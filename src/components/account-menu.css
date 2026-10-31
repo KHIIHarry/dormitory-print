@@ -1,0 +1,60 @@
+.account-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.account-menu-trigger {
+  min-height: 44px;
+  padding: 0;
+  border-radius: 10px;
+}
+.account-menu-trigger > svg {
+  transition: transform 160ms ease;
+}
+.account-menu-trigger[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.account-menu-panel {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 130;
+  width: 190px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 12px 32px #49322118;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.account-menu-panel[data-state="open"] {
+  opacity: 1;
+}
+.account-menu-panel[data-state="closing"] {
+  pointer-events: none;
+}
+.account-menu-panel > a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #66574a;
+}
+.account-menu-panel > a:hover,
+.account-menu-panel > a:focus-visible {
+  background: var(--cream);
+  color: var(--primary-dark);
+}
+.account-menu-panel svg {
+  color: var(--primary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .account-menu-panel,
+  .account-menu-trigger > svg {
+    transition: none;
+  }
+}

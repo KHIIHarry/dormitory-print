@@ -1,0 +1,136 @@
+.link-qr-dialog {
+  display: grid;
+  gap: 14px;
+}
+.link-qr-dialog .notice {
+  margin: 0;
+}
+.link-qr-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid #ecd9c8;
+  border-radius: 12px;
+  background: #fff8f1;
+  color: #6f5544;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.link-qr-privacy svg {
+  flex: none;
+  margin-top: 2px;
+}
+.link-qr-status {
+  margin: 0;
+  color: #7d756f;
+  font-size: 0.9rem;
+}
+.link-qr-preview {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--line, #e5ded8);
+  border-radius: 14px;
+  background: #fff;
+}
+.link-qr-preview img {
+  display: block;
+  width: min(100%, 320px);
+  height: auto;
+  image-rendering: pixelated;
+}
+.link-qr-value-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.link-qr-value {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-height: 128px;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--line, #e5ded8);
+  border-radius: 10px;
+  background: #faf7f4;
+  color: #3e3833;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.link-qr-copy {
+  flex: none;
+}
+.link-qr-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.link-qr-fallback {
+  display: grid;
+  gap: 6px;
+}
+.link-qr-fallback label {
+  font-size: 0.88rem;
+  color: #6f5544;
+}
+.link-qr-fallback textarea {
+  min-height: 92px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+.link-qr-actions {
+  margin: 0;
+}
+.v1-qr-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+.v1-qr-form .notice {
+  margin: 0;
+}
+.v1-qr-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #dcebdd;
+  border-radius: 12px;
+  background: #f5fbf5;
+}
+.v1-qr-result p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: #3f6544;
+  font-size: 0.9rem;
+}
+.v1-qr-result svg {
+  flex: none;
+}
+@media (max-width: 600px) {
+  .link-qr-preview img {
+    width: 100%;
+  }
+  .link-qr-value {
+    flex-basis: 100%;
+  }
+  .v1-qr-result {
+    align-items: flex-start;
+  }
+}

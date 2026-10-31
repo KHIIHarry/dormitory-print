@@ -1,0 +1,439 @@
+# DormPrint V1 production Compose topology.
+#
+#   internet -> proxy (same origin, SPA + /api) -> api
+#                                            -> postgres/redis (internal only)
+#   files queue: file-worker (no egress, read-only root, tmpfs)
+#   business queue: business-worker (SMTP/export/purge, egress)
+#
+# Data services and application ports are never published.  The proxy binds to
+# loopback by default; terminate TLS in front of it before exposing anything.
+name: dormprint
+
+x-app-build: &app-build
+  context: ../backend
+  dockerfile: Dockerfile
+
+x-app-env: &app-env
+  DORMPRINT_ENVIRONMENT: production
+  DORMPRINT_DATABASE_URL: postgresql+psycopg://dormprint:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/dormprint
+  DORMPRINT_REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+  DORMPRINT_STORAGE_ROOT: /var/lib/dormprint
+  DORMPRINT_SECRET_KEY: ${DORMPRINT_SECRET_KEY:?DORMPRINT_SECRET_KEY is required}
+  DORMPRINT_PUBLIC_ORIGIN: ${DORMPRINT_PUBLIC_ORIGIN:?DORMPRINT_PUBLIC_ORIGIN is required}
+  DORMPRINT_SECURE_COOKIES: "true"
+  DORMPRINT_MAX_REQUEST_BYTES: ${DORMPRINT_MAX_REQUEST_BYTES:-230686720}
+  DORMPRINT_SOFFICE_PATH: /usr/bin/soffice
+  DORMPRINT_GHOSTSCRIPT_PATH: /usr/bin/gs
+  DORMPRINT_CONVERSION_TIMEOUT_SECONDS: "120"
+  DORMPRINT_WORKER_LEASE_SECONDS: "180"
+
+x-app-base: &app-base
+  image: dormprint-api:prod
+  build: *app-build
+  user: "10001:10001"
+  restart: unless-stopped
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # Fix named-volume ownership once.  Application containers then run as
+  # 10001 without root.
+  volume-init:
+    image: alpine:3.20
+    user: "0:0"
+    read_only: true
+    network_mode: none
+    command:
+      - sh
+      - -c
+      - >-
+        chown -R 10001:10001 /private /backup-state
+        && chmod 0700 /private /backup-state
+    volumes:
+      - private-files:/private
+      - backup-state:/backup-state
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dormprint
+      POSTGRES_USER: dormprint
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dormprint -d dormprint"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    shm_size: 256mb
+    mem_limit: 1g
+    cpus: "2.0"
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 256m
+    cpus: "1.0"
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    <<: *app-base
+    command:
+      - uvicorn
+      - app.main:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "*"
+    environment:
+      <<: *app-env
+      DORMPRINT_MAIL_ALLOWED_HOSTS: ${DORMPRINT_MAIL_ALLOWED_HOSTS:-}
+      DORMPRINT_ALLOW_INSECURE_SMTP: "false"
+      DORMPRINT_ALLOW_INTERNAL_SMTP: "false"
+      DORMPRINT_MAIL_TIMEOUT_SECONDS: "10"
+      DORMPRINT_EXPORT_MAX_ROWS: "10000"
+    volumes:
+      - private-files:/var/lib/dormprint
+    networks:
+      - internal
+      - egress
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/live', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 1536m
+    cpus: "2.0"
+    pids_limit: 512
+    stop_grace_period: 30s
+
+  # ASSET/PREPARATION only.  No egress, no SMTP variables, LibreOffice/GS
+  # available, one child at a time and a private tmpfs for converter profiles.
+  file-worker:
+    <<: *app-base
+    command:
+      - celery
+      - -A
+      - app.jobs:celery_app
+      - worker
+      - -Q
+      - files
+      - --concurrency=1
+      - --prefetch-multiplier=1
+      - --max-tasks-per-child=20
+      - --time-limit=900
+      - --soft-time-limit=840
+      - --loglevel=INFO
+      - --hostname=files@%h
+    environment:
+      <<: *app-env
+      DORMPRINT_MAIL_ALLOWED_HOSTS: ""
+    volumes:
+      - private-files:/var/lib/dormprint
+    networks:
+      - internal
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 2g
+    cpus: "2.0"
+    pids_limit: 512
+    stop_grace_period: 30s
+
+  # EMAIL/EXPORT/PURGE only.  SMTP and remote export egress are allowed; this
+  # worker never claims ASSET/PREPARATION jobs.
+  business-worker:
+    <<: *app-base
+    command:
+      - celery
+      - -A
+      - app.jobs:celery_app
+      - worker
+      - -Q
+      - business
+      - --concurrency=1
+      - --prefetch-multiplier=1
+      - --max-tasks-per-child=50
+      - --time-limit=900
+      - --soft-time-limit=840
+      - --loglevel=INFO
+      - --hostname=business@%h
+    environment:
+      <<: *app-env
+      DORMPRINT_MAIL_ALLOWED_HOSTS: ${DORMPRINT_MAIL_ALLOWED_HOSTS:-}
+      DORMPRINT_ALLOW_INSECURE_SMTP: "false"
+      DORMPRINT_ALLOW_INTERNAL_SMTP: "false"
+      DORMPRINT_MAIL_TIMEOUT_SECONDS: "10"
+      DORMPRINT_EXPORT_MAX_ROWS: "10000"
+    volumes:
+      - private-files:/var/lib/dormprint
+    networks:
+      - internal
+      - egress
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 256
+    stop_grace_period: 30s
+
+  # The two beat routes are defined in app/jobs.py.  Beat has no private file
+  # volume and no SMTP variables.
+  beat:
+    <<: *app-base
+    command:
+      - celery
+      - -A
+      - app.jobs:celery_app
+      - beat
+      - --loglevel=INFO
+      - --schedule=/tmp/celerybeat-schedule
+      - --pidfile=/tmp/celerybeat.pid
+    environment:
+      <<: *app-env
+    networks:
+      - internal
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: "0.5"
+    pids_limit: 128
+    stop_grace_period: 30s
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    restart: unless-stopped
+    user: "101:101"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - ${DORMPRINT_BIND_ADDRESS:-127.0.0.1}:${DORMPRINT_HTTP_PORT:-8080}:8080
+    environment:
+      DORMPRINT_UPLOAD_LIMIT_MB: ${DORMPRINT_UPLOAD_LIMIT_MB:-220}
+      DORMPRINT_PUBLIC_HOST: ${DORMPRINT_PUBLIC_HOST:-_}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+    volumes:
+      - ../dist:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+    networks:
+      - edge
+      - internal
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 128m
+    pids_limit: 128
+    stop_grace_period: 15s
+
+  # Encrypted off-site snapshots.  The service starts even when RESTIC_* is
+  # unset; the scheduler then records and logs BACKUP_UNAVAILABLE every hour
+  # instead of pretending a backup happened.
+  backup:
+    image: dormprint-backup:prod
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["/opt/dormprint/backup-scheduler.sh"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: dormprint
+      PGUSER: dormprint
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      BACKUP_STATE_DIR: /state
+      BACKUP_HOSTNAME: dormprint
+      BACKUP_DAILY_UTC_HOUR: ${BACKUP_DAILY_UTC_HOUR:-2}
+      DORMPRINT_STORAGE_ROOT: /storage
+      DORMPRINT_CAPACITY_ALERT_PERCENT: ${DORMPRINT_CAPACITY_ALERT_PERCENT:-85}
+      DORMPRINT_MASTER_KEY_FINGERPRINT: ${DORMPRINT_MASTER_KEY_FINGERPRINT:-}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
+      RESTIC_PASSWORD_FILE: ${RESTIC_PASSWORD_FILE:-}
+      RESTIC_CACERT: ${RESTIC_CACERT:-}
+      RESTIC_CACHE_DIR: /state/restic-cache
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-}
+      AWS_ENDPOINT: ${AWS_ENDPOINT:-}
+      TZ: UTC
+    volumes:
+      - private-files:/storage
+      - backup-state:/state
+    networks:
+      - internal
+      - egress
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,time,sys; d=json.load(open('/state/last-success.json')); sys.exit(0 if time.time()-float(d.get('epoch',0)) < 10800 else 1)"]
+      interval: 300s
+      timeout: 10s
+      retries: 2
+      start_period: 3900s
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 256
+    stop_grace_period: 60s
+
+  # One-shot migration/bootstrap tools.  The CLI commands are the contract with
+  # Codex (see docs/DEPLOYMENT.md); they are never replaced by create_all.
+  migrate:
+    <<: *app-base
+    profiles: ["tools"]
+    command: ["python", "-m", "app.cli", "migrate"]
+    environment:
+      <<: *app-env
+    networks:
+      - internal
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  init-admin:
+    <<: *app-base
+    profiles: ["tools"]
+    command: ["python", "-m", "app.cli", "init-admin", "--username", "${DORMPRINT_INITIAL_ADMIN_USERNAME:-admin}", "--email", "${DORMPRINT_INITIAL_ADMIN_EMAIL:-}"]
+    environment:
+      <<: *app-env
+    networks:
+      - internal
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    stdin_open: true
+    tty: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  doctor:
+    <<: *app-base
+    profiles: ["tools"]
+    command: ["python", "-m", "app.cli", "doctor"]
+    environment:
+      <<: *app-env
+    volumes:
+      - private-files:/var/lib/dormprint
+    networks:
+      - internal
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+networks:
+  internal:
+    internal: true
+  egress:
+    driver: bridge
+  edge:
+    driver: bridge
+
+volumes:
+  private-files:
+  postgres-data:
+  redis-data:
+  backup-state:

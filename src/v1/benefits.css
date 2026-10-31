@@ -1,0 +1,137 @@
+.v1-benefits {
+  display: grid;
+  gap: 18px;
+}
+
+.v1-benefits-form {
+  display: grid;
+  gap: 18px;
+}
+
+.v1-benefit-grade-list {
+  display: grid;
+  gap: 10px;
+}
+
+.v1-benefit-grade-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.4fr) minmax(
+      170px,
+      0.9fr
+    );
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fffdfb 0%, var(--cream) 100%);
+}
+
+.v1-benefit-grade-title {
+  display: grid;
+  gap: 4px;
+}
+
+.v1-benefit-grade-title strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.v1-benefit-grade-title span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.v1-benefit-grade-row .field {
+  margin: 0;
+}
+
+.v1-benefit-grade-preview {
+  min-height: 22px;
+  color: var(--primary-dark);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.v1-benefits-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.v1-benefits-notes {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.9;
+}
+
+.v1-benefits .notice.success {
+  border-color: #cfe5d8;
+  background: #f3faf5;
+}
+
+.v1-benefit-summary {
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid #f0d9ca;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, #f7dfcf 0%, transparent 42%),
+    var(--cream);
+  box-shadow: var(--shadow);
+}
+
+.v1-benefit-summary-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+
+.v1-benefit-kicker {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--peach);
+  color: var(--primary-dark);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.v1-benefit-summary-head strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.v1-benefit-summary-rate {
+  color: var(--primary-dark);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.v1-benefit-summary-expiry {
+  color: var(--green);
+  font-size: 13px;
+}
+
+.v1-benefit-summary p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+@media (max-width: 820px) {
+  .v1-benefit-grade-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .v1-benefit-grade-preview {
+    min-height: 0;
+  }
+}

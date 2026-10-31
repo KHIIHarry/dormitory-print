@@ -1,0 +1,20 @@
+# Explicit allowlist: no database files, credentials or private uploads in context.
+**
+!package.json
+!package-lock.json
+!index.html
+!tsconfig.json
+!vite.config.ts
+!scripts/
+!scripts/generate-pwa.mjs
+!src/
+!src/**
+!public/
+!public/**
+!deploy/
+!deploy/frontend.Dockerfile
+!deploy/nginx/
+!deploy/nginx/nginx.conf
+!deploy/nginx/19-local-config.sh
+!deploy/nginx/templates/
+!deploy/nginx/templates/default.conf.template

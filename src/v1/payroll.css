@@ -1,0 +1,260 @@
+.payroll-page {
+  --payroll-line: color-mix(in srgb, var(--line, #d8d5cc) 78%, transparent);
+  display: grid;
+  gap: 18px;
+}
+
+.payroll-page .page-heading {
+  align-items: flex-start;
+}
+
+.payroll-inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.payroll-end {
+  justify-content: flex-end;
+}
+
+.payroll-muted {
+  margin: 0;
+  color: var(--muted, #6d6a61);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.payroll-mono {
+  display: block;
+  max-width: 22ch;
+  overflow: hidden;
+  color: var(--muted, #6d6a61);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payroll-filter-panel .payroll-filter-grid,
+.payroll-policy-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.payroll-filter-panel .field,
+.payroll-policy-form .field {
+  margin: 0;
+}
+
+.payroll-policy-form,
+.payroll-form {
+  display: grid;
+  gap: 14px;
+}
+
+.payroll-policy-columns {
+  display: grid;
+  align-items: start;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.payroll-policy-columns > .panel,
+.payroll-policy-columns > .card {
+  min-width: 0;
+}
+
+.payroll-policy-columns .panel .panel {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.payroll-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.payroll-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.payroll-summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid var(--payroll-line);
+  border-radius: 14px;
+  background: var(--surface, #fffdf8);
+}
+
+.payroll-summary-card span {
+  color: var(--muted, #6d6a61);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+.payroll-summary-card strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+
+.payroll-summary-card small {
+  color: var(--muted, #6d6a61);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.payroll-summary-inline {
+  color: var(--muted, #6d6a61);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.payroll-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--payroll-line);
+  border-radius: 12px;
+}
+
+.payroll-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.payroll-table th,
+.payroll-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--payroll-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.payroll-table th {
+  background: color-mix(
+    in srgb,
+    var(--surface, #fffdf8) 82%,
+    var(--ink, #24221d)
+  );
+  color: var(--muted, #6d6a61);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.payroll-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.payroll-table .num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.payroll-negative {
+  color: var(--danger, #a33a2b) !important;
+}
+
+.payroll-flags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.payroll-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid var(--payroll-line);
+  border-radius: 999px;
+  color: var(--muted, #6d6a61);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.payroll-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #8a4b24);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.payroll-employee .payroll-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+@media (max-width: 900px) {
+  .payroll-policy-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .payroll-table th,
+  .payroll-table td {
+    padding: 9px 10px;
+  }
+}
+
+.payroll-policy-form {
+  margin-top: 20px;
+  gap: 20px;
+}
+.payroll-policy-form .payroll-policy-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 20px;
+}
+.payroll-policy-form .field :is(input:not([type="checkbox"]), select) {
+  height: 44px;
+  min-height: 44px;
+  padding: 10px 13px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+}
+.payroll-policy-form .field > label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.payroll-policy-form .field > small {
+  display: block;
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.payroll-policy-form .payroll-check {
+  min-height: 32px;
+  align-items: center;
+}
+.payroll-policy-form .payroll-check input {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+}
+@media (max-width: 600px) {
+  .payroll-policy-form .payroll-policy-grid {
+    grid-template-columns: 1fr;
+  }
+}

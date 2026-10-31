@@ -1,0 +1,25 @@
+# Build context hygiene: never bake local secrets, test data or virtualenvs
+# into the production image.
+.venv/
+.data/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+test-results/
+playwright-report/
+.git/
+.gitignore
+Dockerfile
+.dockerignore
+*.md
+docs/
+*.sqlite
+*.sqlite3
+*.log
+.DS_Store

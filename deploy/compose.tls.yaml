@@ -1,0 +1,14 @@
+# Optional TLS overlay.  Run:
+#   docker compose -f compose.yaml -f compose.tls.yaml up -d
+# after placing fullchain.pem and privkey.pem in deploy/nginx/tls/.
+#
+# The base Compose entry publishes only loopback HTTP.  This overlay adds a
+# loopback HTTPS port; the public edge still belongs to the host firewall /
+# load balancer and is not configured by this repository.
+services:
+  proxy:
+    ports:
+      - ${DORMPRINT_BIND_ADDRESS:-127.0.0.1}:${DORMPRINT_HTTPS_PORT:-8443}:443
+    volumes:
+      - ./nginx/tls:/etc/nginx/tls:ro
+      - ./nginx/templates-tls:/etc/nginx/templates:ro

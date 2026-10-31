@@ -1,0 +1,135 @@
+.image-medium-dialog {
+  display: grid;
+  gap: 20px;
+}
+.image-medium-source {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.image-medium-source > img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--cream);
+}
+.image-medium-source > div {
+  min-width: 0;
+}
+.image-medium-source strong {
+  display: block;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.image-medium-source p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.image-medium-options {
+  display: grid;
+  gap: 12px;
+}
+.image-medium-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 18px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.image-medium-option:hover {
+  background: var(--cream);
+  border-color: var(--peach);
+}
+.image-medium-option:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.image-medium-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--cream);
+  color: var(--primary);
+}
+.image-medium-option > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.image-medium-option strong {
+  display: block;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.image-medium-option small {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+.image-medium-option em {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  font-style: normal;
+  color: var(--primary-dark);
+}
+.image-medium-option > svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+.upload-panel .file-row .image-medium-change {
+  flex-shrink: 0;
+  min-height: 44px;
+}
+@media (max-width: 600px) {
+  .image-medium-option {
+    gap: 10px;
+    padding: 14px;
+    align-items: flex-start;
+  }
+  .image-medium-option strong {
+    font-size: 14px;
+  }
+  .image-medium-option > svg {
+    margin-top: 12px;
+    width: 15px;
+  }
+  .image-medium-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+  .image-medium-icon svg {
+    width: 21px;
+  }
+  .upload-panel .file-list .file-row {
+    flex-wrap: wrap;
+  }
+  .upload-panel .file-list .file-info {
+    min-width: calc(100% - 60px);
+  }
+  .upload-panel .file-row .image-medium-change {
+    margin-left: auto;
+  }
+}

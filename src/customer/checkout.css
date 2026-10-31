@@ -1,0 +1,63 @@
+.checkout-promotion-stack {
+  display: grid;
+  gap: 15px;
+}
+.checkout-promotion-stack select {
+  width: 100%;
+  max-width: 100%;
+}
+.checkout-summary .checkbox-label {
+  margin: 18px 0;
+  align-items: flex-start;
+}
+.checkout-summary .checkbox-label input {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.checkout-summary .notice {
+  margin-top: 14px;
+}
+.checkout-summary .btn.secondary {
+  margin-top: 12px;
+}
+.checkout-summary .price-rows > div:not(.price-total) {
+  gap: 14px;
+}
+
+.checkout-order-note {
+  margin-top: 20px;
+}
+.checkout-order-note .order-note-count {
+  margin: 6px 0 0;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.final-preview-confirm {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.modal:has(.final-preview-confirm) > .document-preview .preview-canvas {
+  min-height: 0;
+  padding: 12px;
+}
+.modal:has(.final-preview-confirm)
+  > .document-preview
+  .preview-canvas
+  > canvas {
+  width: auto;
+  max-width: 100%;
+  max-height: max(160px, calc(86dvh - 330px));
+  object-fit: contain;
+}
+@media (max-width: 600px) {
+  .modal:has(.final-preview-confirm)
+    > .document-preview
+    .preview-canvas
+    > canvas {
+    max-height: max(160px, calc(86dvh - 390px));
+  }
+}

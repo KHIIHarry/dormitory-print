@@ -1,0 +1,145 @@
+/* Two levels: quiet group headings, one warm selected destination. */
+.admin-sidebar .admin-nav {
+  gap: 4px;
+  margin-bottom: 24px;
+}
+.admin-sidebar .admin-nav > .admin-nav-home,
+.admin-sidebar .admin-nav-toggle,
+.admin-sidebar .admin-nav-utility > a {
+  min-height: 44px;
+  padding: 12px 14px;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 20px;
+}
+.admin-sidebar .admin-nav-toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #78634f;
+  text-align: left;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.admin-sidebar .admin-nav-toggle:hover,
+.admin-sidebar .admin-nav-group.is-open > .admin-nav-toggle {
+  background: #faf7f3;
+  color: #4f4035;
+}
+.admin-sidebar .admin-nav-toggle > span {
+  flex: 1;
+  min-width: 0;
+}
+.admin-sidebar .admin-nav-toggle > svg {
+  flex-shrink: 0;
+  stroke-width: 1.6;
+}
+.admin-sidebar .admin-nav-chevron {
+  color: #a89583;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.admin-sidebar .admin-nav-group.is-open .admin-nav-chevron {
+  transform: rotate(180deg);
+}
+.admin-sidebar
+  .admin-nav-group.contains-current:not(.is-open)
+  > .admin-nav-toggle {
+  color: var(--primary-dark);
+}
+.admin-sidebar .admin-nav-children {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 150ms ease,
+    visibility 0s linear 220ms;
+}
+.admin-sidebar .admin-nav-group.is-open > .admin-nav-children {
+  grid-template-rows: 1fr;
+  visibility: inherit;
+  opacity: 1;
+  transition-delay: 0s;
+}
+.admin-sidebar .admin-nav-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.admin-sidebar .admin-subnav {
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  margin: 4px 0 6px 22px;
+  padding: 0 0 0 9px;
+  border-left: 1px solid #ede4db;
+}
+.admin-sidebar .admin-subnav a {
+  min-height: 40px;
+  padding: 9px 11px;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 20px;
+}
+/* Keep keyboard focus inside each row, including the animated clip edges. */
+.admin-sidebar .admin-nav a:focus-visible,
+.admin-sidebar .admin-nav-toggle:focus-visible {
+  outline: 2px solid var(--primary-dark);
+  outline-offset: -3px;
+}
+.admin-sidebar .admin-subnav a::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #c9b9a9;
+}
+.admin-sidebar .admin-subnav a.active {
+  font-weight: 600;
+}
+.admin-sidebar .admin-subnav a.active::before {
+  background: var(--primary);
+}
+.admin-sidebar .admin-nav-utility {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 767px) {
+  .admin-sidebar {
+    visibility: hidden;
+    transition:
+      transform 200ms ease,
+      visibility 0s linear 200ms;
+  }
+  .admin-sidebar.open {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+  .admin-sidebar .admin-sidebar-close {
+    display: inline-flex;
+    position: absolute;
+    top: 22px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+  }
+  .admin-sidebar .admin-subnav a {
+    min-height: 44px;
+    padding-block: 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-sidebar,
+  .admin-sidebar .admin-nav-children,
+  .admin-sidebar .admin-nav-chevron {
+    transition: none;
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "dormprint-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "build:demo": "tsc -b && vite build --mode demo",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "api:generate": "openapi-typescript docs/openapi.yaml -o src/lib/api-schema.d.ts",
+    "predev": "node scripts/generate-pwa.mjs",
+    "prebuild": "node scripts/generate-pwa.mjs",
+    "prebuild:demo": "node scripts/generate-pwa.mjs",
+    "format": "prettier --write src tests vite.config.ts",
+    "contract:generate": "node scripts/generate-contract.mjs && node scripts/extend-growth-contract.mjs && npm run api:generate"
+  },
+  "dependencies": {
+    "@fontsource/sora": "5.3.0",
+    "@tanstack/react-query": "5.105.0",
+    "lucide-react": "1.64.0",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "5.4.624",
+    "qrcode": "^1.5.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router-dom": "7.18.5",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "openapi-typescript": "7.13.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

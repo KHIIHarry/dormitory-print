@@ -1,0 +1,355 @@
+/* Motion and temporary feedback only: incumbent geometry, branding and typography stay in styles.css. */
+:root {
+  --motion-feedback: 100ms;
+  --motion-local: 140ms;
+  --motion-page: 150ms;
+  --motion-expand: 220ms;
+  --motion-modal-in: 320ms;
+  --motion-shade-in: 300ms;
+  --motion-modal-out: 180ms;
+  --motion-enter: cubic-bezier(0.16, 1, 0.3, 1);
+}
+.task-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  color: var(--text-muted, #796f66);
+}
+.task-status > svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+.task-status small {
+  display: block;
+  margin-top: 6px;
+}
+.resource-refresh-pending {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.resource-refresh {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  padding: 8px 0;
+  color: var(--text-muted, #796f66);
+}
+.resource-refresh.has-error {
+  color: var(--danger, #a54136);
+}
+.resource-skeleton {
+  width: 100%;
+}
+.skeleton-block {
+  display: block;
+  max-width: 100%;
+  flex-shrink: 0;
+  background: #e9e3dd;
+  border-radius: 6px;
+  animation: skeleton-breathe 1.8s ease-in-out infinite;
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+  min-height: 78px;
+}
+.skeleton-row > div {
+  flex: 1;
+  display: grid;
+  gap: 12px;
+}
+.skeleton-table {
+  min-height: 62px;
+  padding: 12px 0;
+}
+.skeleton-detail {
+  display: grid;
+  gap: 18px;
+  padding: 20px 0;
+}
+.skeleton-profile {
+  display: flex;
+  gap: 16px;
+  padding: 24px 0;
+}
+.skeleton-profile > div {
+  flex: 1;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+}
+.resource-skeleton .stat {
+  display: grid;
+  gap: 18px;
+}
+.skeleton-coupons {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+.skeleton-coupon {
+  display: grid;
+  gap: 18px;
+  padding: 22px 0;
+}
+.skeleton-paper {
+  width: min(100%, 260px);
+  aspect-ratio: 210/297;
+  margin: 12px auto;
+  background: var(--white, #fff);
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.task-progress {
+  display: block;
+  height: 4px;
+  width: 100%;
+  overflow: hidden;
+  background: #e9e3dd;
+  border-radius: 4px;
+  margin-top: 8px;
+}
+.task-progress > .progress-value {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform-origin: left center;
+  background: var(--primary);
+  transition: transform var(--motion-local) linear;
+}
+.task-progress > .progress-unknown {
+  display: block;
+  height: 100%;
+  width: 32%;
+  background: var(--primary);
+  animation: progress-travel 1.4s ease-in-out infinite;
+}
+.task-progress-ring {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  margin: 0;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.task-progress-ring svg {
+  width: 32px;
+  height: 32px;
+  transform: rotate(-90deg);
+}
+.task-progress-ring circle {
+  fill: none;
+  stroke-width: 3;
+}
+.task-progress-ring .progress-track {
+  stroke: #e9e3dd;
+}
+.task-progress-ring .progress-value,
+.task-progress-ring .progress-unknown {
+  stroke: var(--primary);
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--motion-local) linear;
+}
+.task-progress-ring .progress-unknown {
+  transform-origin: 18px 18px;
+  animation: spin 1.1s linear infinite;
+}
+.btn.busy {
+  position: relative;
+  opacity: 1;
+}
+.btn.busy > .button-original {
+  visibility: hidden;
+  display: contents;
+}
+.btn.busy > .button-original > * {
+  visibility: hidden;
+}
+.btn .button-feedback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.btn .button-feedback:not(.is-visible) .spin {
+  visibility: hidden;
+}
+.modal-backdrop::before {
+  transition: opacity var(--motion-shade-in) linear;
+}
+.modal {
+  transition: opacity var(--motion-modal-in) ease-in-out;
+}
+.modal-backdrop[data-state="closing"]::before,
+.modal-backdrop[data-state="closing"] > .modal {
+  transition-duration: var(--motion-modal-out);
+  transition-timing-function: ease-out;
+}
+.modal-backdrop[data-state="closing"] > .modal {
+  pointer-events: none;
+}
+.route-content {
+  animation: content-appear var(--motion-page) var(--motion-enter);
+}
+.dropdown {
+  animation: content-appear var(--motion-local) var(--motion-enter);
+}
+.toast {
+  animation: content-appear var(--motion-local) var(--motion-enter);
+}
+.toast[data-state="closing"] {
+  opacity: 0;
+  transition: opacity var(--motion-local) ease-in;
+  pointer-events: none;
+}
+.motion-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--motion-expand) var(--motion-enter),
+    visibility 0s linear var(--motion-expand);
+}
+.motion-fold[data-open="true"] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.motion-fold > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.faq-item > button > svg {
+  transition: transform var(--motion-expand) var(--motion-enter);
+}
+.faq-item > button[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.btn,
+.tabs > button,
+.paper-option,
+.segment-tab {
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--motion-feedback);
+}
+.sidebar-scrim {
+  transition: opacity var(--motion-expand) var(--motion-enter);
+}
+.sidebar-scrim[data-state="entering"],
+.sidebar-scrim[data-state="closing"] {
+  opacity: 0;
+}
+@keyframes skeleton-breathe {
+  0%,
+  100% {
+    opacity: 0.62;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes progress-travel {
+  from {
+    transform: translateX(-105%);
+  }
+  to {
+    transform: translateX(420%);
+  }
+}
+@keyframes content-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (max-width: 767px) {
+  .skeleton-table {
+    min-height: 78px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-status .spin,
+  .resource-refresh .spin {
+    animation: none;
+  }
+  .task-progress > .progress-unknown {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+  .task-progress-ring .progress-unknown {
+    animation: none;
+  }
+  .resource-skeleton .skeleton-block,
+  .route-content,
+  .dropdown,
+  .toast {
+    animation: none;
+  }
+  .motion-fold,
+  .faq-item > button > svg,
+  .sidebar-scrim,
+  .task-progress > .progress-value {
+    transition: none;
+  }
+}
+
+.file-progress-visual {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.file-progress-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.file-progress-visual .file-icon > svg,
+.file-progress-visual .file-icon > small {
+  opacity: 0.25;
+}
+.resource-skeleton[data-paused="true"] .skeleton-block,
+.task-progress[data-paused="true"] .progress-unknown {
+  animation-play-state: paused;
+}
+
+.resource-skeleton .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+}
+.dashboard-summary > .resource-skeleton {
+  grid-column: 1/-1;
+}
+@media (max-width: 767px) {
+  .resource-skeleton .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+.modal-backdrop[data-exit-snapshot="true"]::before {
+  opacity: var(--exit-shade-opacity, 0);
+}

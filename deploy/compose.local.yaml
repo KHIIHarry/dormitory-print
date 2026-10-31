@@ -1,0 +1,55 @@
+# Merge with compose.yaml using local.sh. Production defaults remain unchanged.
+x-local-app: &local-app
+  image: dormprint-api:local
+  environment:
+    DORMPRINT_ENVIRONMENT: development
+    DORMPRINT_PUBLIC_ORIGIN: http://localhost:8080
+    DORMPRINT_SECURE_COOKIES: "false"
+
+services:
+  api:
+    <<: *local-app
+  file-worker:
+    <<: *local-app
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.jobs:celery_app inspect ping --destination=files@$${HOSTNAME} --timeout=5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+  business-worker:
+    <<: *local-app
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.jobs:celery_app inspect ping --destination=business@$${HOSTNAME} --timeout=5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+  beat:
+    <<: *local-app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(int(open('/tmp/celerybeat.pid').read()), 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+  migrate:
+    <<: *local-app
+  init-admin:
+    <<: *local-app
+  doctor:
+    <<: *local-app
+  proxy:
+    image: dormprint-web:local
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    # Everything is baked into the image, including Nginx configuration.
+    volumes: !override []
+    ports: !override
+      - "127.0.0.1:8080:8080"
+    environment:
+      DORMPRINT_PUBLIC_HOST: localhost
+      NGINX_ENVSUBST_OUTPUT_DIR: /tmp/conf.d
+  backup:
+    profiles: ["backup"]
