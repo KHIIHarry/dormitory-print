@@ -316,8 +316,8 @@ def create_batch(api, client, courier, *, offset_hours=-1, duration=3):
     ends_at = starts_at + timedelta(hours=duration)
     response = api(client, '/admin/batches', {
         'name': f'测试批次 {uuid4().hex[:6]}',
-        'date': to_shanghai_date(starts_at),
-        'time': to_shanghai_window(starts_at, ends_at),
+        'startsAt': starts_at.isoformat(),
+        'endsAt': ends_at.isoformat(),
         'courierId': courier.id,
         'reason': '',
     })
@@ -329,8 +329,8 @@ def create_batch_fixed(api, client, courier, starts_at, *, duration=1):
     ends_at = starts_at + timedelta(hours=duration)
     response = api(client, '/admin/batches', {
         'name': f'测试批次 {uuid4().hex[:6]}',
-        'date': to_shanghai_date(starts_at),
-        'time': f'{to_shanghai_hhmm(starts_at)} – {to_shanghai_hhmm(ends_at)}',
+        'startsAt': starts_at.isoformat(),
+        'endsAt': ends_at.isoformat(),
         'courierId': courier.id,
         'reason': '',
     })
