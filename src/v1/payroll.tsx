@@ -67,6 +67,21 @@ function timestamp(value: string | null | undefined): string {
   });
 }
 
+const SOURCE_PREFIX_LABEL: Record<string, string> = {
+  DELIVERY: "配送",
+  REFUND: "退款",
+  SUPPLEMENTARY: "补费",
+  MANUAL: "手工",
+};
+
+function sourceRef(sourceKey: string): string {
+  const [prefix, ref] = sourceKey.split(":");
+  if (!ref) return sourceKey;
+  const short = ref.slice(0, 8);
+  const label = SOURCE_PREFIX_LABEL[prefix];
+  return label ? `${label} · ${short}` : `#${short}`;
+}
+
 function SummaryCards({ summary }: { summary: LedgerSummary }) {
   return (
     <div className="payroll-summary-grid">
@@ -128,7 +143,14 @@ function EntryTable({
                   <strong>{wageKindLabel(entry.kind)}</strong>
                   <small className="payroll-mono">{entry.sourceKey}</small>
                 </td>
-                <td className="payroll-mono">{entry.orderId || "—"}</td>
+                <td>
+                  <span
+                    className="payroll-mono"
+                    title={entry.orderId || undefined}
+                  >
+                    {entry.orderId || "—"}
+                  </span>
+                </td>
                 <td>
                   {entry.period}
                   {originalPeriod && originalPeriod !== entry.period && (
@@ -447,7 +469,7 @@ function ApplyPolicyModal({
   target: NeedsConfigurationRow;
   catalog: PolicyCatalog | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (target: NeedsConfigurationRow) => void;
 }) {
   const submit = useSubmit();
   const policies = [
@@ -481,11 +503,11 @@ function ApplyPolicyModal({
             body,
           },
         ),
-      "已按所选策略补录工资",
+      "工资已补录，请继续在「记录工资发放」中确认发放",
     );
     if (result.ok) {
       onClose();
-      onSaved();
+      onSaved(target);
     }
   }
 
@@ -493,7 +515,7 @@ function ApplyPolicyModal({
     <Modal title="补录待配置工资" onClose={onClose}>
       <p className="payroll-muted">
         订单 {target.orderId || "—"} 于 {timestamp(target.deliveredAt)}{" "}
-        交付，当时没有可用策略。 补录会冻结所选策略并写入明确的补录原因。
+        交付，当时没有可用策略。补录会冻结所选策略并生成工资条目；补录后还需在「记录工资发放」中确认发放，工资才算结清。
       </p>
       <form className="payroll-form" onSubmit={save}>
         {!policies.length && (
@@ -679,89 +701,99 @@ function SettlementPanel({
         </span>
       }
     >
-      <p className="payroll-muted">
-        只能选择未发放条目；净额必须 ≥
-        0。退款/补费冲减记入实际发生月份，历史未发放金额一并列出，历史负向调整必须计入本次净额。
-      </p>
-      <div className="payroll-inline">
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => setSelected(candidates.map((entry) => entry.id))}
-        >
-          全选可发放
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => setSelected([])}
-        >
-          清空
-        </Button>
-      </div>
-      <div className="payroll-table-wrap">
-        <table className="payroll-table">
-          <thead>
-            <tr>
-              <th>选择</th>
-              <th>类型</th>
-              <th>月份</th>
-              <th className="num">金额</th>
-              <th>来源</th>
-            </tr>
-          </thead>
-          <tbody>
-            {candidates.map((entry) => {
-              const originalPeriod = entryOriginalDeliveryPeriod(entry);
-              return (
-                <tr key={entry.id}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.includes(entry.id) || mandatoryCarry(entry)
-                      }
-                      disabled={mandatoryCarry(entry)}
-                      aria-label={`选择 ${entry.sourceKey}`}
-                      onChange={(event) =>
-                        setSelected((current) =>
-                          event.target.checked
-                            ? Array.from(new Set([...current, entry.id]))
-                            : current.filter((id) => id !== entry.id),
-                        )
-                      }
-                    />
-                  </td>
-                  <td>{wageKindLabel(entry.kind)}</td>
-                  <td>
-                    {entry.period}
-                    {originalPeriod && originalPeriod !== entry.period && (
-                      <small className="payroll-mono">
-                        原交付 {originalPeriod}
-                      </small>
-                    )}
-                  </td>
-                  <td
-                    className={`num ${entry.amountCents < 0 ? "payroll-negative" : ""}`}
-                  >
-                    {money(entry.amountCents)}
-                  </td>
-                  <td className="payroll-mono">{entry.sourceKey}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {blocked && <Notice type="warning">{selection.error}</Notice>}
-      <div className="payroll-inline payroll-end">
-        <Button
-          type="button"
-          disabled={blocked}
-          onClick={() => setConfirm(true)}
-        >
-          记录发放
-        </Button>
+      <div className="payroll-settle-body">
+        <div className="payroll-toolbar">
+          <p className="payroll-muted">
+            只能选择未发放条目；净额必须 ≥
+            0。退款/补费冲减记入实际发生月份，历史未发放金额一并列出，历史负向调整必须计入本次净额。
+          </p>
+          <div className="payroll-inline payroll-toolbar-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              className="payroll-compact"
+              onClick={() => setSelected(candidates.map((entry) => entry.id))}
+            >
+              全选可发放
+            </Button>
+            <Button
+              type="button"
+              variant="text"
+              className="payroll-compact"
+              onClick={() => setSelected([])}
+            >
+              清空
+            </Button>
+          </div>
+        </div>
+        <div className="payroll-table-wrap">
+          <table className="payroll-table">
+            <thead>
+              <tr>
+                <th className="payroll-select">选择</th>
+                <th>类型</th>
+                <th>月份</th>
+                <th className="num">金额</th>
+                <th>来源</th>
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((entry) => {
+                const originalPeriod = entryOriginalDeliveryPeriod(entry);
+                return (
+                  <tr key={entry.id}>
+                    <td className="payroll-select">
+                      <input
+                        type="checkbox"
+                        checked={
+                          selected.includes(entry.id) || mandatoryCarry(entry)
+                        }
+                        disabled={mandatoryCarry(entry)}
+                        aria-label={`选择 ${entry.sourceKey}`}
+                        onChange={(event) =>
+                          setSelected((current) =>
+                            event.target.checked
+                              ? Array.from(new Set([...current, entry.id]))
+                              : current.filter((id) => id !== entry.id),
+                          )
+                        }
+                      />
+                    </td>
+                    <td>{wageKindLabel(entry.kind)}</td>
+                    <td>
+                      {entry.period}
+                      {originalPeriod && originalPeriod !== entry.period && (
+                        <small className="payroll-mono">
+                          原交付 {originalPeriod}
+                        </small>
+                      )}
+                    </td>
+                    <td
+                      className={`num ${entry.amountCents < 0 ? "payroll-negative" : ""}`}
+                    >
+                      {money(entry.amountCents)}
+                    </td>
+                    <td>
+                      <span className="payroll-source" title={entry.sourceKey}>
+                        {sourceRef(entry.sourceKey)}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {blocked && <Notice type="warning">{selection.error}</Notice>}
+        <div className="payroll-inline payroll-end">
+          <Button
+            type="button"
+            disabled={blocked}
+            onClick={() => setConfirm(true)}
+          >
+            记录发放
+          </Button>
+        </div>
       </div>
       {confirm && (
         <SettlementConfirm
@@ -822,6 +854,11 @@ export function AdminPayrollPage({
   const [applyTarget, setApplyTarget] = useState<NeedsConfigurationRow | null>(
     null,
   );
+  const [settleHint, setSettleHint] = useState<{
+    staffId: string;
+    staffName: string;
+    period: string;
+  } | null>(null);
 
   const ledgerPath = PAYROLL_PATHS.ledger({
     period,
@@ -900,8 +937,7 @@ export function AdminPayrollPage({
       <Panel className="payroll-filter-panel" title="账本筛选">
         {staffCatalog.error && (
           <Notice type="warning">
-            员工目录加载失败，仍可手动输入员工
-            ID；请确认当前账号拥有工资管理权限。
+            员工目录加载失败，暂时只能选择账本中出现的员工；请确认当前账号拥有工资管理权限。
           </Notice>
         )}
         <div className="payroll-filter-grid">
@@ -909,28 +945,55 @@ export function AdminPayrollPage({
             <input
               type="month"
               value={period}
-              onChange={(event) =>
-                setPeriod(event.target.value || shanghaiPeriod())
-              }
+              onChange={(event) => {
+                setPeriod(event.target.value || shanghaiPeriod());
+                setSettleHint(null);
+              }}
             />
           </Field>
-          <Field label="员工筛选（可选）" hint="留空查看全部员工汇总">
-            <input
-              list="payroll-admin-staff-options"
+          <Field
+            label="员工筛选（可选）"
+            hint="选择员工可查看个人账本并记录工资发放"
+          >
+            <select
               value={staffFilter}
-              placeholder="输入员工 ID 查看个人账本"
-              onChange={(event) => setStaffFilter(event.target.value.trim())}
-            />
-            <datalist id="payroll-admin-staff-options">
+              onChange={(event) => {
+                setStaffFilter(event.target.value);
+                setSettleHint(null);
+              }}
+            >
+              <option value="">全部员工</option>
               {staffOptions.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.name}
+                  {option.name || option.id}
                 </option>
               ))}
-            </datalist>
+            </select>
           </Field>
         </div>
       </Panel>
+
+      {settleHint && (
+        <Notice type="success">
+          <div>
+            已为 {settleHint.staffName} 补录 {settleHint.period}{" "}
+            的交付工资。补录只生成工资条目，还需在下方「记录工资发放」确认发放，订单/批次才能删除。
+          </div>
+          <div>
+            <button
+              type="button"
+              className="payroll-link"
+              onClick={() =>
+                document
+                  .getElementById("payroll-settlement")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
+              去记录工资发放
+            </button>
+          </div>
+        </Notice>
+      )}
 
       <ResourceState
         loading={ledger.loading}
@@ -1035,7 +1098,7 @@ export function AdminPayrollPage({
               action={<AlertTriangle size={18} />}
             >
               <p className="payroll-muted">
-                这些订单已成功交付，但当时没有可用策略，因此没有生成金额。补录需要明确选择策略并填写原因。
+                这些订单已成功交付，但当时没有可用策略，因此没有生成金额。补录需要明确选择策略并填写原因；补录只生成工资条目，还需在「记录工资发放」中确认发放，订单/批次才能删除。
               </p>
               <div className="payroll-table-wrap">
                 <table className="payroll-table">
@@ -1045,17 +1108,24 @@ export function AdminPayrollPage({
                       <th>员工</th>
                       <th>交付时间</th>
                       <th>月份</th>
-                      <th />
+                      <th className="payroll-actions">操作</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.needsConfiguration.map((row) => (
                       <tr key={row.entryId}>
-                        <td className="payroll-mono">{row.orderId || "—"}</td>
+                        <td>
+                          <span
+                            className="payroll-mono"
+                            title={row.orderId || undefined}
+                          >
+                            {row.orderId || "—"}
+                          </span>
+                        </td>
                         <td>{row.staffName || row.staffId}</td>
                         <td>{timestamp(row.deliveredAt)}</td>
                         <td>{row.period}</td>
-                        <td>
+                        <td className="payroll-actions">
                           <Button
                             type="button"
                             variant="secondary"
@@ -1073,44 +1143,49 @@ export function AdminPayrollPage({
           )}
 
           {staffFilter && ledger.data && (
-            <SettlementPanel
-              key={`${staffFilter}:${period}`}
-              ledger={{
-                staff: {
-                  id: staffFilter,
-                  name:
-                    data.summaries[0]?.staffName ||
-                    staffOptions.find((option) => option.id === staffFilter)
-                      ?.name ||
-                    staffFilter,
-                },
-                period,
-                summary:
-                  data.summaries[0] ||
-                  ({
-                    staffId: staffFilter,
-                    staffName: staffFilter,
-                    entryCount: 0,
-                    grossCents: 0,
-                    deductionsCents: 0,
-                    netCents: 0,
-                    paidCents: 0,
-                    unpaidCents: 0,
-                    carryForwardCents: 0,
-                    availableCents: 0,
-                    needsConfigurationCount: 0,
-                  } satisfies LedgerSummary),
-                entries: data.entries.filter(
-                  (entry) => entry.staffId === staffFilter,
-                ),
-                carryForward: data.carryForward.filter(
-                  (entry) => entry.staffId === staffFilter,
-                ),
-                settlements: settlements.data || [],
-              }}
-              period={period}
-              onSaved={reloadAll}
-            />
+            <div id="payroll-settlement" className="payroll-settlement-anchor">
+              <SettlementPanel
+                key={`${staffFilter}:${period}`}
+                ledger={{
+                  staff: {
+                    id: staffFilter,
+                    name:
+                      data.summaries[0]?.staffName ||
+                      staffOptions.find((option) => option.id === staffFilter)
+                        ?.name ||
+                      staffFilter,
+                  },
+                  period,
+                  summary:
+                    data.summaries[0] ||
+                    ({
+                      staffId: staffFilter,
+                      staffName: staffFilter,
+                      entryCount: 0,
+                      grossCents: 0,
+                      deductionsCents: 0,
+                      netCents: 0,
+                      paidCents: 0,
+                      unpaidCents: 0,
+                      carryForwardCents: 0,
+                      availableCents: 0,
+                      needsConfigurationCount: 0,
+                    } satisfies LedgerSummary),
+                  entries: data.entries.filter(
+                    (entry) => entry.staffId === staffFilter,
+                  ),
+                  carryForward: data.carryForward.filter(
+                    (entry) => entry.staffId === staffFilter,
+                  ),
+                  settlements: settlements.data || [],
+                }}
+                period={period}
+                onSaved={() => {
+                  setSettleHint(null);
+                  reloadAll();
+                }}
+              />
+            </div>
           )}
 
           {staffFilter && (
@@ -1210,7 +1285,16 @@ export function AdminPayrollPage({
           target={applyTarget}
           catalog={catalog.data || null}
           onClose={() => setApplyTarget(null)}
-          onSaved={reloadAll}
+          onSaved={(target) => {
+            setStaffFilter(target.staffId);
+            setPeriod(target.period);
+            setSettleHint({
+              staffId: target.staffId,
+              staffName: target.staffName || target.staffId,
+              period: target.period,
+            });
+            void catalog.reload();
+          }}
         />
       )}
     </div>

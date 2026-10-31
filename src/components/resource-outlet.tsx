@@ -33,9 +33,15 @@ export function ResourceOutlet() {
     refreshError,
     refresh,
     actionIssues,
+    clearActionIssues,
     resources,
   } = useStore();
   const { pathname } = useLocation();
+  // Action errors describe the page they failed on; do not carry them (or
+  // duplicate banners from an earlier attempt) into the next page.
+  useLayoutEffect(() => {
+    clearActionIssues();
+  }, [pathname, clearActionIssues]);
   const reduced = useReducedMotion();
   const anchor = useRef<HTMLSpanElement>(null);
   const publicOrLocal =

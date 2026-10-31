@@ -29,6 +29,11 @@ import {
 } from "lucide-react";
 import { ADMIN, useStore } from "../lib/store";
 import { money } from "../lib/api";
+import {
+  hasWageBlocker,
+  trashBlockers,
+  type TrashBlocker,
+} from "../lib/trash-blockers";
 import type { Order } from "../lib/types";
 import {
   Badge,
@@ -315,6 +320,7 @@ export function AdminOrderDetail() {
   const [payment, setPayment] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteBlockers, setDeleteBlockers] = useState<TrashBlocker[]>([]);
   const [reason, setReason] = useState("");
   const [received, setReceived] = useState("");
   const [zeroConfirmed, setZeroConfirmed] = useState(false);
@@ -560,16 +566,14 @@ export function AdminOrderDetail() {
               </Button>
               <Button
                 variant="secondary"
-                disabled={
-                  [
-                    "DELIVERING",
-                    "DELIVERED",
-                    "COMPLETED",
-                    "CLOSED",
-                    "CANCELLED",
-                    "REFUNDED",
-                  ].includes(order.status)
-                }
+                disabled={[
+                  "DELIVERING",
+                  "DELIVERED",
+                  "COMPLETED",
+                  "CLOSED",
+                  "CANCELLED",
+                  "REFUNDED",
+                ].includes(order.status)}
                 title={
                   [
                     "DELIVERING",
@@ -592,7 +596,9 @@ export function AdminOrderDetail() {
               <Button
                 variant="danger"
                 disabled={
-                  !["DELIVERED", "COMPLETED", "CANCELLED"].includes(order.status)
+                  !["DELIVERED", "COMPLETED", "CANCELLED"].includes(
+                    order.status,
+                  )
                 }
                 title={
                   ["DELIVERED", "COMPLETED", "CANCELLED"].includes(order.status)
@@ -601,6 +607,7 @@ export function AdminOrderDetail() {
                 }
                 onClick={() => {
                   setReason("");
+                  setDeleteBlockers([]);
                   setDeleting(true);
                 }}
               >
@@ -611,67 +618,70 @@ export function AdminOrderDetail() {
         </div>
         <aside className="order-detail-sidebar">
           <div className="order-detail-column">
-          <Panel title="联系与配送">
-            <dl className="detail-dl vertical">
-              <div>
-                <dt>微信昵称</dt>
-                <dd>{order.nickname}</dd>
-              </div>
-              {order.customerNote && (
+            <Panel title="联系与配送">
+              <dl className="detail-dl vertical">
                 <div>
-                  <dt>订单备注</dt>
-                  <dd className="order-note-text">{order.customerNote}</dd>
+                  <dt>微信昵称</dt>
+                  <dd>{order.nickname}</dd>
                 </div>
+                {order.customerNote && (
+                  <div>
+                    <dt>订单备注</dt>
+                    <dd className="order-note-text">{order.customerNote}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt>手机号</dt>
+                  <dd>
+                    <a href={`tel:${order.phone}`}>{order.phone}</a>
+                  </dd>
+                </div>
+                <div>
+                  <dt>目标楼栋</dt>
+                  <dd>
+                    {
+                      data.buildings.find((b) => b.id === order.locationId)
+                        ?.name
+                    }
+                  </dd>
+                </div>
+                <div>
+                  <dt>原预约时段</dt>
+                  <dd>{data.slots.find((s) => s.id === order.slotId)?.name}</dd>
+                </div>
+                <div>
+                  <dt>最新批次</dt>
+                  <dd>
+                    {data.batches.find((b) => b.id === order.batchId)?.name ||
+                      "尚未安排"}
+                  </dd>
+                </div>
+              </dl>
+              {order.addressReview && (
+                <>
+                  <Notice>用户修改了楼栋，必须复核后才可配送。</Notice>
+                  <Button
+                    onClick={() =>
+                      updateOrder(
+                        order.id,
+                        { addressReview: false },
+                        "review-address",
+                      )
+                    }
+                  >
+                    确认配送地址已复核
+                  </Button>
+                </>
               )}
-              <div>
-                <dt>手机号</dt>
-                <dd>
-                  <a href={`tel:${order.phone}`}>{order.phone}</a>
-                </dd>
-              </div>
-              <div>
-                <dt>目标楼栋</dt>
-                <dd>
-                  {data.buildings.find((b) => b.id === order.locationId)?.name}
-                </dd>
-              </div>
-              <div>
-                <dt>原预约时段</dt>
-                <dd>{data.slots.find((s) => s.id === order.slotId)?.name}</dd>
-              </div>
-              <div>
-                <dt>最新批次</dt>
-                <dd>
-                  {data.batches.find((b) => b.id === order.batchId)?.name ||
-                    "尚未安排"}
-                </dd>
-              </div>
-            </dl>
-            {order.addressReview && (
-              <>
-                <Notice>用户修改了楼栋，必须复核后才可配送。</Notice>
-                <Button
-                  onClick={() =>
-                    updateOrder(
-                      order.id,
-                      { addressReview: false },
-                      "review-address",
-                    )
-                  }
-                >
-                  确认配送地址已复核
-                </Button>
-              </>
-            )}
-          </Panel>
-          <AdminAccessLinks orderId={order.id} />
+            </Panel>
+            <AdminAccessLinks orderId={order.id} />
           </div>
           <div className="order-detail-column">
-          <AdminSupplementaryPanel orderId={order.id} />
-          <Panel title="费用快照">
-            <PriceRows total={order.totalCents} quote={order.quote} />
-            <p className="form-hint">历史订单金额不会随新价目修改。</p>
-          </Panel>
+            <AdminSupplementaryPanel orderId={order.id} />
+            <Panel title="费用快照">
+              <PriceRows total={order.totalCents} quote={order.quote} />
+              <p className="form-hint">历史订单金额不会随新价目修改。</p>
+            </Panel>
           </div>
         </aside>
       </div>
@@ -738,7 +748,10 @@ export function AdminOrderDetail() {
         </Modal>
       )}
       {voiding && (
-        <Modal title={`作废订单 · ${order.pickupCode}`} onClose={() => setVoiding(false)}>
+        <Modal
+          title={`作废订单 · ${order.pickupCode}`}
+          onClose={() => setVoiding(false)}
+        >
           <Notice>
             作废只关闭尚未交付的订单，不删除数据。已收款、已开始生产或已开始配送的订单必须走交付或售后，不能作废。
           </Notice>
@@ -790,13 +803,35 @@ export function AdminOrderDetail() {
         </Modal>
       )}
       {deleting && (
-        <Modal title={`删除订单 · ${order.pickupCode}`} onClose={() => setDeleting(false)}>
+        <Modal
+          title={`删除订单 · ${order.pickupCode}`}
+          onClose={() => {
+            setDeleting(false);
+            setDeleteBlockers([]);
+          }}
+        >
           <Notice>
-            订单将移入回收站，24 小时内可恢复；超过保留期会被永久清理。删除前必须确保履约、售后、退款和工资全部结清。
+            订单将移入回收站，24
+            小时内可恢复；超过保留期会被永久清理。删除前必须确保履约、售后、退款和工资全部结清。
           </Notice>
           {!!order.blockers?.length && (
-            <Notice>
-              {order.blockers.map((b) => b.message).join("；")}
+            <Notice>{order.blockers.map((b) => b.message).join("；")}</Notice>
+          )}
+          {!!deleteBlockers.length && (
+            <Notice type="error">
+              <div>
+                删除被以下未结业务拦下：
+                {deleteBlockers.map((blocker) => blocker.label).join("；")}
+              </div>
+              {hasWageBlocker(deleteBlockers) && (
+                <div>
+                  请先到{" "}
+                  <Link className="text-link" to={`${ADMIN}/payroll`}>
+                    工资结算
+                  </Link>{" "}
+                  为这单的配送工资记录发放（若仍待配置，先补录策略），再回来删除。
+                </div>
+              )}
             </Notice>
           )}
           <Field label="删除原因（必填，写入审计记录）">
@@ -824,6 +859,9 @@ export function AdminOrderDetail() {
                   ...s,
                   orders: s.orders.filter((o) => o.id !== order.id),
                 }),
+                "POST",
+                undefined,
+                (e) => setDeleteBlockers(trashBlockers(e)),
               );
               setBusy(false);
               if (ok) {

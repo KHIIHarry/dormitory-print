@@ -16,8 +16,12 @@ import {
 } from "lucide-react";
 import { ADMIN, DEMO, useStore } from "../lib/store";
 import { mutation } from "../lib/api";
+import {
+  hasWageBlocker,
+  trashBlockers,
+  type TrashBlocker,
+} from "../lib/trash-blockers";
 import { growthRequest } from "../growth/client";
-import { useIdentity } from "../growth/identity";
 import { batchPrimaryAction, canStartBatch } from "../lib/domain";
 import type { Batch, DataState, Slot } from "../lib/types";
 import {
@@ -42,17 +46,14 @@ type CourierCatalogResult = {
 };
 
 /**
- * Dispatch needs only the minimal courier directory, not the private staff
- * store. `/admin/staff` is gated by staff.manage; when the backend grows a
- * delivery-specific catalog this path is the only change needed.
+ * Dispatch only needs the minimal delivery-specific catalog.  Reading the
+ * private `/admin/staff` directory here both required staff.manage and leaked
+ * internal employee names; the public catalog resolves the customer nickname
+ * instead.
  */
 const COURIER_CATALOG_PATH = "/admin/couriers";
 
 function useCourierCatalog() {
-  const identity = useIdentity();
-  const capabilities = identity.staff?.capabilities || [];
-  const canReadStaff =
-    capabilities.includes("*") || capabilities.includes("staff.manage");
   const [rows, setRows] = useState<CourierDirectoryRow[]>([]);
   const [loading, setLoading] = useState(!DEMO);
   const [error, setError] = useState("");
@@ -66,15 +67,9 @@ function useCourierCatalog() {
         active = false;
       };
     }
-    if (!identity.staffReady)
-      return () => {
-        active = false;
-      };
     setLoading(true);
     setError("");
-    growthRequest<CourierCatalogResult>(
-      canReadStaff ? "/admin/staff" : COURIER_CATALOG_PATH,
-    )
+    growthRequest<CourierCatalogResult>(COURIER_CATALOG_PATH)
       .then((result) => {
         if (active) setRows(result.items || result.staff || []);
       })
@@ -82,11 +77,9 @@ function useCourierCatalog() {
         if (!active) return;
         const status = (cause as { status?: number }).status;
         setError(
-          status === 404 && !canReadStaff
-            ? "后端尚未提供配送候选目录（GET /admin/couriers，仅需 delivery.manage）。请权限模块补齐；不要要求配送管理员临时授予员工管理权限。"
-            : status === 403
-              ? "当前账号无权读取配送员目录，请联系权限管理员。"
-              : (cause as { message?: string }).message ||
+          status === 403
+            ? "当前账号无权读取配送员目录，请联系权限管理员。"
+            : (cause as { message?: string }).message ||
                 "配送员目录加载失败，请重试。",
         );
       })
@@ -96,7 +89,7 @@ function useCourierCatalog() {
     return () => {
       active = false;
     };
-  }, [canReadStaff, identity.staffReady]);
+  }, []);
   return { options: eligibleCouriers(rows), loading, error };
 }
 
@@ -120,7 +113,10 @@ export function Batches() {
         {[
           ["今日批次", data.batches.length],
           ["规划中", data.batches.filter((b) => b.status === "PLANNED").length],
-          ["已延期", data.batches.filter((b) => b.status === "POSTPONED").length],
+          [
+            "已延期",
+            data.batches.filter((b) => b.status === "POSTPONED").length,
+          ],
           [
             "配送中",
             data.batches.filter((b) => b.status === "DELIVERING").length,
@@ -222,14 +218,20 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
     : catalog.options;
   const [name, setName] = useState(batch?.name || "");
   const [slotId, setSlotId] = useState("");
-  const [availableSlots, setAvailableSlots] = useState<Slot[]>(DEMO ? data.slots : []);
+  const [availableSlots, setAvailableSlots] = useState<Slot[]>(
+    DEMO ? data.slots : [],
+  );
   const [slotsError, setSlotsError] = useState("");
   useEffect(() => {
     if (DEMO || batch) return;
     const controller = new AbortController();
-    growthRequest<{ items: Slot[] }>("/admin/slots", { signal: controller.signal })
+    growthRequest<{ items: Slot[] }>("/admin/slots", {
+      signal: controller.signal,
+    })
       .then((result) => setAvailableSlots(result.items || []))
-      .catch((error) => { if (!controller.signal.aborted) setSlotsError((error as Error).message); });
+      .catch((error) => {
+        if (!controller.signal.aborted) setSlotsError((error as Error).message);
+      });
     return () => controller.abort();
   }, [batch]);
   const [date, setDate] = useState(batch?.date || "");
@@ -245,34 +247,54 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
           placeholder="例如 晚间配送 · 东区"
         />
       </Field>
-      {!batch && <Field label="配送时段" hint="选择已配置的预计配送时段；配送可根据实际情况提前开始。">
-        <select value={slotId} onChange={(event) => {
-          const selected = availableSlots.find((item) => item.id === event.target.value);
-          setSlotId(event.target.value);
-          setDate(selected?.date || "");
-          setTime(selected ? `${selected.start} – ${selected.end}` : "");
-        }}>
-          <option value="">请选择配送时段</option>
-          {availableSlots.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.date} · {item.name} · {item.start}–{item.end}</option>)}
-        </select>
-      </Field>}
-      {!batch && slotsError && <Notice type="error">配送时段加载失败：{slotsError}</Notice>}
-      {batch && <div className="form-grid">
-        <Field label="配送日期">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+      {!batch && (
+        <Field
+          label="配送时段"
+          hint="选择已配置的预计配送时段；配送可根据实际情况提前开始。"
+        >
+          <select
+            value={slotId}
+            onChange={(event) => {
+              const selected = availableSlots.find(
+                (item) => item.id === event.target.value,
+              );
+              setSlotId(event.target.value);
+              setDate(selected?.date || "");
+              setTime(selected ? `${selected.start} – ${selected.end}` : "");
+            }}
+          >
+            <option value="">请选择配送时段</option>
+            {availableSlots
+              .filter((item) => item.enabled)
+              .map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.date} · {item.name} · {item.start}–{item.end}
+                </option>
+              ))}
+          </select>
         </Field>
-        <Field label="配送时间">
-          <input
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            placeholder="例如 19:00 – 20:00"
-          />
-        </Field>
-      </div>}
+      )}
+      {!batch && slotsError && (
+        <Notice type="error">配送时段加载失败：{slotsError}</Notice>
+      )}
+      {batch && (
+        <div className="form-grid">
+          <Field label="配送日期">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </Field>
+          <Field label="配送时间">
+            <input
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              placeholder="例如 19:00 – 20:00"
+            />
+          </Field>
+        </div>
+      )}
       <Field label="配送员">
         <select
           value={courier}
@@ -332,7 +354,11 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
               batch ? `/admin/batches/${id}` : "/admin/batches",
               {
                 name,
-                ...(batch ? (date !== batch.date || time !== batch.time ? { date, time } : {}) : { slotId }),
+                ...(batch
+                  ? date !== batch.date || time !== batch.time
+                    ? { date, time }
+                    : {}
+                  : { slotId }),
                 courierId: courier,
                 expectedVersion: batch?.version,
                 reason,
@@ -394,6 +420,7 @@ export function BatchDetail() {
     id: string;
     blockers: string[];
   } | null>(null);
+  const [commitBlockers, setCommitBlockers] = useState<TrashBlocker[]>([]);
   if (!batch) return <Empty title="配送批次不存在" />;
   const orders = data.orders.filter((o) => batch.orderIds.includes(o.id));
   const canStart = canStartBatch(orders);
@@ -421,6 +448,7 @@ export function BatchDetail() {
     setMode(m);
     setSelected(m === "MERGE" ? batch.orderIds : []);
     setPreview(null);
+    setCommitBlockers([]);
     setReason("");
     setTarget("");
   };
@@ -593,15 +621,19 @@ export function BatchDetail() {
             <Button variant="secondary" onClick={() => setEdit(true)}>
               编辑批次 / 指派配送员
             </Button>
-            {batchPrimaryAction(batch.status) && <Button
-              onClick={() => {
-                const action = batchPrimaryAction(batch.status);
-                if (action) begin(action);
-              }}
-            >
-              <Send size={16} />
-              {batchPrimaryAction(batch.status) === "PUBLISH" ? "发布计划" : "开始配送"}
-            </Button>}
+            {batchPrimaryAction(batch.status) && (
+              <Button
+                onClick={() => {
+                  const action = batchPrimaryAction(batch.status);
+                  if (action) begin(action);
+                }}
+              >
+                <Send size={16} />
+                {batchPrimaryAction(batch.status) === "PUBLISH"
+                  ? "发布计划"
+                  : "开始配送"}
+              </Button>
+            )}
           </div>
         }
       />
@@ -679,7 +711,8 @@ export function BatchDetail() {
                         (o as Record<string, any>).confirmedSlotSnapshot ||
                         data.slots.find(
                           (slot) =>
-                            slot.id === (o as Record<string, any>).confirmedSlotId,
+                            slot.id ===
+                            (o as Record<string, any>).confirmedSlotId,
                         );
                       return (
                         <>
@@ -775,7 +808,10 @@ export function BatchDetail() {
       {mode && (
         <Modal
           title={preview ? `确认影响 · ${labels[mode]}` : labels[mode]}
-          onClose={() => setMode("")}
+          onClose={() => {
+            setMode("");
+            setCommitBlockers([]);
+          }}
           wide
         >
           {preview ? (
@@ -803,6 +839,23 @@ export function BatchDetail() {
                     </p>
                   )}
                 </div>
+              )}
+              {!!commitBlockers.length && (
+                <Notice type="error">
+                  <div>
+                    操作被以下未结业务拦下：
+                    {commitBlockers.map((blocker) => blocker.label).join("；")}
+                  </div>
+                  {hasWageBlocker(commitBlockers) && (
+                    <div>
+                      请先到{" "}
+                      <Link className="text-link" to={`${ADMIN}/payroll`}>
+                        工资结算
+                      </Link>{" "}
+                      为批次内的配送工资记录发放（若仍待配置，先补录策略），再回来删除。
+                    </div>
+                  )}
+                </Notice>
               )}
               <div className="button-row">
                 <Button variant="secondary" onClick={() => setPreview(null)}>
@@ -833,9 +886,13 @@ export function BatchDetail() {
                           ? { expectedVersion: batch.version }
                           : { planId: preview.id },
                         apply,
+                        "POST",
+                        undefined,
+                        (e) => setCommitBlockers(trashBlockers(e)),
                       )
                     ) {
                       setMode("");
+                      setCommitBlockers([]);
                       toast("批次操作已完成");
                     }
                   }}
@@ -990,7 +1047,9 @@ export function Slots() {
         edit.id ? `/admin/slots/${id}` : "/admin/slots",
         {
           ...slot,
-          ...(edit.id ? { expectedVersion: (edit as Record<string, any>).version } : {}),
+          ...(edit.id
+            ? { expectedVersion: (edit as Record<string, any>).version }
+            : {}),
         },
         (s) => ({
           ...s,
@@ -1056,7 +1115,8 @@ export function Slots() {
                     <small>
                       已占 {(s as Record<string, any>).occupied ?? 0} · 剩余{" "}
                       {(s as Record<string, any>).remaining ?? s.capacity}
-                      {(s as Record<string, any>).selectable === false && " · 不可选"}
+                      {(s as Record<string, any>).selectable === false &&
+                        " · 不可选"}
                     </small>
                   </td>
                   <td>
@@ -1098,8 +1158,21 @@ export function Slots() {
                   </td>
                   <td>
                     <div className="button-row">
-                      <button className="text-button" onClick={() => setEdit(s)}>编辑时段</button>
-                      <button className="text-button" onClick={() => { setRemoveSlot(s); setRemoveReason(""); }}>移除时段</button>
+                      <button
+                        className="text-button"
+                        onClick={() => setEdit(s)}
+                      >
+                        编辑时段
+                      </button>
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setRemoveSlot(s);
+                          setRemoveReason("");
+                        }}
+                      >
+                        移除时段
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1110,18 +1183,48 @@ export function Slots() {
         {!slots.length && <Empty title="尚未配置配送时段" />}
       </Panel>
       {!DEMO && <SlotProposals slots={slots} />}
-      {removeSlot && <Modal title="移除配送时段" onClose={() => setRemoveSlot(null)}>
-        <Notice>将归档「{removeSlot.name}」，保留历史记录；有关联中的订单或批次时无法移除。</Notice>
-        <Field label="移除原因（选填）"><input value={removeReason} onChange={(event) => setRemoveReason(event.target.value)} /></Field>
-        <Button busy={pendingActions[`/admin/slots/${removeSlot.id}`]} onClick={async () => {
-          const selected = removeSlot;
-          const ok = await act(`/admin/slots/${selected.id}`, { expectedVersion: (selected as Record<string, any>).version, reason: removeReason }, (current) => ({ ...current, slots: current.slots.filter((item) => item.id !== selected.id) }), "DELETE");
-          if (!ok) return;
-          setSlots((current) => current.filter((item) => item.id !== selected.id));
-          setRemoveSlot(null);
-          toast("配送时段已移除，历史记录保留");
-        }}>确认移除</Button>
-      </Modal>}
+      {removeSlot && (
+        <Modal title="移除配送时段" onClose={() => setRemoveSlot(null)}>
+          <Notice>
+            将归档「{removeSlot.name}
+            」，保留历史记录；有关联中的订单或批次时无法移除。
+          </Notice>
+          <Field label="移除原因（选填）">
+            <input
+              value={removeReason}
+              onChange={(event) => setRemoveReason(event.target.value)}
+            />
+          </Field>
+          <Button
+            busy={pendingActions[`/admin/slots/${removeSlot.id}`]}
+            onClick={async () => {
+              const selected = removeSlot;
+              const ok = await act(
+                `/admin/slots/${selected.id}`,
+                {
+                  expectedVersion: (selected as Record<string, any>).version,
+                  reason: removeReason,
+                },
+                (current) => ({
+                  ...current,
+                  slots: current.slots.filter(
+                    (item) => item.id !== selected.id,
+                  ),
+                }),
+                "DELETE",
+              );
+              if (!ok) return;
+              setSlots((current) =>
+                current.filter((item) => item.id !== selected.id),
+              );
+              setRemoveSlot(null);
+              toast("配送时段已移除，历史记录保留");
+            }}
+          >
+            确认移除
+          </Button>
+        </Modal>
+      )}
       {edit && (
         <Modal
           title={edit.id ? "编辑配送时段" : "新建配送时段"}
@@ -1245,7 +1348,9 @@ function SlotProposals({ slots }: { slots: Slot[] }) {
   };
   const slotLabel = (id?: string | null) => {
     const slot = slots.find((row) => row.id === id);
-    return slot ? `${slot.date} ${slot.start}–${slot.end} ${slot.name}` : id || "—";
+    return slot
+      ? `${slot.date} ${slot.start}–${slot.end} ${slot.name}`
+      : id || "—";
   };
   return (
     <Panel title="待结算订单时段建议">
@@ -1320,7 +1425,10 @@ function SlotProposals({ slots }: { slots: Slot[] }) {
                 {available.map((slot) => (
                   <option key={slot.id} value={slot.id}>
                     {slot.date} {slot.start}–{slot.end} {slot.name}（剩余{" "}
-                    {Number((slot as Record<string, any>).remaining ?? slot.capacity)}）
+                    {Number(
+                      (slot as Record<string, any>).remaining ?? slot.capacity,
+                    )}
+                    ）
                   </option>
                 ))}
               </select>
@@ -1337,10 +1445,18 @@ function SlotProposals({ slots }: { slots: Slot[] }) {
               提交后仅写入建议，订单仍为待结算。客户确认前不得安排配送；客户拒绝后需重新建议。
             </Notice>
             <div className="form-actions">
-              <Button variant="secondary" type="button" onClick={() => setTarget(null)}>
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setTarget(null)}
+              >
                 取消
               </Button>
-              <Button busy={busy} disabled={!available.length} onClick={propose}>
+              <Button
+                busy={busy}
+                disabled={!available.length}
+                onClick={propose}
+              >
                 提交建议
               </Button>
             </div>

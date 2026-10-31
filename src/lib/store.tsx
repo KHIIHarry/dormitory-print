@@ -9,6 +9,7 @@ import { usePresence, MOTION } from "../components/presence";
 import {
   createContext,
   useContext,
+  useCallback,
   useEffect,
   useState,
   useRef,
@@ -21,6 +22,7 @@ import type { Quote } from "../growth/types";
 import { getIdentityGeneration } from "../growth/client";
 import { useLocation } from "react-router-dom";
 import { DEMO, ADMIN, mutation, request, now } from "./api";
+import { trashBlockers } from "./trash-blockers";
 import type { DataState, Config, PrintFile, Role, Order } from "./types";
 const emptyConfig: Config = {
   serviceEnabled: false,
@@ -78,6 +80,7 @@ type Store = {
   refreshError: string;
   pendingActions: Record<string, boolean>;
   actionIssues: Record<string, string>;
+  clearActionIssues: () => void;
   loading: boolean;
   authReady: boolean;
   error: string;
@@ -152,6 +155,7 @@ export function Provider({ children }: { children: ReactNode }) {
     {},
   );
   const [actionIssues, setActionIssues] = useState<Record<string, string>>({});
+  const clearActionIssues = useCallback(() => setActionIssues({}), []);
   const [dataGeneration, setDataGeneration] = useState(getIdentityGeneration());
   const authReady = identity.staffReady;
   const [error, setError] = useState("");
@@ -547,9 +551,12 @@ export function Provider({ children }: { children: ReactNode }) {
     } catch (e) {
       if (operationGeneration !== getIdentityGeneration()) return false;
       onError?.(e);
+      const blocked = trashBlockers(e);
       const issue = isUncertainSubmission(e)
         ? "提交结果待核实：请求响应未确认，请先刷新并核对实际业务状态，避免重复操作。"
-        : (e as Error).message;
+        : blocked.length
+          ? `${(e as Error).message}：${blocked.map((b) => b.label).join("；")}`
+          : (e as Error).message;
       setActionIssues((old) => ({ ...old, [path]: issue }));
       if ((e as { status: number }).status === 409) void refresh();
       return false;
@@ -700,6 +707,7 @@ export function Provider({ children }: { children: ReactNode }) {
         refreshError,
         pendingActions,
         actionIssues,
+        clearActionIssues,
         setData,
         draft,
         setDraft,
