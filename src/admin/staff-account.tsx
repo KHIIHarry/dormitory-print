@@ -1014,7 +1014,10 @@ export function StaffManagementPage() {
                 }
               />
             </Field>
-            <Field label="姓名 / 展示名">
+            <Field
+              label="员工姓名"
+              hint="用于员工管理与工资记录；工作台展示名统一使用客户昵称"
+            >
               <input
                 required
                 value={draft.name}
@@ -1281,7 +1284,10 @@ export function StaffManagementPage() {
                   value={`${grant.account.displayName} · ${grant.account.emailMasked} · ${grant.account.id}`}
                 />
               </Field>
-              <Field label="姓名 / 展示名" hint="可选，默认使用客户昵称">
+              <Field
+                label="员工姓名"
+                hint="可选，仅用于员工管理与工资记录；工作台展示名统一使用客户昵称"
+              >
                 <input
                   value={grant.name}
                   placeholder={grant.account.displayName}

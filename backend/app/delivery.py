@@ -72,6 +72,7 @@ from .delivery_schemas import (
     to_shanghai_window,
 )
 from .models import (
+    Account,
     Asset,
     BatchPlan,
     BindingTask,
@@ -104,6 +105,19 @@ OPEN_EXCEPTION_STATUSES = ('OPEN', 'IN_PROGRESS')
 # ---------------------------------------------------------------------------
 # shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _staff_display_name(db, staff: Staff | None) -> str:
+    """Public courier name from the linked customer nickname (FINAL N05)."""
+    if staff is None:
+        return ''
+    if staff.account_id:
+        account = db.get(Account, staff.account_id)
+        if account is not None and account.deleted_at is None:
+            nickname = (account.display_name or '').strip()
+            if nickname:
+                return nickname
+    return (staff.name or '').strip()
 
 
 def _is_admin(actor: Actor) -> bool:
@@ -226,7 +240,7 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
         'slotId': slot_id,
         'slotName': slot_name,
         'courierId': batch.courier_id,
-        'courierName': courier.name if courier else None,
+        'courierName': _staff_display_name(db, courier) if courier else None,
         'status': batch.status,
         'orderIds': [assignment.order_id for assignment in assignments],
         'assignmentIds': [assignment.id for assignment in assignments],
@@ -282,7 +296,7 @@ def _assignment_view(db, assignment: DeliveryAssignment) -> dict:
         'batchId': assignment.batch_id,
         'batchName': batch.name if batch else None,
         'courierId': assignment.courier_id,
-        'courierName': courier.name if courier else None,
+        'courierName': _staff_display_name(db, courier) if courier else None,
         'status': assignment.status,
         'version': assignment.version,
         'addressReview': assignment.address_review,
@@ -696,7 +710,7 @@ def admin_delivery_staff(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
             continue
         capabilities = [cap for cap in (row.capabilities or [])
                         if cap in ('*', 'delivery.manage')]
-        items.append({'id': row.id, 'name': row.name, 'role': row.role,
+        items.append({'id': row.id, 'name': _staff_display_name(db, row), 'role': row.role,
                       'enabled': row.enabled, 'status': row.status,
                       'capabilities': capabilities})
     return ok({'items': items})

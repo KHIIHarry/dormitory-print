@@ -705,6 +705,36 @@ def test_profile_versioning_and_all_other_session_revocation(client, db):
     assert foreign.status_code in (401, 403)
 
 
+def test_customer_nickname_is_the_staff_display_name(client, db):
+    """Changing 我的资料 → 显示昵称 must update the employee's public name.
+
+    FINAL N05 links every employee to one customer account.  The account
+    nickname is the display name shown in 员工入口 / 管理端 / 配送端; Staff.name
+    stays as the internal employee name for administration and payroll.
+    """
+    staff = make_admin(db, name='管理员')
+    db.commit()
+    login = login_staff(client, staff.username)
+    assert login.status_code == 200, login.text
+    assert login.json()['data']['name'] == '管理员'
+
+    profile = api(client, '/customer/account', method='GET')
+    assert profile.status_code == 200, profile.text
+    updated = api(client, '/customer/account', {
+        'displayName': 'Harry',
+        'expectedVersion': profile.json()['data']['version'],
+    }, method='PATCH')
+    assert updated.status_code == 200, updated.text
+    assert updated.json()['data']['displayName'] == 'Harry'
+
+    me = api(client, '/auth/me', method='GET')
+    assert me.status_code == 200, me.text
+    assert me.json()['data']['name'] == 'Harry'
+
+    db.expire_all()
+    assert db.get(Staff, staff.id).name == '管理员'
+
+
 def test_personal_export_request_and_deletion_application_do_not_execute_deletion(client, db):
     account = make_account(db)
     db.commit()

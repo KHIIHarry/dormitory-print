@@ -810,6 +810,10 @@ function AccountContent() {
   const update = async (path: string, body: unknown, method = "POST") => {
     await growthRequest(path, { method, body });
     await identity.refreshCustomer();
+    // The customer nickname is also the employee display name.  Refresh the
+    // staff probe as well so the 员工入口 card and workspace headers update
+    // immediately without a full page reload.
+    await identity.refreshStaff();
     resource.reload();
   };
   return (

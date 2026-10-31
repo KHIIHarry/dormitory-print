@@ -14835,7 +14835,7 @@
       },
       "StaffCreateInput": {
         "additionalProperties": false,
-        "description": "Grant an existing verified customer account employee rights.\n\n``name``/``username``/``phone`` are optional display metadata only. They are\nnever used to find or bind an account; that is always ``accountId``.",
+        "description": "Grant an existing verified customer account employee rights.\n\n``name``/``username``/``phone`` are optional internal metadata only.  The\npublic workspace display name always comes from the linked account nickname;\n``name`` is the employee/HR name used by staff administration and payroll.\nNone of these fields is ever used to find or bind an account; that is always\n``accountId``.",
         "properties": {
           "accountId": {
             "maxLength": 64,

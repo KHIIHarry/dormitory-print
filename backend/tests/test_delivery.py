@@ -1449,3 +1449,13 @@ def test_batch_delete_blocks_active_delivery_and_preserves_order(
     stored_order = db.get(Order, order.id)
     assert stored.deleted_at is None and stored.status == 'DELIVERING'
     assert stored_order.status == 'DELIVERING'
+
+
+def test_batch_courier_name_uses_linked_account_nickname(
+        api, client, act_as, staff_factory, account_factory):
+    act_as(staff_factory(role='ADMIN'))
+    account = account_factory(display_name='客户昵称')
+    courier = staff_factory(role='COURIER', account_id=account.id,
+                            capabilities=[])
+    batch = create_batch(api, client, courier)
+    assert batch['courierName'] == '客户昵称'

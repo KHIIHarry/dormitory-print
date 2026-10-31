@@ -317,8 +317,11 @@ class GrantableAccountList(DTO):
 class StaffCreateInput(DTO):
     """Grant an existing verified customer account employee rights.
 
-    ``name``/``username``/``phone`` are optional display metadata only. They are
-    never used to find or bind an account; that is always ``accountId``.
+    ``name``/``username``/``phone`` are optional internal metadata only.  The
+    public workspace display name always comes from the linked account nickname;
+    ``name`` is the employee/HR name used by staff administration and payroll.
+    None of these fields is ever used to find or bind an account; that is always
+    ``accountId``.
     """
 
     account_id: str = Field(min_length=1, max_length=64)

@@ -416,15 +416,23 @@ export function AdminLayout() {
               className="avatar admin-avatar"
               aria-label="个人账号"
             >
-              管
+              {staff?.name?.slice(0, 1) || "管"}
             </Link>
             <div className="user-name">
-              {staff?.isSuperAdmin
-                ? "超级管理员"
-                : role === "ADMIN"
-                  ? "管理员"
-                  : "员工"}
-              <small>校园打印工作室</small>
+              {staff?.name ||
+                (staff?.isSuperAdmin
+                  ? "超级管理员"
+                  : role === "ADMIN"
+                    ? "管理员"
+                    : "员工")}
+              <small>
+                {staff?.isSuperAdmin
+                  ? "超级管理员"
+                  : role === "ADMIN"
+                    ? "管理员"
+                    : "员工"}{" "}
+                · 校园打印工作室
+              </small>
             </div>
             <button className="icon-btn" aria-label="退出登录" onClick={logout}>
               <LogOut size={18} />

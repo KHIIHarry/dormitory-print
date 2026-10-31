@@ -1154,6 +1154,22 @@ def test_delivery_staff_catalog_requires_delivery_manage_and_is_minimal(
     assert denied.status_code == 403, denied.text
 
 
+def test_delivery_staff_catalog_uses_linked_account_nickname(
+    api, client_factory, db, account_factory
+):
+    dispatcher = staff_session(client_factory, db, ['delivery.manage'],
+                               name='配送调度员')
+    courier_account = account_factory(display_name='客户新昵称')
+    courier = make_staff(db, courier_account, role='COURIER', name='内部员工姓名',
+                         capabilities=[])
+
+    response = api(dispatcher, '/admin/delivery-staff', method='GET')
+    assert response.status_code == 200, response.text
+    row = next(item for item in response.json()['data']['items']
+               if item['id'] == courier.id)
+    assert row['name'] == '客户新昵称'
+
+
 def test_purge_tombstone_records_actual_rows_and_files(api, client_factory, db, account_factory):
     data_admin = staff_session(client_factory, db, ['data.manage'])
     owner = account_factory()

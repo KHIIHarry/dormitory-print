@@ -516,14 +516,30 @@ def _customer_session(account: Account | None, *, recovered: bool = False,
     )
 
 
-def _staff_session_view(staff: Staff) -> StaffSessionView:
+def _staff_display_name(db, staff: Staff) -> str:
+    """Public staff display name: the linked customer account nickname.
+
+    FINAL N05 keeps one identity per person.  ``Staff.name`` is the internal
+    employee name used by staff administration and payroll snapshots; it is
+    only a fallback for historical standalone rows without an account nickname.
+    """
+    if staff.account_id:
+        account = db.get(Account, staff.account_id)
+        if account is not None and account.deleted_at is None:
+            nickname = (account.display_name or '').strip()
+            if nickname:
+                return nickname
+    return (staff.name or '').strip()
+
+
+def _staff_session_view(db, staff: Staff) -> StaffSessionView:
     return StaffSessionView(
         account_id=staff.account_id or '',
         is_super_admin=bool(staff.is_super_admin),
         discount_level=staff.discount_level,
         id=staff.id,
         role=staff.role,  # type: ignore[arg-type]
-        name=staff.name,
+        name=_staff_display_name(db, staff),
         username=staff.username,
         email_masked=mask_email(staff.email),
         email_verified=bool(staff.email_verified),
@@ -1600,7 +1616,7 @@ def staff_login(payload: StaffLoginInput, request: Request, response: Response, 
     _issue_account_session(db, response, request, account, current)
     _clear_cookie(response, STAFF_COOKIE)
     audit(db, 'account:' + account.id, 'STAFF_LOGIN', 'staff', staff.id)
-    return ok(_staff_session_view(staff))
+    return ok(_staff_session_view(db, staff))
 
 
 @router.get('/auth/me', response_model=Envelope[StaffSessionView])
@@ -1609,7 +1625,7 @@ def staff_me(db=Depends(get_db), actor=Depends(actor_dep)):
     staff = db.get(Staff, actor.staff_id)
     if staff is None or not _staff_active(staff):
         raise DomainError('AUTH_REQUIRED', '员工权限已失效，请重新登录客户账号', 401)
-    return ok(_staff_session_view(staff))
+    return ok(_staff_session_view(db, staff))
 
 
 @router.post('/auth/logout', response_model=Envelope[RevokeResult])
