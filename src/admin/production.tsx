@@ -1289,7 +1289,7 @@ function ServerPrintTask() {
             </p>
           )}
         </Panel>
-        <Panel title="实际开印">
+        <Panel className="print-start-panel" title="实际开印">
           <p className="muted">
             实际开印必须由管理员明确登记；未登记前不能确认实体打印完成。后端只允许登记一次，重复提交会返回已登记错误。
           </p>
@@ -1350,7 +1350,7 @@ function ServerPrintTask() {
         </Panel>
       </div>
       {attemptId && !completed && (
-        <Panel title="确认本次打印结果">
+        <Panel className="print-result-panel" title="确认本次打印结果">
           <Notice>
             请核对实体纸张的颜色、单双面、翻转与页序。确认完成后才能进入装订/装袋。
           </Notice>
@@ -1379,7 +1379,7 @@ function ServerPrintTask() {
           </Button>
         </Panel>
       )}
-      <Panel title="实体纸张与补打">
+      <Panel className="reprint-panel" title="实体纸张与补打">
         <p className="muted">
           指定纸张补打按服务端页纸映射选择完整实体纸张；双面会自动包含正反面与空白背面，整任务补打不增加费用。
         </p>

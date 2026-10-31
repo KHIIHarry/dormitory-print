@@ -560,7 +560,8 @@ export function AdminOrderDetail() {
             </div>
           </Panel>
         </div>
-        <aside>
+        <aside className="order-detail-sidebar">
+          <div className="order-detail-column">
           <Panel title="联系与配送">
             <dl className="detail-dl vertical">
               <div>
@@ -614,12 +615,15 @@ export function AdminOrderDetail() {
               </>
             )}
           </Panel>
-          <AdminSupplementaryPanel orderId={order.id} />
           <AdminAccessLinks orderId={order.id} />
+          </div>
+          <div className="order-detail-column">
+          <AdminSupplementaryPanel orderId={order.id} />
           <Panel title="费用快照">
             <PriceRows total={order.totalCents} quote={order.quote} />
             <p className="form-hint">历史订单金额不会随新价目修改。</p>
           </Panel>
+          </div>
         </aside>
       </div>
       {payment && (

@@ -113,7 +113,7 @@ function PreviewContent({
             canvas.current,
             page,
             abort.signal,
-            expanded ? 1800 : 720,
+            expanded ? 2200 : 1440,
           );
       })
       .then((count) => {

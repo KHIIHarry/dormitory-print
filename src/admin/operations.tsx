@@ -1,3 +1,4 @@
+import { mapPublishError, mapPublishHotspots } from "./map-publish";
 import { formatDisplayTime } from "../lib/display-format";
 import { AuditPage } from "./audit";
 import { useEffect, useRef, useState } from "react";
@@ -69,6 +70,7 @@ export function MapEditor() {
   );
   const [publish, setPublish] = useState(false);
   const [mapBusy, setMapBusy] = useState(false);
+  const [mapIssue, setMapIssue] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const mapUpload = useRef(new AssetUpload(getIdentityGeneration));
   const [mapUploadState, setMapUploadState] = useState<AssetUploadState>({
@@ -177,7 +179,7 @@ export function MapEditor() {
               <Upload size={16} />
               {mapUploadHint ? "正在上传底图…" : "更换底图"}
             </Button>
-            <Button onClick={() => setPublish(true)}>
+            <Button onClick={() => { setMapIssue(""); setPublish(true); }}>
               <Save size={16} />
               预览并发布
             </Button>
@@ -341,9 +343,9 @@ export function MapEditor() {
             本次将发布 {buildings.length} 个楼栋热点，其中{" "}
             {buildings.filter((b) => b.enabled).length} 个开放配送。
           </Notice>
-          {actionIssues["/admin/maps"] && (
+          {(mapIssue || actionIssues["/admin/maps"]) && (
             <Notice type="error">
-              <span role="alert">{actionIssues["/admin/maps"]}</span>
+              <span role="alert">{mapIssue || actionIssues["/admin/maps"]}</span>
             </Notice>
           )}
           {version > 1 && !migrate && (
@@ -360,11 +362,12 @@ export function MapEditor() {
                 return;
               }
               setMapBusy(true);
+              setMapIssue("");
               const ok = await act(
                 "/admin/maps",
                 {
                   version,
-                  hotspots: buildings,
+                  hotspots: mapPublishHotspots(buildings),
                   migrationConfirmed: migrate,
                   ...(mapAssetId ? { mapAssetId } : {}),
                 },
@@ -378,6 +381,10 @@ export function MapEditor() {
                   const next = result as { version?: number };
                   if (typeof next.version === "number")
                     setVersion(next.version);
+                },
+                (error) => {
+                  if ((error as { message?: string })?.message === "输入内容不符合要求")
+                    setMapIssue(mapPublishError(error, buildings));
                 },
               );
               setMapBusy(false);

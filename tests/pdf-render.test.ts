@@ -86,3 +86,24 @@ it("destroys the loading task when decoding fails", async () => {
   );
   expect(destroy).toHaveBeenCalledOnce();
 });
+it("renders a sharper preview while limiting memory for unusually tall pages", async () => {
+  const scales: number[] = [];
+  const render = vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() }));
+  state.documents.push({
+    promise: Promise.resolve({
+      numPages: 1,
+      getPage: async () => ({
+        getViewport: ({ scale }: { scale: number }) => {
+          scales.push(scale);
+          return { width: 600 * scale, height: 1200 * scale };
+        },
+        render,
+      }),
+    }),
+    destroy: vi.fn(async () => {}),
+  });
+  const target = { getContext: () => ({ drawImage: vi.fn() }) } as any;
+  await renderPage(new Uint8Array([1]), target, 1, undefined, 2200);
+  expect(scales[1]).toBeGreaterThan(2);
+  expect(target.width * target.height).toBeLessThanOrEqual(8_000_000);
+});

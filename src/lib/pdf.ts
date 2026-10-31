@@ -39,8 +39,11 @@ export async function renderPage(
     check();
     const p = await pdf.getPage(Math.max(1, Math.min(page, pdf.numPages)));
     check();
+    const baseViewport = p.getViewport({ scale: 1 });
+    // Bound pixel count so high-resolution previews stay usable on mobile.
+    const pixelLimitScale = Math.sqrt(8_000_000 / (baseViewport.width * baseViewport.height));
     const viewport = p.getViewport({
-      scale: Math.min(3, maxWidth / p.getViewport({ scale: 1 }).width),
+      scale: Math.min(4, pixelLimitScale, maxWidth / baseViewport.width),
     });
     // PDF.js owns only a private canvas until this complete, current render commits.
     const buffer = document.createElement("canvas");

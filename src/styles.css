@@ -7982,3 +7982,21 @@ button.session-action svg { stroke-width: 1.7; }
   .admin-content .detail-grid { grid-template-columns: minmax(0, 1fr); }
   .admin-content .detail-grid > aside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
 }
+
+/* Independent columns prevent a tall card from leaving a gap beside its neighbour. */
+.order-detail-column { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.order-detail-column > .panel { margin-bottom: 0; }
+.order-access-panel .panel-heading { flex-wrap: wrap; align-items: flex-start; }
+.admin-content .detail-grid .order-access-panel .button-row .btn { width: auto; margin-top: 0; }
+.order-access-panel > .form-hint { margin: 0 0 16px; }
+.print-start-panel > .muted, .reprint-panel > .muted { margin: 0 0 22px; line-height: 1.8; }
+.print-start-panel .growth-facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin: 0 0 24px; }
+.print-start-panel .growth-facts > div { display: grid; gap: 6px; min-width: 0; }
+.print-start-panel .growth-facts dt, .print-start-panel .growth-facts dd { margin: 0; line-height: 1.5; }
+.print-start-panel .growth-facts dd { overflow-wrap: anywhere; }
+.reprint-panel > .button-row, .print-result-panel > .button-row { margin-bottom: 22px; }
+.reprint-panel .sheet-selector { margin: 0 0 22px; }
+@media (max-width: 767px) {
+  .admin-content .detail-grid > .order-detail-sidebar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .order-access-panel .panel-heading { gap: 16px; }
+}

@@ -87,6 +87,7 @@ type Store = {
     apply: (s: DataState) => DataState,
     method?: string,
     onResponse?: (result: unknown) => void,
+    onError?: (error: unknown) => void,
   ) => Promise<boolean>;
   updateOrder: (
     id: string,
@@ -494,6 +495,7 @@ export function Provider({ children }: { children: ReactNode }) {
     apply: (s: DataState) => DataState,
     method = "POST",
     onResponse?: (result: unknown) => void,
+    onError?: (error: unknown) => void,
   ) => {
     if (!navigator.onLine) {
       toast("当前离线，联网后再执行此操作");
@@ -543,6 +545,7 @@ export function Provider({ children }: { children: ReactNode }) {
       return true;
     } catch (e) {
       if (operationGeneration !== getIdentityGeneration()) return false;
+      onError?.(e);
       const issue = isUncertainSubmission(e)
         ? "提交结果待核实：请求响应未确认，请先刷新并核对实际业务状态，避免重复操作。"
         : (e as Error).message;
