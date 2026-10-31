@@ -107,11 +107,11 @@ ADMIN_PURPOSE_CAPABILITIES = {
     **{purpose: 'config.manage' for purpose in PUBLIC_PURPOSES},
 }
 DOCUMENT_KINDS = frozenset({'PDF', 'DOC', 'DOCX', 'PPT', 'PPTX', 'XLS', 'XLSX'})
-IMAGE_KINDS = frozenset({'JPEG', 'PNG', 'WEBP', 'HEIC'})
+IMAGE_KINDS = frozenset({'JPEG', 'PNG', 'WEBP', 'HEIC', 'SVG'})
 KIND_EXTENSIONS = {
     'PDF': {'pdf'}, 'DOC': {'doc'}, 'DOCX': {'docx'}, 'PPT': {'ppt'}, 'PPTX': {'pptx'},
     'XLS': {'xls'}, 'XLSX': {'xlsx'}, 'JPEG': {'jpg', 'jpeg'}, 'PNG': {'png'},
-    'WEBP': {'webp'}, 'HEIC': {'heic', 'heif'},
+    'WEBP': {'webp'}, 'HEIC': {'heic', 'heif'}, 'SVG': {'svg'},
 }
 FAILURE_MESSAGES = {
     'CANCELED': '任务已取消',
@@ -988,11 +988,17 @@ async def create_asset(
             raise DomainError('EMPTY_FILE', '上传文件为空', 422)
         try:
             info = pdf_engine.inspect_upload(temporary, name, file.content_type or '')
-            if info.kind in IMAGE_KINDS:
+            if info.kind in IMAGE_KINDS and info.kind != 'SVG':
                 pdf_engine.validate_image(
                     temporary, info.kind, max_pixels=int(services.get('maxPixels') or 40_000_000)
                 )
-            _format_allowed(services, info.kind)
+            if info.kind == 'SVG' and purpose not in PUBLIC_PURPOSES:
+                raise DomainError('FORMAT_DISABLED', 'SVG 仅支持公开图片上传', 415)
+            if not (info.kind == 'SVG' and purpose in PUBLIC_PURPOSES):
+                _format_allowed(services, info.kind)
+            if info.kind == 'SVG':
+                size = temporary.stat().st_size
+                sha = pdf_engine.sha256_file(temporary)
         except pdf_engine.EngineError as error:
             raise _engine_error(error) from error
 
@@ -1509,6 +1515,8 @@ def _content_response(asset: Asset, range_header: str | None) -> Response:
         'ETag': f'"{asset.sha256}"',
         'X-Content-Type-Options': 'nosniff',
     }
+    if asset.mime == 'image/svg+xml':
+        headers['Content-Security-Policy'] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
     if partial:
         headers['Content-Range'] = f'bytes {start}-{end}/{size}'
     status = 206 if partial else 200

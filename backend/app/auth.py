@@ -226,7 +226,8 @@ def _active_session_count(db, kind: str, *, account_id: str | None = None,
 
 
 def _issue_account_session(db, response: Response, request: Request, account: Account,
-                           current: AuthSession | None = None) -> AuthSession:
+                           current: AuthSession | None = None,
+                           replace_session_id: str | None = None) -> AuthSession:
     now = _now()
     device_id = _device_id(request, current)
     staff = _active_staff_for_account(db, account)
@@ -251,11 +252,28 @@ def _issue_account_session(db, response: Response, request: Request, account: Ac
         session = candidate
     else:
         if _active_session_count(db, 'CUSTOMER', account_id=account.id) >= MAX_DEVICES:
-            raise DomainError(
-                'DEVICE_LIMIT_REACHED',
-                '此账号最多同时登录 2 台设备，请先在已登录设备退出一个设备后重试',
-                409,
-            )
+            if replace_session_id:
+                replaced = db.get(AuthSession, replace_session_id)
+                if (replaced is None or replaced.kind != 'CUSTOMER'
+                        or replaced.account_id != account.id
+                        or not _session_active(replaced)):
+                    raise DomainError(
+                        'DEVICE_REPLACEMENT_INVALID',
+                        '要下线的设备会话已失效，请刷新设备列表后重试',
+                        409,
+                    )
+                _revoke_session(replaced)
+                db.flush()
+                audit(db, 'account:' + account.id, 'CUSTOMER_DEVICE_REPLACED',
+                      'auth_session', replaced.id)
+            else:
+                sessions = _session_list(db, 'CUSTOMER', account_id=account.id)
+                raise DomainError(
+                    'DEVICE_LIMIT_REACHED',
+                    '此账号最多同时登录 2 台设备，请选择一台已登录设备下线后再登录',
+                    409,
+                    details={'sessions': sessions.model_dump(mode='json')['items']},
+                )
         session = AuthSession(kind='CUSTOMER', token_hash=token_hash(raw),
                               principal_id=account.principal_id, account_id=account.id,
                               device_id=device_id, device_label='浏览器',
@@ -976,7 +994,8 @@ def customer_login(payload: CustomerLoginInput, request: Request, response: Resp
         request_row = recover_account(db, account)
         deadline = recovery_deadline(request_row)
         current = _load_session(db, request, ACCOUNT_COOKIE, 'CUSTOMER')
-        _issue_account_session(db, response, request, account, current)
+        _issue_account_session(db, response, request, account, current,
+                               payload.replace_session_id)
         _clear_cookie(response, STAFF_COOKIE)
         audit(db, 'account:' + account.id, 'CUSTOMER_LOGIN', 'account', account.id)
         return ok(_customer_session(
@@ -987,7 +1006,8 @@ def customer_login(payload: CustomerLoginInput, request: Request, response: Resp
     if not account.verified_at or account.status != 'ACTIVE':
         raise DomainError('EMAIL_NOT_VERIFIED', '请先完成邮箱验证', 403)
     current = _load_session(db, request, ACCOUNT_COOKIE, 'CUSTOMER')
-    _issue_account_session(db, response, request, account, current)
+    _issue_account_session(db, response, request, account, current,
+                           payload.replace_session_id)
     # Pre-unification staff cookies confer no identity; remove them on login.
     _clear_cookie(response, STAFF_COOKIE)
     audit(db, 'account:' + account.id, 'CUSTOMER_LOGIN', 'account', account.id)

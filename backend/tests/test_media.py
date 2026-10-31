@@ -1762,3 +1762,47 @@ def test_guest_order_revision_is_not_silently_upgraded_to_account(client, db):
     assert view['checkoutAuthKind'] == 'ANONYMOUS'
     assert view['quote']['checkoutAccountId'] is None
     assert view['canAdopt'] is False
+
+
+# ---------------------------------------------------------------------------
+# SVG public images
+# ---------------------------------------------------------------------------
+
+
+SAFE_SVG = (
+    b'<?xml version="1.0" encoding="UTF-8"?>'
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 576" width="700" height="576">'
+    b'<rect width="700" height="576" fill="#f6f2ea"/>'
+    b'<path d="M10 10 H100 V100 Z" fill="#c67c4e"/>'
+    b'</svg>'
+)
+
+
+def test_public_map_accepts_svg_and_serves_sanitized_svg(admin_client):
+    response = upload(
+        admin_client, SAFE_SVG, 'campus.svg', 'image/svg+xml', purpose='PUBLIC_MAP'
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()['data']
+    assert data['kind'] == 'SVG'
+    assert data['status'] == 'READY'
+    content = admin_client.get(f"/api/v1/assets/{data['assetId']}/content")
+    assert content.status_code == 200
+    assert content.headers['content-type'].startswith('image/svg+xml')
+    assert content.headers['content-security-policy'].startswith("default-src 'none'")
+    text = content.text
+    assert '<svg' in text and 'M10 10' in text
+    assert '<script' not in text and 'onload=' not in text
+
+
+def test_svg_with_script_or_event_handler_is_rejected(admin_client):
+    for payload in (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><script>alert(1)</script></svg>',
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" onload="alert(1)"/></svg>',
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" style="fill:url(https://evil.invalid/a)"/></svg>',
+    ):
+        response = upload(
+            admin_client, payload, 'campus.svg', 'image/svg+xml', purpose='PUBLIC_MAP'
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()['error']['code'] == 'SVG_UNSAFE'

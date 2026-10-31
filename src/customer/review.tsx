@@ -153,10 +153,10 @@ function ReviewContent() {
   );
   const quoteRef = useRef(quote);
   quoteRef.current = quote;
+  const adoptForAccount = useRef<string | null>(null);
   const [confirmedQuote, setConfirmedQuote] = useState(""),
     [preview, setPreview] = useState<Artifact | null>(null),
-    [loginOpen, setLoginOpen] = useState(false),
-    [adoptOpen, setAdoptOpen] = useState(false);
+    [loginOpen, setLoginOpen] = useState(false);
   const [name, setName] = useState(saved?.name || original?.nickname || ""),
     [phone, setPhone] = useState(saved?.phone || original?.phone || ""),
     [building, setBuilding] = useState(
@@ -466,7 +466,6 @@ function ReviewContent() {
       acceptQuote(next);
       setContentGeneration(generation);
       setContentReadiness(configEpoch);
-      if (adopt) setAdoptOpen(false);
     } catch (e) {
       if (
         current() &&
@@ -556,7 +555,6 @@ function ReviewContent() {
       artifactsRef.current = [];
       setAcks([]);
       setConfirmedQuote("");
-      setAdoptOpen(false);
       setLoginOpen(false);
       setPreview(null);
       setPromotionIntent({ selectionMode: "AUTO" });
@@ -599,6 +597,25 @@ function ReviewContent() {
     slot,
     customerNote,
     setCheckoutMemory,
+  ]);
+  useEffect(() => {
+    if (!verified) {
+      adoptForAccount.current = null;
+      return;
+    }
+    const accountId = identity.customer.account?.id;
+    if (original || !accountId || !quote || quoteBusy || submitting) return;
+    if (quote.checkoutAccountId === accountId) return;
+    if (adoptForAccount.current === accountId) return;
+    adoptForAccount.current = accountId;
+    void refreshQuote({ selectionMode: "AUTO" }, true);
+  }, [
+    verified,
+    original,
+    quote,
+    quoteBusy,
+    submitting,
+    identity.customer.account?.id,
   ]);
   if (!draft.length) return <Navigate to="/u/new" replace />;
   const contentCurrent =
@@ -946,10 +963,10 @@ function ReviewContent() {
                     <>
                       <Notice>
                         {accountAdopted
-                          ? "本次结算已明确关联到当前账号。"
-                          : "你已登录账号，当前准备单仍保留原游客结算身份。可继续游客下单，或仅关联本次结算以使用账号优惠，不会合并其他游客订单。"}
+                          ? "本次结算使用当前账号，账号优惠券已生效。"
+                          : "已登录账号。正在将本次结算关联到账号并重新报价，账号优惠会自动生效…"}
                       </Notice>
-                      {accountAdopted && !original && (
+                      {!accountAdopted && quoteError && (
                         <Button
                           variant="secondary"
                           disabled={
@@ -959,29 +976,12 @@ function ReviewContent() {
                             submitting ||
                             !quote
                           }
-                          onClick={() =>
-                            void refreshQuote(
-                              { selectionMode: "AUTO" },
-                              "withdraw",
-                            )
-                          }
+                          onClick={() => {
+                            adoptForAccount.current = null;
+                            void refreshQuote({ selectionMode: "AUTO" }, true);
+                          }}
                         >
-                          撤回本次账号结算，改为游客
-                        </Button>
-                      )}
-                      {!accountAdopted && (
-                        <Button
-                          variant="secondary"
-                          disabled={
-                            !configReady ||
-                            busy ||
-                            quoteBusy ||
-                            submitting ||
-                            !quote
-                          }
-                          onClick={() => setAdoptOpen(true)}
-                        >
-                          仅关联本次结算到账号
+                          重新关联账号并报价
                         </Button>
                       )}
                     </>
@@ -1412,38 +1412,8 @@ function ReviewContent() {
           <CustomerAuthForm
             mode="login"
             embedded
-            onSuccess={() => {
-              setLoginOpen(false);
-              setAdoptOpen(true);
-            }}
+            onSuccess={() => setLoginOpen(false)}
           />
-        </Modal>
-      )}
-      {adoptOpen && verified && !original && (
-        <Modal
-          title="仅关联本次结算"
-          onClose={() => !quoteBusy && setAdoptOpen(false)}
-        >
-          <div className="checkout-promotion-stack">
-            <Notice>
-              确认后仅授权当前准备单与打印文件用于账号结算。不会合并本机其他游客订单，PDF
-              未变化时保留已有检查记录。新报价需要重新确认金额。
-            </Notice>
-            {quoteError && <Notice type="error">{quoteError}</Notice>}
-            <Button
-              disabled={!configReady || quoteBusy || submitting}
-              onClick={() => void refreshQuote({ selectionMode: "AUTO" }, true)}
-            >
-              {quoteBusy ? "正在关联并重新报价…" : "确认仅关联本次结算"}
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!configReady || quoteBusy || submitting}
-              onClick={() => setAdoptOpen(false)}
-            >
-              继续游客结算
-            </Button>
-          </div>
         </Modal>
       )}
       {contentCurrent && preview && (

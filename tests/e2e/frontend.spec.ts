@@ -76,7 +76,7 @@ test("courier cannot skip geolocation", async ({ page }) => {
   await expect(page.getByText("配送员必须获取真实定位")).toBeVisible();
 });
 
-test("checkout login/adoption/withdrawal keeps PDF acknowledgment and requires a fresh amount confirmation", async ({
+test("checkout login adopts the account automatically and requires a fresh amount confirmation", async ({
   page,
 }) => {
   await page.goto("/preview");
@@ -95,15 +95,12 @@ test("checkout login/adoption/withdrawal keeps PDF acknowledgment and requires a
     .getByRole("button", { name: "登录 / 注册以使用账号优惠", exact: true })
     .click();
   await page.getByRole("button", { name: "体验演示账号", exact: true }).click();
-  await page
-    .getByRole("button", { name: "确认仅关联本次结算", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "撤回本次账号结算，改为游客", exact: true })
-    .click();
   await expect(
-    page.getByRole("button", { name: "仅关联本次结算到账号", exact: true }),
+    page.getByText("本次结算使用当前账号，账号优惠券已生效。", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /撤回本次账号结算|仅关联本次结算到账号/ }),
+  ).toHaveCount(0);
   await expect(acknowledgment).toBeChecked();
   await expect(
     page.getByRole("checkbox", { name: /我确认本次应付/ }),

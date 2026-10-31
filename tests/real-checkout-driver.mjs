@@ -61,18 +61,9 @@ try {
   await generate.click();
 
   await expect(page).toHaveURL(/\/u\/review$/);
-  const adopt = page.getByRole('button', { name: '仅关联本次结算到账号', exact: true });
-  const adoptedNotice = page.getByText('本次结算已明确关联到当前账号。', { exact: true });
-  await expect.poll(async () => {
-    if (await adoptedNotice.isVisible().catch(() => false)) return 'adopted';
-    if (await adopt.isVisible().catch(() => false) && await adopt.isEnabled().catch(() => false)) return 'adoptable';
-    return 'waiting';
-  }, { timeout: 60000 }).toMatch(/adopted|adoptable/);
-  if (await adopt.isVisible().catch(() => false) && await adopt.isEnabled().catch(() => false)) {
-    await adopt.click();
-    await page.getByRole('button', { name: '确认仅关联本次结算', exact: true }).click();
-  }
-  await expect(adoptedNotice).toBeVisible({ timeout: 30000 });
+  const adoptedNotice = page.getByText('本次结算使用当前账号，账号优惠券已生效。', { exact: true });
+  await expect(adoptedNotice).toBeVisible({ timeout: 60000 });
+
 
   const ack = page.getByRole('checkbox', { name: '我已检查这份最终 PDF，确认打印设置', exact: true });
   await ack.click();

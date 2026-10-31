@@ -291,6 +291,68 @@ def test_third_device_is_rejected_and_revocation_releases_slot(client, db):
     assert active <= 2
 
 
+def test_third_device_can_replace_a_selected_session(client, db):
+    account = make_account(db)
+    db.commit()
+    clients = [new_client(client.app) for _ in range(3)]
+    assert login_customer(clients[0], account.email).status_code == 200
+    assert login_customer(clients[1], account.email).status_code == 200
+    rejected = login_customer(clients[2], account.email)
+    assert rejected.status_code == 409
+    assert rejected.json()['error']['code'] == 'DEVICE_LIMIT_REACHED'
+    sessions = rejected.json()['error']['details']['sessions']
+    assert len(sessions) == 2
+    assert all(item['id'] for item in sessions)
+
+    replaced = api(clients[2], '/customer/auth/login', {
+        'email': account.email,
+        'password': PASSWORD,
+        'replaceSessionId': sessions[0]['id'],
+    })
+    assert replaced.status_code == 200, replaced.text
+    assert api(clients[2], '/customer/account/sessions', method='GET').status_code == 200
+    remaining = [api(item, '/customer/account/sessions', method='GET').status_code for item in clients[:2]]
+    assert sorted(remaining) == [200, 403], remaining
+
+    db.expire_all()
+    active = db.scalar(select(func.count()).select_from(AuthSession).where(
+        AuthSession.kind == 'CUSTOMER', AuthSession.account_id == account.id,
+        AuthSession.revoked_at.is_(None), AuthSession.expires_at > utcnow()))
+    assert active == 2
+
+
+def test_device_replacement_rejects_unknown_or_revoked_session(client, db):
+    account = make_account(db)
+    db.commit()
+    clients = [new_client(client.app) for _ in range(4)]
+    assert login_customer(clients[0], account.email).status_code == 200
+    assert login_customer(clients[1], account.email).status_code == 200
+
+    unknown = login_customer(clients[2], account.email)
+    invalid = api(clients[2], '/customer/auth/login', {
+        'email': account.email, 'password': PASSWORD,
+        'replaceSessionId': 'missing-session',
+    })
+    assert invalid.status_code == 409
+    assert invalid.json()['error']['code'] == 'DEVICE_REPLACEMENT_INVALID'
+    versions = unknown.json()['error']['details']['sessions']
+    assert len(versions) == 2
+
+    target = versions[0]['id']
+    assert api(clients[2], '/customer/auth/login', {
+        'email': account.email, 'password': PASSWORD,
+        'replaceSessionId': target,
+    }).status_code == 200
+    fourth = login_customer(clients[3], account.email)
+    assert fourth.status_code == 409
+    revoked = api(clients[3], '/customer/auth/login', {
+        'email': account.email, 'password': PASSWORD,
+        'replaceSessionId': target,
+    })
+    assert revoked.status_code == 409
+    assert revoked.json()['error']['code'] == 'DEVICE_REPLACEMENT_INVALID'
+
+
 def test_concurrent_third_device_never_oversubscribes(client, db):
     account = make_account(db)
     db.commit()

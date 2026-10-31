@@ -80,6 +80,7 @@ class RegisterInput(DTO):
 class CustomerLoginInput(DTO):
     email: str
     password: str = Field(max_length=512)
+    replace_session_id: str | None = None
 
     _email = field_validator('email')(_email_field)
 

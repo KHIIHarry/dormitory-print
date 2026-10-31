@@ -196,7 +196,7 @@ export function MapEditor() {
         hidden
         ref={input}
         type="file"
-        accept="image/*"
+        accept="image/*,.svg"
         disabled={mapUploadState.busy}
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -1007,7 +1007,7 @@ function SettingsForm() {
                     ref={qrInput}
                     type="file"
                     disabled={imageState.busy}
-                    accept="image/*"
+                    accept="image/*,.svg"
                     aria-label="选择管理员微信二维码图片"
                     onChange={(e) => {
                       const files = Array.from(e.target.files || []);

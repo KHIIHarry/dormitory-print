@@ -1,7 +1,7 @@
 import { inviteRegistrationUrl, inviteShareText } from "../lib/invite-share";
 import { ResourceSkeleton, RefreshStatus } from "../components/feedback";
 import { getIdentityGeneration } from "../growth/client";
-import { isUncertainSubmission } from "../lib/api";
+import { ApiError, isUncertainSubmission } from "../lib/api";
 import {
   useEffect,
   useLayoutEffect,
@@ -286,6 +286,14 @@ export function CustomerAuthForm({
     [registered, setRegistered] = useState(false),
     [completed, setCompleted] = useState(false),
     [linkPrompt, setLinkPrompt] = useState(false);
+  const [deviceOptions, setDeviceOptions] = useState<
+    Array<{
+      id: string;
+      device: string;
+      lastSeenAt?: string;
+      current?: boolean;
+    }> | null
+  >(null);
   const changingEmail =
     mode === "verify" &&
     ["emailchange", "email-change"].includes(
@@ -319,15 +327,34 @@ export function CustomerAuthForm({
       setChallenge(pendingRegistration);
     }
   };
+  const login = async (replaceSessionId?: string) => {
+    try {
+      const recovered = await identity.loginCustomer(
+        email.trim(),
+        password,
+        replaceSessionId,
+      );
+      setDeviceOptions(null);
+      if (recovered) toast("账号已恢复，已取消本次注销。");
+      setPassword("");
+      if (embedded) onSuccess?.();
+      else setLinkPrompt(true);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "DEVICE_LIMIT_REACHED") {
+        const details = error.details as
+          | { sessions?: Array<{ id: string; device: string; lastSeenAt?: string; current?: boolean }> }
+          | undefined;
+        setDeviceOptions(details?.sessions || []);
+        return;
+      }
+      throw error;
+    }
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void action.run(async () => {
       if (mode === "login") {
-        const recovered = await identity.loginCustomer(email.trim(), password);
-        if (recovered) toast("账号已恢复，已取消本次注销。");
-        setPassword("");
-        if (embedded) onSuccess?.();
-        else setLinkPrompt(true);
+        await login();
         return;
       }
       if (mode === "register") {
@@ -503,25 +530,67 @@ export function CustomerAuthForm({
                   重置链接缺失或已使用，请重新申请找回邮件。
                 </Notice>
               )}
-              <Button
-                busy={action.busy}
-                busyTarget={action.control}
-                disabled={
-                  action.busy ||
-                  ((mode === "verify" || mode === "reset") && !token)
-                }
-              >
-                {action.busy
-                  ? "正在提交…"
-                  : {
-                      login: "登录",
-                      register: "注册并申请验证邮件",
-                      forgot: "申请重置邮件",
-                      verify: changingEmail ? "确认换绑新邮箱" : "确认验证邮箱",
-                      reset: "设置新密码",
-                    }[mode]}
-                <ArrowRight size={16} />
-              </Button>
+              {mode === "login" && deviceOptions ? (
+                <div className="account-device-picker">
+                  <strong>登录设备已满</strong>
+                  <p>
+                    此账号最多同时登录 2 台设备。选择一台设备下线，当前设备即可登录。
+                  </p>
+                  {deviceOptions.length ? (
+                    deviceOptions.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        className="account-device-option"
+                        disabled={action.busy}
+                        onClick={() => void action.run(() => login(session.id))}
+                      >
+                        <span>
+                          <b>{session.device}</b>
+                          <small>
+                            {session.current
+                              ? "当前设备"
+                              : session.lastSeenAt
+                                ? `最近使用 ${new Date(session.lastSeenAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                                : "登录设备"}
+                          </small>
+                        </span>
+                        <em>下线并登录</em>
+                      </button>
+                    ))
+                  ) : (
+                    <p>设备列表暂不可用，请稍后重试。</p>
+                  )}
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={action.busy}
+                    onClick={() => setDeviceOptions(null)}
+                  >
+                    返回重新输入
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  busy={action.busy}
+                  busyTarget={action.control}
+                  disabled={
+                    action.busy ||
+                    ((mode === "verify" || mode === "reset") && !token)
+                  }
+                >
+                  {action.busy
+                    ? "正在提交…"
+                    : {
+                        login: "登录",
+                        register: "注册并申请验证邮件",
+                        forgot: "申请重置邮件",
+                        verify: changingEmail ? "确认换绑新邮箱" : "确认验证邮箱",
+                        reset: "设置新密码",
+                      }[mode]}
+                  <ArrowRight size={16} />
+                </Button>
+              )}
             </form>
           )}
           {verifyControls && (
@@ -904,11 +973,7 @@ function AccountContent() {
             }}
           >
             {(
-              [
-                ["orderCreated", "订单创建回执"],
-                ["orderStatusUpdated", "订单状态更新"],
-                ["referralReward", "邀请奖励通知"],
-              ] as const
+              [["referralReward", "邀请奖励到账通知"]] as const
             ).map(([key, label]) => (
               <label key={key} className="account-check">
                 <input
@@ -921,7 +986,7 @@ function AccountContent() {
                 {label}
               </label>
             ))}
-            <small>邮箱验证、密码找回等安全邮件不受订阅开关影响。</small>
+            <small>只有邀请奖励等运营邮件受此开关控制；付款成功、签收成功、账号安全与注销通知属于事务性邮件，会直接发送，不受开关影响。</small>
             <Button
               busy={action.busy}
               busyTarget={action.control}

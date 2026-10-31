@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from lxml import etree
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,6 +88,7 @@ KIND_BY_EXTENSION = {
     '.webp': 'WEBP',
     '.heic': 'HEIC',
     '.heif': 'HEIC',
+    '.svg': 'SVG',
 }
 
 KIND_MIME = {
@@ -101,6 +103,7 @@ KIND_MIME = {
     'PNG': 'image/png',
     'WEBP': 'image/webp',
     'HEIC': 'image/heic',
+    'SVG': 'image/svg+xml',
 }
 
 MIME_KINDS = {
@@ -117,10 +120,11 @@ MIME_KINDS = {
     'image/webp': 'WEBP',
     'image/heic': 'HEIC',
     'image/heif': 'HEIC',
+    'image/svg+xml': 'SVG',
 }
 
 OFFICE_KINDS = frozenset({'DOC', 'DOCX', 'PPT', 'PPTX', 'XLS', 'XLSX'})
-IMAGE_KINDS = frozenset({'JPEG', 'PNG', 'WEBP', 'HEIC'})
+IMAGE_KINDS = frozenset({'JPEG', 'PNG', 'WEBP', 'HEIC', 'SVG'})
 OOXML_KIND_PARTS = {
     'DOCX': 'word/document.xml',
     'XLSX': 'xl/workbook.xml',
@@ -172,6 +176,9 @@ def _sha256_stream(handle) -> str:
 
 
 def signature_kind(head: bytes) -> str | None:
+    probe = head.lstrip(b'\xef\xbb\xbf \t\r\n')
+    if probe.startswith(b'<svg') or (probe.startswith(b'<?xml') and b'<svg' in head[:4096].lower()):
+        return 'SVG'
     if b'%PDF-' in head[:1024]:
         return 'PDF'
     if head.startswith(b'\xff\xd8\xff'):
@@ -344,6 +351,8 @@ def inspect_upload(path: str | Path, filename: str, declared_mime: str = '') -> 
     _assert_mime(kind, declared_mime)
     if kind == 'PDF':
         validate_pdf(path, max_pages=100_000)
+    elif kind == 'SVG':
+        validate_svg(path)
     elif kind in IMAGE_KINDS:
         validate_image(path, kind)
     return MediaInfo(kind=kind, mime=KIND_MIME[kind], size=size, sha256=sha256_file(path))
@@ -390,7 +399,78 @@ def _pdf_has_active_content(document) -> bool:
     return False
 
 
+_SVG_DENIED_TAGS = frozenset({
+    'script', 'foreignobject', 'iframe', 'object', 'embed', 'audio', 'video', 'canvas',
+    'animate', 'set', 'animatetransform', 'animatemotion', 'handler',
+})
+_SVG_UNSAFE_CSS = re.compile(r'url\s*\(|@import|expression\s*\(|javascript:|behavior:|-moz-binding', re.I)
+
+
+def _svg_pixels(value: str | None) -> int:
+    if not value:
+        return 0
+    match = re.match(r'\s*([0-9]+(?:\.[0-9]+)?)', value)
+    return int(float(match.group(1))) if match else 0
+
+
+def validate_svg(path: str | Path) -> ImageProbe:
+    """Validate and rewrite an SVG to a safe, script-free subset.
+
+    SVGs are served inline from the application origin, so any script, event
+    handler, external reference or remote resource is rejected outright rather
+    than stripped. The on-disk file is replaced with the serialized safe tree so
+    the stored asset itself is what gets served.
+    """
+    path = Path(path)
+    raw = path.read_bytes()
+    if len(raw) > 2 * 1024 * 1024:
+        raise EngineError('SVG_TOO_LARGE', 'SVG 文件不能超过 2 MB', retryable=False)
+    lowered = raw[:16384].lower()
+    if b'<!doctype' in lowered or b'<!entity' in lowered:
+        raise EngineError('SVG_UNSAFE', 'SVG 不允许包含 DOCTYPE 或实体声明', retryable=False)
+    parser = etree.XMLParser(
+        resolve_entities=False, no_network=True, load_dtd=False,
+        recover=False, huge_tree=False,
+    )
+    try:
+        root = etree.fromstring(raw, parser)
+    except etree.XMLSyntaxError as error:
+        raise EngineError('SVG_UNDECODABLE', 'SVG 文件损坏或无法解析', retryable=False) from error
+    if etree.QName(root).localname.lower() != 'svg':
+        raise EngineError('MIME_MISMATCH', '文件内容不是有效的 SVG', retryable=False)
+    for node in root.iter():
+        if not isinstance(node.tag, str):
+            continue
+        tag = etree.QName(node).localname.lower()
+        if tag in _SVG_DENIED_TAGS:
+            raise EngineError('SVG_UNSAFE', f'SVG 包含不允许的 <{tag}> 元素', retryable=False)
+        if tag == 'style' and node.text and _SVG_UNSAFE_CSS.search(node.text):
+            raise EngineError('SVG_UNSAFE', 'SVG 样式包含外部资源或脚本', retryable=False)
+        for name, value in node.attrib.items():
+            local = etree.QName(name).localname.lower()
+            if local.startswith('on'):
+                raise EngineError('SVG_UNSAFE', 'SVG 不允许事件属性', retryable=False)
+            if local in ('href', 'src') and value.strip() and not value.strip().startswith('#'):
+                raise EngineError('SVG_UNSAFE', 'SVG 不允许引用外部资源', retryable=False)
+            if local == 'style' and _SVG_UNSAFE_CSS.search(value):
+                raise EngineError('SVG_UNSAFE', 'SVG 样式包含外部资源或脚本', retryable=False)
+    width = _svg_pixels(root.get('width'))
+    height = _svg_pixels(root.get('height'))
+    if (not width or not height) and root.get('viewBox'):
+        parts = re.split(r'[\s,]+', root.get('viewBox').strip())
+        if len(parts) == 4:
+            width = width or int(float(parts[2]))
+            height = height or int(float(parts[3]))
+    if width <= 0 or height <= 0:
+        raise EngineError('SVG_UNDECODABLE', 'SVG 缺少有效的宽高或 viewBox', retryable=False)
+    safe = etree.tostring(root, xml_declaration=True, encoding='utf-8')
+    path.write_bytes(safe)
+    return ImageProbe(width=width, height=height, mode='', format='SVG', exif_orientation=None, frames=1)
+
+
 def validate_image(path: str | Path, kind: str | None = None, max_pixels: int | None = None) -> ImageProbe:
+    if kind == 'SVG':
+        return validate_svg(path)
     try:
         with Image.open(path) as image:
             image_format = (image.format or '').upper()

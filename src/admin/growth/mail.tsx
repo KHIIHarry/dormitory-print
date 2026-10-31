@@ -145,7 +145,7 @@ function MailSettingsForm() {
       <SubmitState state={submit} />
       {draft && resource.data && (!resource.error || resource.hasData) && (
         <>
-          <Panel title={`SMTP 配置 · 版本 ${draft.version}`}>
+          <Panel title="SMTP 配置">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -472,7 +472,7 @@ export function MailTemplatesPage() {
                 <tr>
                   <th>模板</th>
                   <th>状态</th>
-                  <th>版本 / 最后修改</th>
+                  <th>最后修改</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -491,7 +491,7 @@ export function MailTemplatesPage() {
                           : "已停用"}
                     </td>
                     <td>
-                      v{t.version} · {t.updatedBy}
+                      {t.updatedBy}
                       <small>{localDate(t.updatedAt)}</small>
                     </td>
                     <td>
@@ -548,8 +548,7 @@ export function MailTemplatesPage() {
           >
             <SubmitState state={submit} />
             <p>
-              版本 {draft.version} · {selected.updatedBy} ·{" "}
-              {localDate(selected.updatedAt)}
+              最后修改：{selected.updatedBy} · {localDate(selected.updatedAt)}
             </p>
             <Field label="主题">
               <input
@@ -629,7 +628,7 @@ export function MailTemplatesPage() {
             </Notice>
             <div className="button-row">
               <Button type="submit" disabled={disabled}>
-                保存版本
+                保存修改
               </Button>
               <Button
                 type="button"
@@ -720,7 +719,7 @@ export function MailTemplatesPage() {
       )}
       {confirm && draft && (
         <ConfirmAction
-          title={confirm === "save" ? "保存模板新版本" : "恢复官方默认模板"}
+          title={confirm === "save" ? "保存模板修改" : "恢复官方默认模板"}
           pending={submit.pending}
           error={submit.error}
           onClose={() => setConfirm(null)}
@@ -744,7 +743,7 @@ export function MailTemplatesPage() {
             return result.ok;
           }}
         >
-          此次操作将生成新的模板版本；已经排队的邮件继续使用其发送快照。
+          此次操作会更新模板内容；已经排队的邮件继续使用其发送快照。
         </ConfirmAction>
       )}
     </div>

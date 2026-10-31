@@ -27,7 +27,7 @@ type Identity = {
   setOrderAccess: (access: OrderAccess | null) => void;
   refreshCustomer: () => Promise<void>;
   refreshStaff: () => Promise<void>;
-  loginCustomer: (email: string, password: string) => Promise<boolean>;
+  loginCustomer: (email: string, password: string, replaceSessionId?: string) => Promise<boolean>;
   logoutCustomer: () => Promise<void>;
   clearCustomer: () => void;
   demoCustomer: () => Promise<void>;
@@ -110,12 +110,20 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     invalidate();
     setStaffState(next);
   };
-  const loginCustomer = async (email: string, password: string) => {
+  const loginCustomer = async (
+    email: string,
+    password: string,
+    replaceSessionId?: string,
+  ) => {
     const result = await growthRequest<{ recovered?: boolean }>(
       "/customer/auth/login",
       {
         method: "POST",
-        body: { email, password },
+        body: {
+          email,
+          password,
+          ...(replaceSessionId ? { replaceSessionId } : {}),
+        },
       },
     );
     invalidate();
