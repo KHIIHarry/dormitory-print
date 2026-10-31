@@ -6478,6 +6478,24 @@
         "title": "Envelope[MailConnectionResult]",
         "type": "object"
       },
+      "Envelope_MailOutboxStatus_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MailOutboxStatus"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[MailOutboxStatus]",
+        "type": "object"
+      },
       "Envelope_MailQueuedResult_": {
         "additionalProperties": false,
         "properties": {
@@ -8735,6 +8753,57 @@
           "message"
         ],
         "title": "MailConnectionResult",
+        "type": "object"
+      },
+      "MailOutboxStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptedat"
+          },
+          "attempts": {
+            "default": 0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "emailJobId": {
+            "title": "Emailjobid",
+            "type": "string"
+          },
+          "errorClass": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorclass"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "emailJobId",
+          "status"
+        ],
+        "title": "MailOutboxStatus",
         "type": "object"
       },
       "MailQueuedResult": {
@@ -21906,6 +21975,55 @@
           }
         },
         "summary": "Admin Export Download"
+      }
+    },
+    "/admin/mail/outbox/{job_id}": {
+      "get": {
+        "operationId": "mail_outbox_status_api_v1_admin_mail_outbox__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_MailOutboxStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Mail Outbox Status"
       }
     },
     "/admin/mail/templates": {

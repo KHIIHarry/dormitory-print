@@ -574,6 +574,35 @@ def test_test_send_without_config_is_unavailable_not_fake_success(admin_client, 
     assert response.json()['error']['code'] == 'EMAIL_SERVICE_UNAVAILABLE'
 
 
+def test_template_test_send_keeps_critical_flag_and_exposes_outbox_status(
+        admin_client, api, db, smtp_server, settings_allow_local):
+    state, port = smtp_server
+    seed_mail_config(db, port)
+    db.commit()
+    before = api(admin_client, '/admin/mail/templates/ADMIN_ORDER_CREATED',
+                 method='GET').json()['data']
+    assert before['critical'] is False
+
+    response = api(admin_client,
+                   '/admin/mail/templates/ADMIN_ORDER_CREATED/test-send',
+                   {'to': 'admin@example.invalid'})
+    assert response.status_code == 200, response.text
+    job_id = response.json()['data']['emailJobId']
+
+    after = api(admin_client, '/admin/mail/templates/ADMIN_ORDER_CREATED',
+                method='GET').json()['data']
+    assert after['critical'] is False
+    assert after['enabled'] == before['enabled']
+    assert after['version'] == before['version']
+
+    status = api(admin_client, f'/admin/mail/outbox/{job_id}', method='GET')
+    assert status.status_code == 200, status.text
+    data = status.json()['data']
+    assert data['status'] == 'QUEUED'
+    assert data['attempts'] == 0
+    assert 'worker' in data['message']
+
+
 def test_connection_route_blocks_ssrf_target_and_does_not_leak_secret(
         admin_client, db, api):
     from app.mail import update_mail_config

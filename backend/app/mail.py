@@ -38,7 +38,7 @@ from .core import (
 from .db import get_db
 from .mail_html import template_html
 from .mail_schemas import (
-    MailConfigDTO, MailConfigInput, MailConnectionResult, MailQueuedResult,
+    MailConfigDTO, MailConfigInput, MailConnectionResult, MailOutboxStatus, MailQueuedResult,
     MailConfigClear, MailConfigUpdate, MailReasonInput, MailTemplateDTO,
     MailTestResult, TemplateInput, TemplateList, TemplatePreview,
     TemplatePreviewInput, TestMailInput,
@@ -1224,14 +1224,43 @@ def test_send_template(key: str, payload: TestMailInput, db=Depends(get_db),
     if not mail_available(db):
         raise DomainError('EMAIL_SERVICE_UNAVAILABLE', '邮件服务未就绪，无法测试发送', 503)
     row = ensure_template(db, key)
-    variables = {item: SAMPLE_VARIABLES.get(item, '') for item in _template_data(row).get('variables', [])
-                 if (item['key'] if isinstance(item, dict) else item) in SAMPLE_VARIABLES}
+    variables = {name: SAMPLE_VARIABLES[name]
+                 for name in _variables_for(_template_data(row))
+                 if name in SAMPLE_VARIABLES}
     job = enqueue_email(db, row.key, payload.to, variables,
                         business_key='mail-template-test:' + row.key + ':' + str(uuid4()))
     audit(db, actor, 'MAIL_TEMPLATE_TEST_SEND', 'MAIL_TEMPLATE', row.key,
           data={'emailJobId': job.id})
     return ok({'emailJobId': job.id, 'status': 'QUEUED', 'deliveryStatus': 'UNKNOWN',
                'message': '测试邮件已入队；SMTP 服务器接受不代表已送达收件箱'})
+
+
+@router.get('/admin/mail/outbox/{job_id}', response_model=Envelope[MailOutboxStatus])
+def mail_outbox_status(job_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'mail.manage')
+    job = db.get(EmailJob, job_id)
+    if job is None:
+        raise DomainError('NOT_FOUND', '邮件作业不存在', 404)
+    data = dict(job.data or {})
+    status = str(job.status or 'QUEUED')
+    if status == 'SMTP_ACCEPTED':
+        message = 'SMTP 服务器已接受，不代表已送达收件箱'
+    elif status == 'FAILED':
+        message = '发送失败，请按错误类别检查 SMTP 配置或收件地址'
+    elif status in ('RETRY', 'RETRY_PENDING'):
+        message = '发送失败，后台将按退避策略重试'
+    elif status == 'EXPIRED':
+        message = '邮件载荷已过期，未发送'
+    else:
+        message = '等待后台 worker 处理；请确认 Celery worker 正在运行'
+    return ok(MailOutboxStatus(
+        email_job_id=job.id,
+        status=status,
+        attempts=int(job.attempts or 0),
+        error_class=data.get('lastErrorClass'),
+        accepted_at=data.get('smtpAcceptedAt'),
+        message=message,
+    ))
 
 
 @router.post('/admin/mail/templates/{key}/restore-default',

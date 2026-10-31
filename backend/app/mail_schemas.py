@@ -168,3 +168,12 @@ class MailConnectionResult(DTO):
     tested_at: datetime
     message: str
     error_class: str | None = None
+
+
+class MailOutboxStatus(DTO):
+    email_job_id: str
+    status: str
+    attempts: int = 0
+    error_class: str | None = None
+    accepted_at: str | None = None
+    message: str = ''

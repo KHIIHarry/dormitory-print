@@ -1,5 +1,12 @@
 import { PencilLine } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type FormEvent,
+  type SetStateAction,
+} from "react";
 import {
   Button,
   Field,
@@ -34,7 +41,42 @@ type MailTest = {
   message?: string;
   code?: string;
   emailJobId?: string;
+  attempts?: number;
+  errorClass?: string | null;
+  acceptedAt?: string | null;
 };
+function useMailTestPolling(
+  test: MailTest | null,
+  setTest: Dispatch<SetStateAction<MailTest | null>>,
+) {
+  const jobId = test?.emailJobId;
+  const status = test?.status;
+  useEffect(() => {
+    if (!jobId || ["SMTP_ACCEPTED", "FAILED", "EXPIRED", "CANCELLED"].includes(status ?? "")) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const payload = await mutate<MailTest>(
+          `/admin/mail/outbox/${encodeURIComponent(jobId)}`,
+          undefined,
+          "GET",
+        );
+        if (cancelled) return;
+        setTest((current) =>
+          current?.emailJobId === jobId ? { ...current, ...payload } : current,
+        );
+      } catch {
+        // Keep the last known state; the next poll or the submit error explains it.
+      }
+    };
+    void tick();
+    const timer = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [jobId, status, setTest]);
+}
 export function MailSettingsPage() {
   const { generation } = useIdentity();
   return <MailSettingsForm key={generation} />;
@@ -51,6 +93,7 @@ function MailSettingsForm() {
     [confirm, setConfirm] = useState<"save" | "clear" | null>(null),
     [testAddress, setTestAddress] = useState(""),
     [test, setTest] = useState<MailTest | null>(null);
+  useMailTestPolling(test, setTest);
   const edited = useRef(false);
   useEffect(() => {
     // Foreground refresh updates the resource, but must not replace an edit.
@@ -305,6 +348,15 @@ function MailSettingsForm() {
                       draft.lastTest?.message ||
                       ""}
                   </p>
+                  {test?.errorClass && (
+                    <p>错误类别：{test.errorClass}</p>
+                  )}
+                  {typeof test?.attempts === "number" && test.attempts > 0 && (
+                    <p>已尝试 {test.attempts} 次</p>
+                  )}
+                  {test?.status === "QUEUED" && (
+                    <p>若长时间停留在“已入队”，请确认 Celery worker 正在运行。</p>
+                  )}
                   {test?.emailJobId && (
                     <small>作业编号：{test.emailJobId}</small>
                   )}
@@ -370,6 +422,7 @@ export function MailTemplatesPage() {
     [target, setTarget] = useState<"subject" | "textBody" | "htmlBody">(
       "textBody",
     );
+  useMailTestPolling(test, setTest);
   const open = async (t: MailTemplate) => {
     const result = await submit.run(() =>
       mutate<MailTemplate>(
@@ -385,6 +438,12 @@ export function MailTemplatesPage() {
       setPreview(null);
     }
   };
+  const targetLabel =
+    target === "subject"
+      ? "主题"
+      : target === "htmlBody"
+        ? "HTML 正文"
+        : "纯文本正文";
   const body = () =>
     draft
       ? {
@@ -523,26 +582,29 @@ export function MailTemplatesPage() {
                 }
               />
             </Field>
-            <Field
-              label={`插入白名单变量到${target === "subject" ? "主题" : target === "htmlBody" ? " HTML 正文" : "纯文本正文"}`}
-            >
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value)
-                    setDraft({
-                      ...draft,
-                      [target]: draft[target] + `{{${e.target.value}}}`,
-                    });
-                }}
-              >
-                <option value="">选择变量</option>
+            <Field label={`可用变量（点击插入到${targetLabel}）`}>
+              <div className="growth-variable-list">
                 {draft.variables.map((v) => (
-                  <option key={v.key} value={v.key}>
-                    {v.key} — {v.description}
-                  </option>
+                  <button
+                    type="button"
+                    key={v.key}
+                    className="growth-variable"
+                    title={`插入 {{${v.key}}}`}
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        [target]: draft[target] + `{{${v.key}}}`,
+                      })
+                    }
+                  >
+                    <code>{`{{${v.key}}}`}</code>
+                    <span>{v.description}</span>
+                  </button>
                 ))}
-              </select>
+              </div>
+              <p className="form-hint">
+                这里只显示该模板允许的变量；点击插入到当前字段。模板引用列表外的变量会被后端拒绝。
+              </p>
             </Field>
             <label className="growth-check">
               <input
@@ -557,6 +619,11 @@ export function MailTemplatesPage() {
                 ? "关键安全模板必须启用"
                 : "启用业务提醒（仍需用户订阅）"}
             </label>
+            {draft.critical && (
+              <p className="form-hint">
+                关键安全邮件是系统固定属性；发送测试邮件不会改变它。
+              </p>
+            )}
             <Notice>
               预览由后端校验和渲染；模板不支持任意表达式，测试不会生成可操作的真实凭证。
             </Notice>
@@ -619,8 +686,15 @@ export function MailTemplatesPage() {
             </div>
             {test && (
               <Notice>
-                {mailStatus(test.status)}
+                <strong>{mailStatus(test.status)}</strong>
                 {test.message && <p>{test.message}</p>}
+                {typeof test.attempts === "number" && test.attempts > 0 && (
+                  <p>已尝试 {test.attempts} 次</p>
+                )}
+                {test.errorClass && <p>错误类别：{test.errorClass}</p>}
+                {test.status === "QUEUED" && (
+                  <p>若长时间停留在“已入队”，请确认 Celery worker 正在运行。</p>
+                )}
                 {test.emailJobId && ` · 作业 ${test.emailJobId}`}
               </Notice>
             )}
