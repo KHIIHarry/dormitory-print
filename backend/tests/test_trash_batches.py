@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core import Actor, actor_dep, utcnow
-from app.delivery_schemas import to_shanghai_date, to_shanghai_window
+from app.delivery_schemas import to_shanghai_date
 from app.models import (
     DeliveryAssignment, DeliveryBatch, Order, TrashEntry, WageEntry,
 )
@@ -37,8 +37,8 @@ def create_batch(api, client, courier):
     ends_at = starts_at + timedelta(hours=3)
     response = api(client, '/admin/batches', {
         'name': f'回收站批次 {uuid4().hex[:6]}',
-        'date': to_shanghai_date(starts_at),
-        'time': to_shanghai_window(starts_at, ends_at),
+        'startsAt': starts_at.isoformat(),
+        'endsAt': ends_at.isoformat(),
         'courierId': courier.id,
         'reason': '',
     })
@@ -269,3 +269,42 @@ def test_unpacked_order_still_blocked_by_packing(db, api, client, act_as, staff_
     })
     assert response.status_code == 409, response.text
     assert 'PACKING_NOT_COMPLETED' in response.json()['error']['details']['blockers']
+
+
+def test_delete_batch_when_member_order_was_already_deleted(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    order = make_ready_order(db)
+    starts_at = utcnow() + timedelta(days=1)
+    created = api(client, '/admin/batches', {
+        'name': f'订单删除批次 {uuid4().hex[:6]}',
+        'date': to_shanghai_date(starts_at),
+        'time': '10:00 – 12:00',
+        'courierId': courier.id,
+        'reason': '',
+    })
+    assert created.status_code == 200, created.text
+    batch = created.json()['data']
+    attach_order(api, client, batch, order)
+    complete_batch(db, batch['id'])
+    order = db.get(Order, order.id)
+    order.deleted_at = utcnow()
+    db.commit()
+
+    stored = db.get(DeliveryBatch, batch['id'])
+    preview = api(client, '/admin/batch-operations/preview', {
+        'action': 'DELETE', 'orderIds': [], 'sourceBatchIds': [batch['id']],
+        'versions': {batch['id']: stored.version},
+        'payload': {'reason': '订单已删除'}})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()['data']['blockers'] == [], preview.json()['data']['blockers']
+    committed = api(client, '/admin/batch-operations/commit',
+                    {'planId': preview.json()['data']['planId']})
+    assert committed.status_code == 200, committed.text
+    db.expire_all()
+    assert db.get(DeliveryBatch, batch['id']).deleted_at is not None
+    assert trash_entry(db, batch['id']) is not None
+    listed = api(client, '/admin/batches', None, method='GET')
+    assert listed.status_code == 200, listed.text
+    assert all(item['id'] != batch['id'] for item in listed.json()['data']['items'])

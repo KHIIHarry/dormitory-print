@@ -1238,14 +1238,17 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
             blockers.append(_blocker('VERSION_CONFLICT', '目标批次数据已变化', target_batch.id))
     order_ids = _operation_order_ids(db, payload)
     orders = {}
+    action = payload.action
     for order_id in order_ids:
         order = db.get(Order, order_id)
         if order is None or order.deleted_at:
-            blockers.append(_blocker('ORDER_NOT_FOUND', '订单不存在或已删除', order_id))
+            # Deleting or cancelling a batch only releases its assignments; a
+            # member order that was already removed must not strand the batch.
+            if action not in ('DELETE', 'CANCEL'):
+                blockers.append(_blocker('ORDER_NOT_FOUND', '订单不存在或已删除', order_id))
         else:
             orders[order_id] = order
 
-    action = payload.action
     if action in ('ADD',):
         if not target_batch and len(source_batches) == 1:
             target_batch = source_batches[0]
