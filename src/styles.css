@@ -1709,7 +1709,7 @@ input[type="date"],
 }
 .settings-layout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) 270px;
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: 21px;
   align-items: start;
 }
@@ -2041,9 +2041,6 @@ input[type="date"],
   color: #978674;
 }
 .preview-pager > span {
-  font-size: 10px;
-}
-.preview-aside > .notice {
   font-size: 10px;
 }
 .pdf-full {
@@ -4972,7 +4969,7 @@ td > .numeric {
     grid-template-columns: 1fr;
   }
   .settings-layout {
-    grid-template-columns: 170px minmax(0, 1fr) 230px;
+    grid-template-columns: 170px minmax(0, 1fr);
     gap: 16px;
   }
   .settings-main .form-grid {
@@ -5092,10 +5089,6 @@ td > .numeric {
   .settings-layout {
     grid-template-columns: 160px minmax(0, 1fr);
     gap: 20px;
-  }
-  .preview-aside {
-    grid-column: 1/-1;
-    display: none;
   }
   .checkout-layout {
     grid-template-columns: minmax(0, 1fr) 280px;
@@ -5946,19 +5939,6 @@ td > .numeric {
     gap: 7px;
     padding: 11px;
     font-size: 10px;
-  }
-  .preview-aside {
-    display: block;
-    width: 100%;
-  }
-  .preview-aside .document-preview {
-    max-width: 100%;
-  }
-  .preview-aside .preview-canvas {
-    padding: 20px 50px;
-  }
-  .preview-aside .sample-paper {
-    max-width: 250px;
   }
   .photo-layout {
     grid-template-columns: 1fr;

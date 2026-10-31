@@ -1,5 +1,5 @@
 import { PencilLine } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Button,
   Field,
@@ -9,6 +9,7 @@ import {
   Panel,
 } from "../../components/ui";
 import { useGrowthResource } from "../../growth/client";
+import { useIdentity } from "../../growth/identity";
 import type { MailConfig, MailTemplate } from "../../growth/types";
 import {
   AccessState,
@@ -35,6 +36,10 @@ type MailTest = {
   emailJobId?: string;
 };
 export function MailSettingsPage() {
+  const { generation } = useIdentity();
+  return <MailSettingsForm key={generation} />;
+}
+function MailSettingsForm() {
   const access = useAdminAccess("mail.manage"),
     resource = useGrowthResource<MailConfig>("/admin/config/mail"),
     submit = useSubmit();
@@ -46,14 +51,28 @@ export function MailSettingsPage() {
     [confirm, setConfirm] = useState<"save" | "clear" | null>(null),
     [testAddress, setTestAddress] = useState(""),
     [test, setTest] = useState<MailTest | null>(null);
+  const edited = useRef(false);
   useEffect(() => {
-    if (resource.data) {
-      setDraft({ ...resource.data });
-      setSecret("");
+    // Foreground refresh updates the resource, but must not replace an edit.
+    // Keep its original version so concurrent server changes still return 409.
+    if (resource.data && !edited.current) {
+      const received = resource.data;
+      setDraft((current) =>
+        current && current.version > received.version ? current : { ...received },
+      );
     }
   }, [resource.data]);
-  const patch = (value: Partial<MailConfig>) =>
+  const patch = (value: Partial<MailConfig>) => {
+    edited.current = true;
     setDraft((d) => (d ? { ...d, ...value } : d));
+  };
+  const discardAndReload = () => {
+    edited.current = false;
+    setSecret("");
+    setDraft(resource.data ? { ...resource.data } : null);
+    submit.setError("");
+    void resource.reload();
+  };
   const testMail = async (kind: "test-connection" | "test-send") => {
     if (!draft) return;
     setMailTask(kind);
@@ -169,7 +188,10 @@ export function MailSettingsPage() {
                   <input
                     type="password"
                     value={secret}
-                    onChange={(e) => setSecret(e.target.value)}
+                    onChange={(e) => {
+                      edited.current = true;
+                      setSecret(e.target.value);
+                    }}
                     autoComplete="new-password"
                   />
                 </Field>
@@ -207,6 +229,19 @@ export function MailSettingsPage() {
               <div className="button-row">
                 <Button type="submit" disabled={disabled}>
                   保存设置
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    submit.pending ||
+                    resource.loading ||
+                    resource.refreshing ||
+                    !submit.online
+                  }
+                  onClick={discardAndReload}
+                >
+                  放弃修改并重新加载
                 </Button>
                 <Button
                   type="button"
@@ -288,7 +323,7 @@ export function MailSettingsPage() {
           onConfirm={async (reason) => {
             const result = await submit.run(
               () =>
-                mutate(
+                mutate<MailConfig>(
                   "/admin/config/mail",
                   buildMailPatch(draft, secret, reason, confirm === "clear"),
                   "PATCH",
@@ -296,8 +331,10 @@ export function MailSettingsPage() {
               "邮件配置已保存",
             );
             if (result.ok) {
+              edited.current = false;
+              setDraft({ ...result.data });
               setSecret("");
-              resource.reload();
+              void resource.reload();
             }
             return result.ok;
           }}
