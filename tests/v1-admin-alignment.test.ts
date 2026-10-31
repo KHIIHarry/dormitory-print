@@ -8,6 +8,7 @@ import {
   afterSaleActionPayload,
   afterSaleReviewPayload,
   afterSaleStatusLabel,
+  configSectionPayload,
   mergeConfigSection,
   receiptRefundPayload,
   receiptRefundTotals,
@@ -401,6 +402,27 @@ describe("后台 V1 实接口对齐", () => {
     expect(services.maxFiles).toBe(20);
     expect(services.prices).toEqual(config.prices);
     expect(config.prices).toEqual({ bwSingle: 20, bwDuplex: 30 });
+  });
+
+  it("照片分区补丁同时携带 A4 最小留白与服务端版本", () => {
+    const photo = configSectionPayload(
+      "photo",
+      {
+        ...config,
+        photoWidthMm: 127,
+        photoHeightMm: 89,
+        margins: { top: 3, right: 3, bottom: 3, left: 3 },
+        a4Margins: { top: 4, right: 5, bottom: 6, left: 7 },
+      } as unknown as AdminConfig,
+      9,
+    );
+    expect(photo).toEqual({
+      expectedVersion: 9,
+      photoWidthMm: 127,
+      photoHeightMm: 89,
+      margins: { top: 3, right: 3, bottom: 3, left: 3 },
+      a4Margins: { top: 4, right: 5, bottom: 6, left: 7 },
+    });
   });
 
   it("版本表与状态文案使用后端真实状态", () => {

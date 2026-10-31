@@ -269,6 +269,9 @@
       "AdminConfigView": {
         "additionalProperties": false,
         "properties": {
+          "a4Margins": {
+            "$ref": "#/components/schemas/Margins"
+          },
           "announcement": {
             "title": "Announcement",
             "type": "string"
@@ -473,6 +476,7 @@
           "photoWidthMm",
           "photoHeightMm",
           "margins",
+          "a4Margins",
           "wechat",
           "phone",
           "qrUrl",
@@ -10283,6 +10287,16 @@
       "PhotoConfigView": {
         "additionalProperties": false,
         "properties": {
+          "a4Margins": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Margins"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "margins": {
             "anyOf": [
               {
@@ -10408,6 +10422,16 @@
       "PhotoPatch": {
         "additionalProperties": false,
         "properties": {
+          "a4Margins": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Margins"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expectedVersion": {
             "title": "Expectedversion",
             "type": "integer"
@@ -12303,6 +12327,9 @@
       "PublicConfigView": {
         "additionalProperties": false,
         "properties": {
+          "a4Margins": {
+            "$ref": "#/components/schemas/Margins"
+          },
           "announcement": {
             "title": "Announcement",
             "type": "string"
@@ -12497,6 +12524,7 @@
           "photoWidthMm",
           "photoHeightMm",
           "margins",
+          "a4Margins",
           "wechat",
           "phone",
           "qrUrl",

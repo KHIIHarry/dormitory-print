@@ -470,7 +470,7 @@ function SettingsForm() {
   const tabs: [ConfigSectionName | "decisions", string][] = [
     ["prices", "打印价目"],
     ["services", "服务与限制"],
-    ["photo", "照片校准"],
+    ["photo", "打印文件校准"],
     ["contact", "微信与联系"],
     ["announcement", "公告与营业"],
     ["workflow", "工作流与暂停"],
@@ -486,6 +486,26 @@ function SettingsForm() {
     ["corner", "左上角单钉（每册）"],
     ["side", "左侧双钉（每册）"],
   ] as const;
+  const marginInputs = (
+    value: Config["margins"] | undefined,
+    onChange: (next: Config["margins"]) => void,
+  ) =>
+    (["top", "right", "bottom", "left"] as const).map((key, i) => (
+      <Field key={key} label={`${["上", "右", "下", "左"][i]}留白（mm）`}>
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          value={value?.[key] ?? ""}
+          onChange={(e) =>
+            onChange({
+              ...(value || { top: 3, bottom: 3, left: 3, right: 3 }),
+              [key]: Math.max(0, Number(e.target.value)),
+            })
+          }
+        />
+      </Field>
+    ));
   const versionAvailable = !!versions[tab as ConfigSectionName]?.version;
   const sectionVersion = versions[tab as ConfigSectionName]?.version;
   const save = async () => {
@@ -835,7 +855,23 @@ function SettingsForm() {
           )}
           {tab === "photo" && (
             <>
-              <h2>5 寸照片校准</h2>
+              <h2>打印文件校准</h2>
+              <p className="muted">
+                按实际纸张和打印机的可打印范围校准，不提供无边距承诺。未保存真实校准值前请勿依赖默认留白。
+              </p>
+              <h3>A4 文件打印</h3>
+              <p className="muted">
+                A4 纸张固定为 210 × 297 mm。填写打印机无法打印的边缘宽度，文件内容会整体收进留白以内。
+              </p>
+              <div className="form-grid">
+                {marginInputs(config.a4Margins, (a4Margins) =>
+                  patch({ a4Margins }),
+                )}
+              </div>
+              <Notice>
+                A4 四边初始留白均为 3 mm，可分别调整；保存后仅影响新报价。
+              </Notice>
+              <h3>5 寸照片校准</h3>
               <p className="muted">
                 尺寸以实际纸张和打印机校准为准，不提供无边距承诺。未保存真实校准值前不要启用照片服务。
               </p>
@@ -860,27 +896,9 @@ function SettingsForm() {
                     }
                   />
                 </Field>
-                {(["top", "right", "bottom", "left"] as const).map((key, i) => (
-                  <Field
-                    key={key}
-                    label={`${["上", "右", "下", "左"][i]}留白（mm）`}
-                  >
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={config.margins?.[key] ?? ""}
-                      onChange={(e) =>
-                        patch({
-                          margins: {
-                            ...(config.margins || {}),
-                            [key]: Math.max(0, Number(e.target.value)),
-                          },
-                        })
-                      }
-                    />
-                  </Field>
-                ))}
+                {marginInputs(config.margins, (margins) =>
+                  patch({ margins }),
+                )}
               </div>
               <Notice>
                 四边初始留白均为 3 mm，可分别调整；保存后仅影响新报价。

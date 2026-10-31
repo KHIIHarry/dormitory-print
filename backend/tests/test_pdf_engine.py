@@ -165,6 +165,102 @@ def test_single_sided_and_segment_order(tmp_path):
         )
 
 
+def test_document_artifact_insets_content_by_configured_a4_margins(tmp_path):
+    from app.pdf_engine import (
+        A4_HEIGHT_PT,
+        A4_WIDTH_PT,
+        EngineError,
+        build_document_artifact,
+    )
+
+    mm = 72.0 / 25.4
+    source = _make_pdf(
+        tmp_path / 'edge.pdf', [(A4_WIDTH_PT, A4_HEIGHT_PT, 0)])
+    full = build_document_artifact(
+        source,
+        tmp_path / 'full-bleed.pdf',
+        segment_id='seg-full',
+        pages=[1],
+        sides='SINGLE',
+        copies=1,
+        color_mode='COLOR',
+        flip='NONE',
+    )
+    assert full.pages == 1
+    full_bbox = _render_bbox(tmp_path / 'full-bleed.pdf')
+    assert full_bbox is not None
+    assert full_bbox[0] <= 1 and full_bbox[1] <= 1
+
+    margins = {'top': 10, 'right': 10, 'bottom': 10, 'left': 10}
+    inset = build_document_artifact(
+        source,
+        tmp_path / 'inset.pdf',
+        segment_id='seg-inset',
+        pages=[1],
+        sides='SINGLE',
+        copies=1,
+        color_mode='COLOR',
+        flip='NONE',
+        margins_mm=margins,
+    )
+    assert inset.pages == 1
+    doc = pymupdf.open(tmp_path / 'inset.pdf')
+    assert doc[0].rect.width == pytest.approx(A4_WIDTH_PT, abs=0.5)
+    assert doc[0].rect.height == pytest.approx(A4_HEIGHT_PT, abs=0.5)
+    bbox = _render_bbox(tmp_path / 'inset.pdf')
+    assert bbox is not None
+    assert bbox[0] >= 10 * mm - 1
+    assert bbox[1] >= 10 * mm - 1
+    assert bbox[2] <= (210 - 10) * mm + 1
+    assert bbox[3] <= (297 - 10) * mm + 1
+    # Equal margins change the aspect ratio, so the page is width-limited and
+    # its full printable width is used.
+    assert bbox[2] - bbox[0] == pytest.approx(190 * mm, abs=1.5)
+
+    with pytest.raises(EngineError) as exc:
+        build_document_artifact(
+            source,
+            tmp_path / 'invalid-margins.pdf',
+            segment_id='seg-bad',
+            pages=[1],
+            sides='SINGLE',
+            copies=1,
+            color_mode='COLOR',
+            flip='NONE',
+            margins_mm={'top': 10, 'right': 10, 'bottom': 10, 'left': 200},
+        )
+    assert exc.value.code == 'PAPER_GEOMETRY_INVALID'
+
+
+def test_document_artifact_bakes_annotations_when_insetting(tmp_path):
+    from app.pdf_engine import A4_HEIGHT_PT, A4_WIDTH_PT, build_document_artifact
+
+    source = tmp_path / 'annotated.pdf'
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4_WIDTH_PT, height=A4_HEIGHT_PT)
+    page.insert_text((50, 50), 'body')
+    page.add_freetext_annot(pymupdf.Rect(100, 100, 300, 150), 'STAMP')
+    doc.save(source)
+    doc.close()
+
+    build_document_artifact(
+        source,
+        tmp_path / 'annotated-inset.pdf',
+        segment_id='seg-annot',
+        pages=[1],
+        sides='SINGLE',
+        copies=1,
+        color_mode='COLOR',
+        flip='NONE',
+        margins_mm={'top': 10, 'right': 10, 'bottom': 10, 'left': 10},
+    )
+
+    out = pymupdf.open(tmp_path / 'annotated-inset.pdf')
+    assert 'STAMP' in out[0].get_text()
+    assert list(out[0].annots()) == []
+    out.close()
+
+
 def test_page_allocation_requires_every_page_printed_or_excluded():
     from app.pdf_engine import EngineError, validate_page_allocation
 

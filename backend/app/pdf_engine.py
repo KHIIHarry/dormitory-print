@@ -1112,8 +1112,15 @@ def build_document_artifact(
     copies: int,
     color_mode: str = 'BW',
     flip: str = 'NONE',
+    margins_mm: Mapping[str, float] | None = None,
 ) -> ArtifactBuild:
-    """Generate one task's immutable multi-copy PDF and page/sheet map."""
+    """Generate one task's immutable multi-copy PDF and page/sheet map.
+
+    ``margins_mm`` is the operator-configured minimum printable margin for A4.
+    The normalized source is already A4, so content is scaled down just enough
+    to stay inside that printable rectangle; zero margins keep the historical
+    full-bleed insertion unchanged.
+    """
     if sides not in ('SINGLE', 'DUPLEX'):
         raise EngineError('ARTIFACT_INVALID', '单双面设置无效')
     if color_mode not in ('BW', 'COLOR'):
@@ -1127,7 +1134,34 @@ def build_document_artifact(
     if not isinstance(copies, int) or copies < 1 or copies > 999:
         raise EngineError('PAGE_RANGE_INVALID', '份数须在 1–999 之间')
 
+    margins = {}
+    for side in ('top', 'right', 'bottom', 'left'):
+        raw = 0 if margins_mm is None else margins_mm.get(side, 0)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise EngineError('PAPER_GEOMETRY_INVALID', 'A4 留白必须是数字') from None
+        if not math.isfinite(value) or value < 0:
+            raise EngineError('PAPER_GEOMETRY_INVALID', 'A4 留白必须是非负数')
+        margins[side] = value
+    printable = None
+    if any(margins.values()):
+        printable_width = A4_WIDTH_PT - (margins['left'] + margins['right']) * MM_TO_PT
+        printable_height = A4_HEIGHT_PT - (margins['top'] + margins['bottom']) * MM_TO_PT
+        if printable_width <= 0.5 or printable_height <= 0.5:
+            raise EngineError('PAPER_GEOMETRY_INVALID', 'A4 留白必须小于纸张尺寸')
+        printable = pymupdf.Rect(
+            margins['left'] * MM_TO_PT,
+            margins['top'] * MM_TO_PT,
+            A4_WIDTH_PT - margins['right'] * MM_TO_PT,
+            A4_HEIGHT_PT - margins['bottom'] * MM_TO_PT,
+        )
+
     source = pymupdf.open(normalized_pdf)
+    if printable is not None:
+        # show_pdf_page only copies page content. Bake annotations and form
+        # fields into content first so printable stamps are not dropped.
+        source.bake(annots=True, widgets=True)
     page_count = source.page_count
     for page in pages:
         if not isinstance(page, int) or page < 1 or page > page_count:
@@ -1140,7 +1174,12 @@ def build_document_artifact(
     try:
         for copy_index in range(1, copies + 1):
             for position, source_page in enumerate(pages):
-                output.insert_pdf(source, from_page=source_page - 1, to_page=source_page - 1, annots=True)
+                if printable is None:
+                    output.insert_pdf(source, from_page=source_page - 1, to_page=source_page - 1, annots=True)
+                else:
+                    output_page = output.new_page(width=A4_WIDTH_PT, height=A4_HEIGHT_PT)
+                    output_page.show_pdf_page(
+                        printable, source, source_page - 1, keep_proportion=True)
                 if sides == 'DUPLEX':
                     sheet_index = position // 2 + 1
                     side = 'FRONT' if position % 2 == 0 else 'BACK'

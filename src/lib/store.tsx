@@ -40,6 +40,7 @@ const emptyConfig: Config = {
   photoWidthMm: 127,
   photoHeightMm: 89,
   margins: { top: 3, bottom: 3, left: 3, right: 3 },
+  a4Margins: { top: 3, bottom: 3, left: 3, right: 3 },
   maxFiles: 0,
   maxMb: 0,
   bindingApproved: false,

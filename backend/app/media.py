@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import and_, func, or_, select
 
 from . import pdf_engine
-from .config import get_config
+from .config import DEFAULTS, get_config
 from .core import (
     Actor,
     DomainError,
@@ -172,6 +172,24 @@ def _preview_key(asset_id: str, sha: str) -> str:
 
 def _config(db, section: str) -> dict:
     return dict(get_config(db, section).data or {})
+
+
+def _a4_margins(db) -> dict[str, float]:
+    """Read the calibrated minimum A4 margins, defaulting for old rows."""
+    data = {**DEFAULTS['photo'], **_config(db, 'photo')}
+    raw = data.get('a4Margins') or DEFAULTS['photo']['a4Margins']
+    margins: dict[str, float] = {}
+    for side in ('top', 'right', 'bottom', 'left'):
+        try:
+            value = float(raw.get(side, 0))
+        except (AttributeError, TypeError, ValueError):
+            raise DomainError('A4_MARGIN_INVALID', 'A4 留白配置无效，请重新保存打印文件校准', 503) from None
+        if not math.isfinite(value) or value < 0:
+            raise DomainError('A4_MARGIN_INVALID', 'A4 留白配置无效，请重新保存打印文件校准', 503)
+        margins[side] = value
+    if margins['left'] + margins['right'] >= 210 or margins['top'] + margins['bottom'] >= 297:
+        raise DomainError('A4_MARGIN_INVALID', 'A4 留白必须小于纸张尺寸', 503)
+    return margins
 
 
 def _services(db) -> dict:
@@ -2583,6 +2601,7 @@ def _build_artifact_plan(db, preparation: Preparation, workdir: Path) -> list[di
     specs = (preparation.data or {}).get('files') or []
     plans: list[dict] = []
     sequence = 0
+    a4_margins = _a4_margins(db)
 
     def store(path: Path, settings_payload: dict, page_map, pages_count, sheets, blank_backs):
         sha = pdf_engine.sha256_file(path)
@@ -2621,6 +2640,7 @@ def _build_artifact_plan(db, preparation: Preparation, workdir: Path) -> list[di
                     copies=int(segment['copies']),
                     color_mode=segment['colorMode'],
                     flip=segment['flip'],
+                    margins_mm=a4_margins,
                 )
                 warnings: list[dict] = []
                 final_path = build.path
@@ -2641,7 +2661,9 @@ def _build_artifact_plan(db, preparation: Preparation, workdir: Path) -> list[di
                     blank_backs=build.blank_backs, copies=int(segment['copies']),
                     color_mode=segment['colorMode'], sides=segment['sides'],
                     flip=segment['flip'],
-                    extra={'warnings': warnings, 'rangeModel': segment['pages']},
+                    extra={'warnings': warnings, 'rangeModel': segment['pages'],
+                           'paperWidthMm': 210.0, 'paperHeightMm': 297.0,
+                           'marginsMm': a4_margins},
                 )
                 plan = store(final_path, payload, build.page_map, build.pages,
                              build.sheets, build.blank_backs)

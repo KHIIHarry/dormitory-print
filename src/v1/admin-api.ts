@@ -124,7 +124,7 @@ export function configSectionPayload(
   if (section === "photo") {
     return {
       expectedVersion,
-      ...present(config, ["photoWidthMm", "photoHeightMm", "margins"]),
+      ...present(config, ["photoWidthMm", "photoHeightMm", "margins", "a4Margins"]),
     };
   }
   if (section === "contact") {

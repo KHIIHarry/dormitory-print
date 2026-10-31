@@ -558,6 +558,19 @@ def test_preparation_generates_real_artifacts_quote_and_requote(client, db):
     color_document = pymupdf.open(stream=client.get(color['url']).content, filetype='pdf')
     assert 'Integration page 4' in color_document[0].get_text()
 
+    # A stored photo section written before A4 calibration existed still
+    # produces artifacts with the safe 3 mm default.
+    from sqlalchemy import select
+    stored = db.scalars(
+        select(Artifact).where(Artifact.preparation_id == prep_id)).all()
+    assert len(stored) == 2
+    for artifact in stored:
+        assert artifact.settings['marginsMm'] == {
+            'top': 3, 'right': 3, 'bottom': 3, 'left': 3,
+        }
+        assert artifact.settings['paperWidthMm'] == 210.0
+        assert artifact.settings['paperHeightMm'] == 297.0
+
     quote = view['quote']
     assert quote['subtotalCents'] == 8 * 4 + 20 * 4
     assert quote['totalCents'] == quote['subtotalCents'] - quote['discountCents']

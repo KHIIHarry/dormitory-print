@@ -16,7 +16,8 @@ DEFAULTS = {
         'maxPixels':40000000,'maxExpandedPages':10000,'maxFinalMb':500,'bindingApproved':True,
         'bindingLimits':{'CORNER':None,'SIDE':None},'formats':['pdf','doc','docx','ppt','pptx','xls','xlsx','jpg','jpeg','png','webp','heic'],
         'photoEnabled':False,'photoCalibrated':False},
-    'photo': {'photoWidthMm':127,'photoHeightMm':89,'margins':{'top':3,'bottom':3,'left':3,'right':3}},
+    'photo': {'photoWidthMm':127,'photoHeightMm':89,'margins':{'top':3,'bottom':3,'left':3,'right':3},
+        'a4Margins':{'top':3,'bottom':3,'left':3,'right':3}},
     'contact': {'wechat':'','phone':'','qrUrl':'','displayName':'DormPrint','guide':''},
     'announcement': {'announcement':'','serviceEnabled':False},
     'workflow': {'unpaidTimeoutMinutes':None,'quoteMinutes':15,'locationMaxAgeSeconds':300,'locationMaxAccuracyMeters':100,
@@ -45,15 +46,27 @@ def get_config(db, section):
     return row
 
 
+def section_data(section, row):
+    """Fill in defaults added after a section row was first written.
+
+    Sections are stored as JSON documents rather than per-field columns, so a
+    row saved before a new field existed does not contain that field. Merging
+    defaults keeps reads and patches forward compatible without a migration.
+    """
+    data = deepcopy(DEFAULTS[section])
+    data.update(row.data or {})
+    return data
+
+
 def public_config(db):
     sections = {name:get_config(db,name) for name in ('prices','services','photo','contact','announcement','workflow','map')}
     result = {}
     for name in ('services','photo','contact','announcement','map'):
-        result.update(sections[name].data)
-    result['prices'] = dict(sections['prices'].data or {})
+        result.update(section_data(name, sections[name]))
+    result['prices'] = section_data('prices', sections['prices'])
     result['versions'] = {name:row.version for name,row in sections.items()}
     result['version'] = max(row.version for row in sections.values())
-    workflow = sections['workflow'].data
+    workflow = section_data('workflow', sections['workflow'])
     result.update({'quoteMinutes':15,'unpaidTimeoutMinutes':workflow.get('unpaidTimeoutMinutes'),
                    'pauses':workflow.get('pauses',{}),'bindingApproved':True,
                    'locationMaxAgeSeconds':workflow.get('locationMaxAgeSeconds',300),
@@ -119,6 +132,7 @@ class PhotoPatch(DTO):
     photo_width_mm: float | None = Field(default=None,gt=0,le=500)
     photo_height_mm: float | None = Field(default=None,gt=0,le=500)
     margins: Margins | None = None
+    a4_margins: Margins | None = None
 
 
 class ContactPatch(DTO):
@@ -206,6 +220,7 @@ class PublicConfigView(DTO):
     photo_width_mm:float
     photo_height_mm:float
     margins:Margins
+    a4_margins:Margins
     wechat:str
     phone:str
     qr_url:str
@@ -267,7 +282,10 @@ def config_admin(db=Depends(get_db), actor:Actor=Depends(actor_dep)):
     require_admin(actor)
     result=public_config(db)
     if '*' in actor.capabilities or 'config.manage' in actor.capabilities:
-        result['sections']={name:{'version':get_config(db,name).version,**get_config(db,name).data} for name in PATCH_TYPES}
+        result['sections']={}
+        for name in PATCH_TYPES:
+            row=get_config(db,name)
+            result['sections'][name]={'version':row.version,**section_data(name,row)}
     return ok(result)
 
 
@@ -281,7 +299,7 @@ def config_patch(section:str, payload:dict, db=Depends(get_db), actor:Actor=Depe
     update=body.model_dump(by_alias=True,exclude_unset=True,exclude={'expected_version'})
     if section != 'prices':
         update={key:value for key,value in update.items() if value is not None}
-    data={**row.data,**update}
+    data={**section_data(section,row),**update}
     if section=='photo':
         m=data['margins']
         if m['left']+m['right'] >= data['photoWidthMm'] or m['top']+m['bottom'] >= data['photoHeightMm']:

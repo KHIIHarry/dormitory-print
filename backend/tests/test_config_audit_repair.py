@@ -216,3 +216,52 @@ def test_audit_actor_labels_resolve_account_principal_system_and_staff_prefix(
     assert items[unknown_row.id]['actorId'] == 'unknown-actor'
     assert items[unknown_row.id]['actorLabel'] == '未知操作人'
     assert items[unknown_row.id]['actorRole'] is None
+
+
+def test_photo_config_merges_and_persists_a4_margins(db, api, admin_client):
+    from app.config import get_config
+
+    # Simulate a row written before A4 calibration existed.
+    row = get_config(db, 'photo')
+    row.version = 11
+    row.data = {
+        'photoWidthMm': 127,
+        'photoHeightMm': 89,
+        'margins': {'top': 3, 'bottom': 3, 'left': 3, 'right': 3},
+    }
+    db.commit()
+
+    read = api(admin_client, '/admin/config', method='GET')
+    assert read.status_code == 200, read.text
+    data = read.json()['data']
+    assert data['a4Margins'] == {'top': 3, 'bottom': 3, 'left': 3, 'right': 3}
+    assert data['sections']['photo']['a4Margins'] == data['a4Margins']
+    assert data['sections']['photo']['version'] == 11
+
+    patched = api(admin_client, '/admin/config/photo', {
+        'expectedVersion': 11,
+        'a4Margins': {'top': 5, 'right': 6, 'bottom': 7, 'left': 8},
+    }, method='PATCH')
+    assert patched.status_code == 200, patched.text
+    body = patched.json()['data']
+    assert body['version'] == 12
+    assert body['a4Margins'] == {'top': 5, 'right': 6, 'bottom': 7, 'left': 8}
+    assert body['photoWidthMm'] == 127
+    db.refresh(row)
+    assert row.data['a4Margins'] == {'top': 5, 'right': 6, 'bottom': 7, 'left': 8}
+
+    # A later photo patch that does not mention A4 margins keeps them.
+    photo_only = api(admin_client, '/admin/config/photo', {
+        'expectedVersion': 12,
+        'photoWidthMm': 128,
+    }, method='PATCH')
+    assert photo_only.status_code == 200, photo_only.text
+    assert photo_only.json()['data']['a4Margins'] == {
+        'top': 5, 'right': 6, 'bottom': 7, 'left': 8,
+    }
+
+    invalid = api(admin_client, '/admin/config/photo', {
+        'expectedVersion': 13,
+        'a4Margins': {'top': -1, 'right': 3, 'bottom': 3, 'left': 3},
+    }, method='PATCH')
+    assert invalid.status_code == 422, invalid.text

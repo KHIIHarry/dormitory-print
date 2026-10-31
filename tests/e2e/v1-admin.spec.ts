@@ -48,6 +48,7 @@ const baseConfig = {
   photoWidthMm: 127,
   photoHeightMm: 89,
   margins: { top: 3, bottom: 3, left: 3, right: 3 },
+  a4Margins: { top: 3, bottom: 3, left: 3, right: 3 },
   wechat: "dormprint",
   phone: "13800138000",
   qrUrl: "/api/v1/assets/qr-1/content",
@@ -280,9 +281,17 @@ test("admin settings exposes section, workflow, retention and pause controls", a
   await page.getByRole("button", { name: "系统与团队" }).click();
   await page.getByRole("link", { name: "系统配置", exact: true }).click();
   await expect(page.getByRole("heading", { name: "系统配置" })).toBeVisible();
-  for (const label of ["价目", "服务与限制", "照片校准", "微信与联系", "公告与营业"]) {
+  for (const label of ["价目", "服务与限制", "打印文件校准", "微信与联系", "公告与营业"]) {
     await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
   }
+  await page.getByRole("button", { name: /打印文件校准/ }).click();
+  const a4Heading = page.getByRole("heading", { name: "A4 文件打印" });
+  const photoHeading = page.getByRole("heading", { name: "5 寸照片校准" });
+  await expect(a4Heading).toBeVisible();
+  await expect(photoHeading).toBeVisible();
+  const a4Box = await a4Heading.boundingBox();
+  const photoBox = await photoHeading.boundingBox();
+  expect(a4Box && photoBox && a4Box.y < photoBox.y).toBe(true);
   await page.getByRole("button", { name: /工作流/ }).click();
   await expect(page.getByText("待付款自动关闭")).toBeVisible();
   await expect(page.getByText("暂停新订单")).toBeVisible();

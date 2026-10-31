@@ -210,6 +210,7 @@ export type Config = {
   photoWidthMm: number;
   photoHeightMm: number;
   margins: { top: number; bottom: number; left: number; right: number };
+  a4Margins: { top: number; bottom: number; left: number; right: number };
   maxFiles: number;
   maxMb: number;
   bindingApproved: boolean;
