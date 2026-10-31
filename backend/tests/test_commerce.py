@@ -120,3 +120,35 @@ def test_dashboard_keeps_supplementary_cash_separate_from_original(db,ready_prep
     assert summary['supplementaryCashReceivedCents']==90
     assert summary['supplementaryRefundCents']==20
     assert summary['supplementaryOutstandingCents']==0
+
+
+def test_admin_order_views_tolerate_null_proof_fields(db,ready_preparation,admin_client,api):
+    """A proof row may store placementNote/deliveredAt as JSON null.
+
+    dict.get(key,default) only applies to missing keys, so the serializer must
+    coerce nulls or every admin order response fails response validation.
+    """
+    from app.commerce import OrderSubmit,submit_order
+    from app.models import DeliveryAssignment,DeliveryBatch,DeliveryProof
+    actor,prep,artifact,slot,body=ready_preparation
+    order=submit_order(db,actor,OrderSubmit.model_validate(body))
+    now=utcnow()
+    batch=DeliveryBatch(name='交付凭证回归批次',courier_id=admin_client.staff.id,
+        starts_at=now,ends_at=now+timedelta(hours=1),status='COMPLETED',data={})
+    db.add(batch);db.flush()
+    assignment=DeliveryAssignment(order_id=order.id,batch_id=batch.id,
+        courier_id=admin_client.staff.id,status='DELIVERED',active=True,data={})
+    db.add(assignment);db.flush()
+    db.add(DeliveryProof(order_id=order.id,assignment_id=assignment.id,active=True,
+        data={'placementNote':None,'deliveredAt':None}))
+    db.commit()
+
+    detail=api(admin_client,f'/admin/orders/{order.id}',None,method='GET')
+    assert detail.status_code==200,detail.text
+    proof=detail.json()['data']['proof']
+    assert proof['placementNote']==''
+    assert proof['deliveredAt']
+
+    listing=api(admin_client,'/admin/orders',None,method='GET')
+    assert listing.status_code==200,listing.text
+    assert order.id in [item['id'] for item in listing.json()['data']['items']]

@@ -382,8 +382,8 @@ def order_view(db,order,actor):
         p=proof.data or {}
         proof_view={'photoUrl':f'/api/v1/assets/{proof.photo_asset_id}/content' if proof.photo_asset_id else None,
             'skipPhotoReason':p.get('skipPhotoReason'),'position':p.get('position'),'skipLocationReason':p.get('skipLocationReason'),
-            'locationFailureCode':p.get('locationFailureCode'),'placementNote':p.get('placementNote',''),
-            'deliveredAt':p.get('serverDeliveredAt',p.get('deliveredAt',proof.created_at.isoformat()))}
+            'locationFailureCode':p.get('locationFailureCode'),'placementNote':p.get('placementNote') or '',
+            'deliveredAt':p.get('serverDeliveredAt') or p.get('deliveredAt') or proof.created_at.isoformat()}
     blockers=[{'code':e.type,'message':e.reason,'relatedId':e.id} for e in db.scalars(select(BusinessException).where(BusinessException.order_id==order.id,BusinessException.status.in_(['OPEN','IN_PROGRESS'])))]
     if order.refund_locked:
         blockers.append({'code':'REFUND_REVIEW_PENDING','message':'退款审核中，已暂停新生产'})
