@@ -264,3 +264,18 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env down
 ```
 
 迁移是前向的；回滚代码前先确认新迁移与旧代码兼容，必要时从独立恢复库恢复，不要对生产库执行 `DROP`/`TRUNCATE`。升级前必须保留可恢复的加密备份点。
+
+## PDF 预览脚本与 MIME 类型
+
+PDF.js 的工作线程及浏览器回退加载都要求脚本以 JavaScript 类型响应。若 `.mjs` 被静态服务器当成 `application/octet-stream`，会出现 `Setting up fake worker failed` 或 `Failed to fetch dynamically imported module`，即使脚本请求返回 200 也不能预览。
+
+仓库的 Nginx 主配置显式将 `.mjs` 映射为 `application/javascript`；Vite 同时把 PDF 工作线程产物命名为带哈希的 `.js`，让新页面避开旧 `.mjs` 地址缓存的错误响应。发布时需要重新构建前端，并更新、重载 Nginx 配置；使用前端镜像时重新构建并替换镜像。只修改前端源码而不发布产物不会修复线上响应。发布后重新打开页面，并检查实际 worker 请求的 `Content-Type` 为 `application/javascript` 或 `text/javascript`。
+
+可在本地使用 Docker 与 Chrome 复现生产静态服务并验证正常工作线程、回退渲染和最终 PDF 确认（仅使用虚构演示文件，不连接私有 API）：
+
+```sh
+npx vite build --mode demo --outDir output/pdf-preview-qa/dist
+node --test tests/deploy/pdf-preview.smoke.mjs
+```
+
+演示构建仅写入已忽略的本地测试目录；正式发布仍使用 `npm run build` 的 `dist/`。
