@@ -1,4 +1,4 @@
-"""Subscribed order notifications traverse the actual outbox and local SMTP."""
+"""New-order mail reaches permitted staff through the real outbox and SMTP."""
 from sqlalchemy import select
 from app.core import Actor
 from app.models import EmailJob,Principal,Quote
@@ -6,10 +6,13 @@ from test_commerce import ready_preparation
 from test_mail import smtp_server,settings_allow_local,seed_mail_config
 
 
-def test_subscribed_order_creation_queues_and_sends_real_local_smtp(db,ready_preparation,account_factory,smtp_server,settings_allow_local):
+def test_new_order_queues_admin_mail_and_sends_real_local_smtp(
+        db,ready_preparation,account_factory,staff_factory,smtp_server,settings_allow_local):
     from app.commerce import submit_order,OrderSubmit
     from app.jobs import claim_next_job,process_claim
     account=account_factory(preferences={'orderCreated':True})
+    staff=staff_factory(username='order_mail_admin',email='order-mail@example.invalid',
+                        email_verified=True,capabilities=['orders.manage'])
     actor,prep,artifact,slot,body=ready_preparation
     prep.checkout_account_id=account.id
     db.get(Principal,prep.principal_id).account_id=account.id
@@ -20,8 +23,9 @@ def test_subscribed_order_creation_queues_and_sends_real_local_smtp(db,ready_pre
     seed_mail_config(db,port)
     order=submit_order(db,Actor(principal_id=prep.principal_id,account_id=account.id),OrderSubmit.model_validate(body))
     db.commit()
-    job=db.scalar(select(EmailJob).where(EmailJob.template_key=='ORDER_CREATED'))
+    job=db.scalar(select(EmailJob).where(EmailJob.template_key=='ADMIN_ORDER_CREATED'))
     assert job is not None
+    assert db.scalar(select(EmailJob).where(EmailJob.template_key=='ORDER_CREATED')) is None
     claim=claim_next_job(['EMAIL'])
     assert claim is not None
     assert process_claim(*claim)
@@ -31,4 +35,7 @@ def test_subscribed_order_creation_queues_and_sends_real_local_smtp(db,ready_pre
     from email import message_from_string
     from email.policy import default
     message=message_from_string(state.messages[0]['data'],policy=default)
-    assert order.pickup_code in message.get_body(preferencelist=('plain',)).get_content()
+    plain=message.get_body(preferencelist=('plain',)).get_content()
+    assert order.pickup_code in plain
+    assert '新订单' in message['Subject']
+    assert staff.email in state.messages[0]['to']

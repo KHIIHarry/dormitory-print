@@ -21,6 +21,7 @@ import socket
 import ssl
 from email.message import EmailMessage
 from email.utils import formataddr
+from html.parser import HTMLParser
 from typing import Any
 from uuid import uuid4
 
@@ -35,6 +36,7 @@ from .core import (
     lock, ok, require_admin, seal, touch, unseal,
 )
 from .db import get_db
+from .mail_html import template_html
 from .mail_schemas import (
     MailConfigDTO, MailConfigInput, MailConnectionResult, MailQueuedResult,
     MailConfigClear, MailConfigUpdate, MailReasonInput, MailTemplateDTO,
@@ -49,21 +51,38 @@ router = APIRouter()
 TEMPLATE_KEYS = (
     'CUSTOMER_VERIFY_EMAIL',
     'CUSTOMER_RESET_PASSWORD',
-    'STAFF_INVITE_OR_SETUP',
-    'STAFF_RESET_PASSWORD',
+    'ADMIN_ORDER_CREATED',
+    'COURIER_DISPATCH',
+    'DELIVERY_UPDATED',
+    'PAYMENT_SUCCESS',
+    'ORDER_DELIVERED',
+    'REFERRAL_REWARD_GRANTED',
+    'ACCOUNT_DELETED',
     'ORDER_CREATED',
     'ORDER_STATUS_UPDATED',
-    'REFERRAL_REWARD_GRANTED',
 )
 
 VARIABLE_DESCRIPTIONS = {
     'brandName': '品牌名称',
+    'logoUrl': '系统品牌 Logo（固定资源，不可自定义）',
     'actionUrl': '一次性安全操作链接（测试仅使用不可操作样例）',
     'expiresMinutes': '安全链接有效分钟数',
-    'roleName': '员工角色名称',
     'orderCode': '订单短提取码',
     'orderStatus': '订单状态中文名称',
     'orderLink': '受权订单查询入口（不含管理链接）',
+    'orderAmount': '订单金额（含币种）',
+    'paidAmount': '实付金额（含币种）',
+    'customerNickname': '客户昵称',
+    'customerPhone': '客户联系电话',
+    'courierName': '配送员称呼',
+    'courierLink': '配送员任务入口',
+    'batchName': '配送批次名称',
+    'deliveryDate': '配送日期',
+    'deliverySlot': '配送时段',
+    'deliveryLocation': '配送楼栋或地点',
+    'deliveredAt': '签收时间',
+    'orderCount': '本批订单数量',
+    'deletionDeadline': '注销完成期限',
     'rewardText': '奖励说明（不包含其他客户信息）',
 }
 
@@ -77,7 +96,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
             '此链接将在 {{expiresMinutes}} 分钟后失效，且只能使用一次。\n'
             '如果这不是您的操作，请忽略本邮件。'
         ),
-        'htmlBody': '',
+        'htmlBody': template_html('CUSTOMER_VERIFY_EMAIL'),
         'variables': ['brandName', 'actionUrl', 'expiresMinutes'],
         'critical': True,
         'enabled': True,
@@ -91,37 +110,94 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
             '链接将在 {{expiresMinutes}} 分钟后失效，且只能使用一次。\n'
             '如果不是您本人申请，请忽略本邮件。任何工作人员都不会索要您的密码。'
         ),
-        'htmlBody': '',
+        'htmlBody': template_html('CUSTOMER_RESET_PASSWORD'),
         'variables': ['brandName', 'actionUrl', 'expiresMinutes'],
         'critical': True,
         'enabled': True,
     },
-    'STAFF_INVITE_OR_SETUP': {
-        'name': '员工初次设置密码',
-        'subject': '{{brandName}}｜设置员工账号密码',
+    'ADMIN_ORDER_CREATED': {
+        'name': '新订单通知（管理员）',
+        'subject': '{{brandName}}｜新订单 {{orderCode}} 待处理',
         'textBody': (
-            '您好！您已受邀成为 {{brandName}} 的 {{roleName}}。\n'
-            '请打开以下一次性链接设置员工账号密码：\n{{actionUrl}}\n'
-            '链接将在 {{expiresMinutes}} 分钟后失效。\n'
-            '若您不了解此次邀请，请联系项目管理员，不要设置密码。'
+            '{{brandName}} 收到一笔新订单 {{orderCode}}，金额 {{orderAmount}}。\n'
+            '客户昵称：{{customerNickname}}\n联系电话：{{customerPhone}}\n'
+            '请及时核对文件并安排打印，留意添加客户微信以便沟通。\n'
+            '查看订单：{{orderLink}}'
         ),
-        'htmlBody': '',
-        'variables': ['brandName', 'actionUrl', 'expiresMinutes', 'roleName'],
-        'critical': True,
+        'htmlBody': template_html('ADMIN_ORDER_CREATED'),
+        'variables': ['brandName', 'orderCode', 'orderAmount', 'customerNickname',
+                      'customerPhone', 'orderLink'],
+        'critical': False,
         'enabled': True,
     },
-    'STAFF_RESET_PASSWORD': {
-        'name': '员工重置密码',
-        'subject': '{{brandName}}｜员工账号密码重置',
+    'COURIER_DISPATCH': {
+        'name': '配送派单通知（配送员）',
+        'subject': '{{brandName}}｜配送任务 {{batchName}}（{{deliveryDate}} {{deliverySlot}}）',
         'textBody': (
-            '您好！这是您的 {{brandName}} 员工账号密码重置链接：\n{{actionUrl}}\n'
-            '链接将在 {{expiresMinutes}} 分钟后失效，且只能使用一次。\n'
-            '如非本人申请，请立即联系管理员。'
+            '{{courierName}}，你好！{{brandName}} 的配送任务已发布。\n'
+            '批次「{{batchName}}」：{{deliveryDate}} {{deliverySlot}}，'
+            '共 {{orderCount}} 单。\n'
+            '请按页面指引领取并配送：{{courierLink}}\n'
+            '出发前请核对订单数量与包装。'
         ),
-        'htmlBody': '',
-        'variables': ['brandName', 'actionUrl', 'expiresMinutes', 'roleName'],
-        'required': ['brandName', 'actionUrl', 'expiresMinutes'],
-        'critical': True,
+        'htmlBody': template_html('COURIER_DISPATCH'),
+        'variables': ['brandName', 'courierName', 'batchName', 'deliveryDate',
+                      'deliverySlot', 'orderCount', 'courierLink'],
+        'critical': False,
+        'enabled': True,
+    },
+    'DELIVERY_UPDATED': {
+        'name': '配送信息变更',
+        'subject': '{{brandName}}｜订单 {{orderCode}} 配送信息已更新',
+        'textBody': (
+            '您好！{{brandName}} 订单 {{orderCode}} 的配送信息已更新。\n'
+            '配送楼栋：{{deliveryLocation}}\n配送时段：{{deliverySlot}}\n'
+            '查看订单：{{orderLink}}'
+        ),
+        'htmlBody': template_html('DELIVERY_UPDATED'),
+        'variables': ['brandName', 'orderCode', 'deliveryLocation',
+                      'deliverySlot', 'orderLink'],
+        'critical': False,
+        'enabled': True,
+    },
+    'PAYMENT_SUCCESS': {
+        'name': '付款成功',
+        'subject': '{{brandName}}｜订单 {{orderCode}} 付款成功',
+        'textBody': (
+            '您好！{{brandName}} 已确认收到订单 {{orderCode}} 的付款 {{paidAmount}}。\n'
+            '我们正在安排打印与配送，签收后会再发送确认邮件。\n'
+            '查看订单：{{orderLink}}'
+        ),
+        'htmlBody': template_html('PAYMENT_SUCCESS'),
+        'variables': ['brandName', 'orderCode', 'paidAmount', 'orderLink'],
+        'critical': False,
+        'enabled': True,
+    },
+    'ORDER_DELIVERED': {
+        'name': '签收成功',
+        'subject': '{{brandName}}｜订单 {{orderCode}} 已签收',
+        'textBody': (
+            '您好！{{brandName}} 订单 {{orderCode}} 已于 {{deliveredAt}} 签收。\n'
+            '配送楼栋：{{deliveryLocation}}\n查看订单：{{orderLink}}\n'
+            '请及时取回资料并妥善保管。'
+        ),
+        'htmlBody': template_html('ORDER_DELIVERED'),
+        'variables': ['brandName', 'orderCode', 'deliveredAt',
+                      'deliveryLocation', 'orderLink'],
+        'critical': False,
+        'enabled': True,
+    },
+    'ACCOUNT_DELETED': {
+        'name': '账号注销受理',
+        'subject': '{{brandName}}｜账号注销申请已受理',
+        'textBody': (
+            '你的 {{brandName}} 账号注销申请已受理。\n'
+            '我们将在 {{deletionDeadline}} 前完成注销，并停止发送后续通知。\n'
+            '在此之前登录账号可撤销申请。注销完成后订单、优惠券与历史记录将无法恢复。'
+        ),
+        'htmlBody': template_html('ACCOUNT_DELETED'),
+        'variables': ['brandName', 'deletionDeadline'],
+        'critical': False,
         'enabled': True,
     },
     'ORDER_CREATED': {
@@ -133,7 +209,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
             '您可通过以下入口查看订单：{{orderLink}}\n'
             '请按页面指引联系打印员并完成线下付款，订单不会自动确认为已付款。'
         ),
-        'htmlBody': '',
+        'htmlBody': template_html('ORDER_CREATED'),
         'variables': ['brandName', 'orderCode', 'orderStatus', 'orderLink'],
         'critical': False,
         'enabled': True,
@@ -145,7 +221,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
             '您好！您的 {{brandName}} 订单 {{orderCode}} 状态已更新：{{orderStatus}}。\n'
             '查看订单：{{orderLink}}\n实际配送时间请以最新订单页面为准。'
         ),
-        'htmlBody': '',
+        'htmlBody': template_html('ORDER_STATUS_UPDATED'),
         'variables': ['brandName', 'orderCode', 'orderStatus', 'orderLink'],
         'critical': False,
         'enabled': True,
@@ -158,7 +234,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
             '您获得的奖励为：{{rewardText}}\n'
             '请登录「我的优惠券」查看使用条件、有效期与活动说明。'
         ),
-        'htmlBody': '',
+        'htmlBody': template_html('REFERRAL_REWARD_GRANTED'),
         'variables': ['brandName', 'rewardText'],
         'critical': False,
         'enabled': True,
@@ -167,21 +243,49 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
 
 SAMPLE_VARIABLES = {
     'brandName': 'DormPrint 示例',
+    'logoUrl': '/assets/icon-192.png',
     'actionUrl': 'https://example.invalid/safe-preview#token=preview-not-usable',
     'expiresMinutes': '30',
-    'roleName': '管理员',
     'orderCode': 'DP20261030',
     'orderStatus': '待确认',
     'orderLink': 'https://example.invalid/orders/sample',
+    'orderAmount': '¥36.00',
+    'paidAmount': '¥36.00',
+    'customerNickname': '示例同学',
+    'customerPhone': '138****0000',
+    'courierName': '示例配送员',
+    'courierLink': 'https://example.invalid/courier',
+    'batchName': '10月31日 晚班',
+    'deliveryDate': '2026-10-31',
+    'deliverySlot': '19:00–20:00',
+    'deliveryLocation': '示例公寓 3 栋',
+    'deliveredAt': '2026-10-31 20:12',
+    'orderCount': '6',
+    'deletionDeadline': '2026-11-14',
     'rewardText': '示例奖励：一张优惠券（以真实活动规则为准）',
 }
 
 _ALLOWED_TAGS = {
     'p', 'br', 'strong', 'b', 'em', 'i', 'h1', 'h2', 'h3', 'h4',
-    'ul', 'ol', 'li', 'blockquote', 'pre', 'span',
+    'ul', 'ol', 'li', 'blockquote', 'pre', 'span', 'div', 'hr', 'a',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'img',
 }
+_ALLOWED_ATTRIBUTES = {
+    'style', 'href', 'role', 'width', 'height', 'align', 'valign', 'bgcolor',
+    'cellpadding', 'cellspacing', 'border', 'colspan', 'rowspan',
+    'src', 'alt',
+}
+_SAFE_HREF_PREFIXES = ('http://', 'https://', 'mailto:')
+_BLOCKED_HTML_TOKENS = (
+    '<script', '<iframe', '<object', '<embed', '<link', '<meta',
+    'javascript:', 'vbscript:', 'data:text/html', 'expression(', 'url(',
+    '@import', '-moz-binding',
+)
+_BLOCKED_STYLES = (
+    'url(', 'expression(', '@import', 'javascript:', 'vbscript:',
+    'behavior:', '-moz-binding', 'position:fixed', 'position:absolute',
+)
 _VARIABLE_RE = re.compile(r'\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}')
-_TAG_RE = re.compile(r'<\s*/?\s*([A-Za-z][A-Za-z0-9]*)')
 _EMAIL_RE = re.compile(r'^[^\s@<>,;"]{1,64}@[^\s@<>,;"]{1,189}\.[A-Za-z]{2,}$')
 _MAX_PAYLOAD_VARIABLES = 20
 _MAX_VARIABLE_LENGTH = 4000
@@ -446,7 +550,17 @@ def _send(values: dict, payload: dict) -> None:
 
 def _variables_for(template: dict) -> list[str]:
     variables = template.get('variables') or []
-    return [item['key'] if isinstance(item, dict) else str(item) for item in variables]
+    keys = [item['key'] if isinstance(item, dict) else str(item) for item in variables]
+    if 'logoUrl' not in keys:
+        keys.append('logoUrl')
+    return keys
+
+
+# The brand logo is a fixed, self-hosted asset. Every editable template may
+# reference it, but it is never part of the required-variable contract.
+for _default_template in DEFAULT_TEMPLATES.values():
+    if 'logoUrl' not in _default_template['variables']:
+        _default_template['variables'].append('logoUrl')
 
 
 def _template_default(key: str) -> dict:
@@ -462,11 +576,6 @@ def _template_data(row: MailTemplate) -> dict:
 def _template_payload(row: MailTemplate) -> dict:
     data = _template_data(row)
     variables = list(data.get('variables') or [])
-    if row.key == 'STAFF_RESET_PASSWORD' and not any(
-            (item.get('key') if isinstance(item, dict) else item) == 'roleName'
-            for item in variables):
-        variables.append({'key': 'roleName',
-                          'description': VARIABLE_DESCRIPTIONS['roleName']})
     return {
         'subject': row.subject,
         'textBody': row.text_body,
@@ -517,7 +626,8 @@ def ensure_template(db, key: str) -> MailTemplate:
             'name': default['name'],
             'variables': [{'key': item, 'description': VARIABLE_DESCRIPTIONS.get(item, '')}
                           for item in default['variables']],
-            'required': list(default.get('required') or default['variables']),
+            'required': [item for item in (default.get('required') or default['variables'])
+                         if item != 'logoUrl'],
             'critical': bool(default['critical']),
             'isDefault': True,
             'updatedBy': '系统默认',
@@ -529,7 +639,80 @@ def ensure_template(db, key: str) -> MailTemplate:
 
 
 def seed_templates(db) -> list[MailTemplate]:
-    return [ensure_template(db, key) for key in TEMPLATE_KEYS]
+    """Create missing templates and backfill HTML for untouched defaults.
+
+    Older installations stored system defaults with an empty ``html_body``.
+    Only rows that are still marked as defaults are upgraded, so an edited
+    template is never overwritten and its version is not bumped.
+    """
+    rows = [ensure_template(db, key) for key in TEMPLATE_KEYS]
+    for row in rows:
+        default = DEFAULT_TEMPLATES.get(row.key)
+        if not default or not default.get('htmlBody'):
+            continue
+        if (_template_data(row).get('isDefault')
+                and (row.html_body or '') != default['htmlBody']):
+            row.html_body = default['htmlBody']
+    db.flush()
+    return rows
+
+
+def _safe_href(value: str) -> bool:
+    raw = value.strip()
+    if not raw:
+        return False
+    if _VARIABLE_RE.fullmatch(raw):
+        return True
+    if not raw.lower().startswith(_SAFE_HREF_PREFIXES):
+        return False
+    return not any(char in raw for char in '<>"') and not any(
+        char.isspace() for char in raw)
+
+
+def _unsafe_style(value: str) -> bool:
+    compact = re.sub(r'\s+', '', value).lower()
+    return any(token in compact for token in _BLOCKED_STYLES)
+
+
+class _TemplateHTMLValidator(HTMLParser):
+    """Accept only the bounded rich-text subset the editor advertises."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.error: str | None = None
+
+    def handle_starttag(self, tag, attrs):
+        self._inspect(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._inspect(tag, attrs)
+
+    def _inspect(self, tag, attrs) -> None:
+        if self.error:
+            return
+        if tag not in _ALLOWED_TAGS:
+            self.error = f'HTML 模板包含不允许的标签 {tag}'
+            return
+        for name, value in attrs:
+            if name not in _ALLOWED_ATTRIBUTES:
+                self.error = ('HTML 模板不能包含事件处理属性'
+                              if name.startswith('on')
+                              else f'HTML 模板包含不允许的属性 {name}')
+                return
+            if name == 'src' and tag != 'img':
+                self.error = 'HTML 模板只允许品牌 Logo 使用图片地址'
+                return
+            if name == 'href' and not _safe_href(value or ''):
+                self.error = 'HTML 模板的链接只允许 http(s)、mailto 或模板变量'
+                return
+            if name == 'style' and _unsafe_style(value or ''):
+                self.error = 'HTML 模板包含不允许的样式'
+                return
+        if tag == 'img':
+            source = (dict(attrs).get('src') or '').strip()
+            match = _VARIABLE_RE.fullmatch(source)
+            if not match or match.group(1) != 'logoUrl':
+                self.error = 'HTML 模板的图片只允许使用系统品牌 Logo'
 
 
 def validate_template_content(template: dict, required: list[str] | None = None,
@@ -552,6 +735,7 @@ def validate_template_content(template: dict, required: list[str] | None = None,
         )
     explicit_required = template.get('required')
     required = required if required is not None else explicit_required or allowed
+    required = [item for item in required if item != 'logoUrl']
     text_found = set(_VARIABLE_RE.findall(text))
     missing = [item for item in required if item not in text_found]
     if missing:
@@ -561,17 +745,19 @@ def validate_template_content(template: dict, required: list[str] | None = None,
         )
     if not html.strip():
         return
+    if len(html) > 60000:
+        raise DomainError('MAIL_TEMPLATE_INVALID', 'HTML 模板内容过长')
     lowered = html.lower()
-    if any(token in lowered for token in ('<script', '<iframe', '<object', '<embed',
-                                          '<img', '<link', '<meta', 'javascript:',
-                                          'vbscript:', 'data:text/html', 'expression(',
-                                          'url(', '@import')):
+    if any(token in lowered for token in _BLOCKED_HTML_TOKENS):
         raise DomainError('MAIL_TEMPLATE_INVALID', 'HTML 模板包含不允许的脚本或远程资源')
-    for tag in _TAG_RE.findall(html):
-        if tag.lower() not in _ALLOWED_TAGS:
-            raise DomainError('MAIL_TEMPLATE_INVALID', f'HTML 模板包含不允许的标签 {tag}')
-    if re.search(r'\son[a-zA-Z]+\s*=', html):
-        raise DomainError('MAIL_TEMPLATE_INVALID', 'HTML 模板不能包含事件处理属性')
+    checker = _TemplateHTMLValidator()
+    try:
+        checker.feed(html)
+        checker.close()
+    except Exception as error:  # malformed markup must not crash the request
+        raise DomainError('MAIL_TEMPLATE_INVALID', 'HTML 模板无法解析') from error
+    if checker.error:
+        raise DomainError('MAIL_TEMPLATE_INVALID', checker.error)
     if critical and ('actionUrl' not in allowed or 'actionUrl' not in found):
         raise DomainError('MAIL_TEMPLATE_REQUIRED_VARIABLE_MISSING',
                           '安全邮件必须保留一次性操作链接')
@@ -579,7 +765,8 @@ def validate_template_content(template: dict, required: list[str] | None = None,
 
 def render_template(template: dict, variables: dict[str, Any]) -> dict[str, str]:
     allowed = _variables_for(template)
-    required = template.get('required') or allowed
+    required = [item for item in (template.get('required') or allowed)
+                if item != 'logoUrl']
     supplied = {str(key): '' if value is None else str(value) for key, value in variables.items()}
     unknown = set(supplied) - set(allowed)
     if unknown:
@@ -659,7 +846,8 @@ def restore_template(db, key: str, expected_version: int,
         'name': default['name'],
         'variables': [{'key': item, 'description': VARIABLE_DESCRIPTIONS.get(item, '')}
                       for item in default['variables']],
-        'required': list(default.get('required') or default['variables']),
+        'required': [item for item in (default.get('required') or default['variables'])
+                     if item != 'logoUrl'],
         'critical': bool(default['critical']),
         'isDefault': True,
         'updatedBy': actor.id if actor else '系统默认',
@@ -692,6 +880,10 @@ def enqueue_email(db, key: str, to: str, variables: dict, business_key: str) -> 
     if not row.enabled:
         raise DomainError('MAIL_TEMPLATE_INVALID', '该通知模板已停用', 422)
     template = _template_payload(row)
+    if 'logoUrl' in _variables_for(template):
+        variables = {**variables,
+                     'logoUrl': f"{get_settings().public_origin.rstrip('/')}"
+                                '/assets/icon-192.png'}
     rendered = render_template(template, variables)
     payload = {
         'to': to,

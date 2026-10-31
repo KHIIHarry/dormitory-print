@@ -28,7 +28,8 @@ from .growth_schemas import (
 from .settings import get_settings
 from .benefits import current_staff_candidate
 from .models import (
-    Account, BusinessException, Campaign, ConfigSection, Coupon, Order,
+    Account, BusinessException, Campaign, ConfigSection, Coupon,
+    DeliveryAssignment, DeliveryBatch, DeliverySlot, Location, Order,
     Preparation, PromotionEvent, Quote, Referral, Refund, Staff, utcnow,
 )
 
@@ -1896,53 +1897,192 @@ _ORDER_STATUS_LABELS = {
 }
 
 
-def notify_order_event(db, order, event):
-    """Optional order notification called by root commerce/delivery.
+_LOCAL_TZ = timezone(timedelta(hours=8))
 
-    Notifications are disabled by default and only queued for a verified,
-    subscribed account. A savepoint isolates the outbox write so a mail failure
-    can never roll back or alter settlement/delivery facts. The caller's
-    transaction is never committed here.
-    """
+
+def _mail_brand(db) -> str:
+    section = db.scalar(select(ConfigSection).where(
+        ConfigSection.section == 'contact'))
+    contact = dict(section.data or {}) if section else {}
+    return str(contact.get('displayName') or 'DormPrint')
+
+
+def _order_link(order) -> str:
+    origin = get_settings().public_origin.rstrip('/')
+    return f'{origin}/u/orders/{url_quote(str(order.id))}'
+
+
+def _admin_order_link(order) -> str:
+    origin = get_settings().public_origin.rstrip('/')
+    return f'{origin}/manage/orders/{url_quote(str(order.id))}'
+
+
+def _mask_phone(value) -> str:
+    digits = str(value or '').strip()
+    if len(digits) >= 7:
+        return f'{digits[:3]}****{digits[-4:]}'
+    return digits
+
+
+def _money(cents) -> str:
+    return f'¥{int(cents or 0) / 100:.2f}'
+
+
+def _local_label(value, fmt: str = '%Y-%m-%d %H:%M') -> str:
+    moment = _as_utc(value)
+    return moment.astimezone(_LOCAL_TZ).strftime(fmt) if moment else ''
+
+
+def _order_slot_label(db, order) -> str:
+    slot_id = order.confirmed_slot_id or order.requested_slot_id
+    slot = db.get(DeliverySlot, slot_id) if slot_id else None
+    if slot is None:
+        return ''
+    start = _local_label(slot.starts_at, '%H:%M')
+    end = _local_label(slot.ends_at, '%H:%M')
+    return f'{slot.date} {slot.name} {start}–{end}'.strip()
+
+
+def _order_location_label(db, order) -> str:
+    location = db.get(Location, order.location_id) if order.location_id else None
+    return location.name if location else ''
+
+
+def _active_customer(db, order):
     account_id = getattr(order, 'checkout_account_id', None)
-    if not account_id:
-        return None
-    account = db.get(Account, account_id)
+    account = db.get(Account, account_id) if account_id else None
     if not account or account.status != 'ACTIVE' or not account.verified_at:
         return None
-    event_key = str(event or '').strip().upper()
-    if event_key in ('CREATED', 'ORDER_CREATED'):
-        template_key = 'ORDER_CREATED'
-        preference = 'orderCreated'
-        suffix = 'created'
-    elif (event_key in ('STATUS', 'STATUS_UPDATED', 'ORDER_STATUS_UPDATED')
-          or event_key in _ORDER_STATUS_LABELS):
-        template_key = 'ORDER_STATUS_UPDATED'
-        preference = 'orderStatusUpdated'
-        suffix = f'status:{getattr(order, "version", 0)}'
-    else:
-        return None
-    if not dict(account.preferences or {}).get(preference):
+    return account
+
+
+def _queue(db, key: str, to: str, variables: dict, business_key: str):
+    if not to:
         return None
     try:
-        contact_section = db.scalar(select(ConfigSection).where(
-            ConfigSection.section == 'contact'))
-        contact = dict(contact_section.data or {}) if contact_section else {}
-        brand = str(contact.get('displayName') or 'DormPrint')
-        status = _ORDER_STATUS_LABELS.get(
-            str(getattr(order, 'status', '') or ''), str(getattr(order, 'status', '')))
-        business_key = f'order-email:{template_key}:{order.id}:{suffix}'
-        public_origin = get_settings().public_origin.rstrip('/')
-        variables = {
-            'brandName': brand,
-            'orderCode': str(getattr(order, 'pickup_code', '') or ''),
-            'orderStatus': status,
-            'orderLink': f'{public_origin}/u/orders/{url_quote(str(order.id))}',
-        }
         with db.begin_nested():
-            job = enqueue_email(db, template_key, account.email, variables,
-                                business_key)
-        return job
+            return enqueue_email(db, key, to, variables, business_key)
     except Exception:
-        # Optional notification/outbox failure is contained by the savepoint.
+        # Transactional facts must never be rolled back by a mail failure.
         return None
+
+
+def notify_admin_order_created(db, order):
+    """Tell active staff with order/production permissions about a new order."""
+    variables = {
+        'brandName': _mail_brand(db),
+        'orderCode': str(getattr(order, 'pickup_code', '') or ''),
+        'orderAmount': _money(getattr(order, 'total_cents', 0)),
+        'customerNickname': str(getattr(order, 'nickname', '') or ''),
+        'customerPhone': _mask_phone(getattr(order, 'phone', '')),
+        'orderLink': _admin_order_link(order),
+    }
+    jobs = []
+    recipients = db.scalars(select(Staff).where(
+        Staff.enabled.is_(True), Staff.status == 'ACTIVE'))
+    for member in recipients:
+        capabilities = set(member.capabilities or [])
+        allowed = member.is_super_admin or bool(
+            capabilities & {'orders.manage', 'production.manage', '*'})
+        if not allowed or not member.email or not member.email_verified:
+            continue
+        job = _queue(db, 'ADMIN_ORDER_CREATED', member.email, variables,
+                     f'admin-order-email:{order.id}:{member.id}')
+        if job is not None:
+            jobs.append(job)
+    return jobs
+
+
+def notify_payment_success(db, order):
+    account = _active_customer(db, order)
+    if account is None:
+        return None
+    variables = {
+        'brandName': _mail_brand(db),
+        'orderCode': str(getattr(order, 'pickup_code', '') or ''),
+        'paidAmount': _money(getattr(order, 'cash_received_cents', 0)
+                             or getattr(order, 'total_cents', 0)),
+        'orderLink': _order_link(order),
+    }
+    return _queue(db, 'PAYMENT_SUCCESS', account.email, variables,
+                  f'order-email:PAYMENT_SUCCESS:{order.id}:{order.version}')
+
+
+def notify_order_delivered(db, order, delivered_at=None):
+    account = _active_customer(db, order)
+    if account is None:
+        return None
+    stamp = delivered_at or (order.data or {}).get('deliveredAt') or utcnow()
+    variables = {
+        'brandName': _mail_brand(db),
+        'orderCode': str(getattr(order, 'pickup_code', '') or ''),
+        'deliveredAt': _local_label(stamp),
+        'deliveryLocation': _order_location_label(db, order),
+        'orderLink': _order_link(order),
+    }
+    return _queue(db, 'ORDER_DELIVERED', account.email, variables,
+                  f'order-email:ORDER_DELIVERED:{order.id}:{order.version}')
+
+
+def notify_delivery_updated(db, order):
+    account = _active_customer(db, order)
+    if account is None:
+        return None
+    variables = {
+        'brandName': _mail_brand(db),
+        'orderCode': str(getattr(order, 'pickup_code', '') or ''),
+        'deliveryLocation': _order_location_label(db, order),
+        'deliverySlot': _order_slot_label(db, order),
+        'orderLink': _order_link(order),
+    }
+    return _queue(db, 'DELIVERY_UPDATED', account.email, variables,
+                  f'order-email:DELIVERY_UPDATED:{order.id}:{order.version}')
+
+
+def notify_courier_dispatch(db, batch):
+    """Send the published batch to its assigned courier only."""
+    courier = db.get(Staff, batch.courier_id) if batch.courier_id else None
+    if (courier is None or not courier.email or not courier.email_verified
+            or not courier.enabled or courier.status != 'ACTIVE'):
+        return None
+    order_count = db.scalar(select(func.count(DeliveryAssignment.id)).where(
+        DeliveryAssignment.batch_id == batch.id,
+        DeliveryAssignment.active.is_(True))) or 0
+    origin = get_settings().public_origin.rstrip('/')
+    variables = {
+        'brandName': _mail_brand(db),
+        'courierName': courier.name or '配送员',
+        'batchName': batch.name,
+        'deliveryDate': _local_label(batch.starts_at, '%Y-%m-%d'),
+        'deliverySlot': (
+            f'{_local_label(batch.starts_at, "%H:%M")}–'
+            f'{_local_label(batch.ends_at, "%H:%M")}'),
+        'orderCount': str(order_count),
+        'courierLink': f'{origin}/courier/batches/{url_quote(str(batch.id))}',
+    }
+    return _queue(db, 'COURIER_DISPATCH', courier.email, variables,
+                  f'courier-dispatch:{batch.id}:{batch.version}')
+
+
+def notify_account_deleted(db, account, deadline=None):
+    if account is None or not account.email:
+        return None
+    variables = {
+        'brandName': _mail_brand(db),
+        'deletionDeadline': _local_label(deadline, '%Y-%m-%d') or '14 天内',
+    }
+    return _queue(db, 'ACCOUNT_DELETED', account.email, variables,
+                  f'account-deleted:{account.id}')
+
+
+def notify_order_event(db, order, event):
+    """Route order lifecycle notifications.
+
+    New orders notify active staff with order/production permissions. Customer
+    order-created and order-status emails are intentionally retired to keep
+    mail volume low; payment and delivery steps call their dedicated helpers.
+    """
+    event_key = str(event or '').strip().upper()
+    if event_key in ('CREATED', 'ORDER_CREATED'):
+        return notify_admin_order_created(db, order)
+    return None

@@ -237,7 +237,7 @@ volumeDiscountCents = a4SubtotalCents - volumePayableCents
 - 验证后可自动进入已认证账户会话（按后端契约），保留原页面返回目标和当前访客订单合并提示。
 - 登录：邮箱+密码，密码显示开关；失败不得泄露账户是否存在；支持忘记密码、重置链接过期/重复使用与重新申请；提供加载/限流/服务故障提示。
 - 注销时只退出对应 CUSTOMER 身份，不误操作管理员/配送员会话；敏感查询缓存与 PDF/object URL 必须销毁。
-- 账号中心增加「邮件通知偏好」，仅在验证邮箱后允许自主订阅/取消订单回执、订单状态与邀请奖励邮件；默认关闭可选运营通知，安全验证和密码找回信不受订阅开关影响。
+- 账号中心保留「邮件通知偏好」，仅用于邀请奖励等运营邮件；付款成功、签收成功、账号注销等事务性邮件不受订阅开关影响。安全验证与密码找回信始终发送。下单回执与订单进度邮件已停发，避免高频状态邮件推高成本。
 - 如需更换已验证邮箱，先发新邮箱验证邮件并在一次性凭证确认成功后更新，原邮箱在确认前继续有效；支持新地址验证的等待、重发和失效状态。必要时使用 `credentials: 'include'` 和后端约定的 CSRF 机制；不可储存密码、验证码、邮箱重置 token、长期 Session Token 到 localStorage/IndexedDB。
 
 ### 2.3 游客订单和账号订单的整合
@@ -320,13 +320,17 @@ volumeDiscountCents = a4SubtotalCents - volumePayableCents
 |---|---|---|
 | `CUSTOMER_VERIFY_EMAIL` | 验证邮箱 | 注册或换绑邮箱请求 |
 | `CUSTOMER_RESET_PASSWORD` | 重置密码 | 用户请求重置 |
-| `STAFF_INVITE_OR_SETUP` | 员工初次设置密码 | 管理员指定员工邮箱发起邀请；消费邀请凭证时验证邮箱并设置初始密码，后续找回才要求已验证邮箱 |
-| `STAFF_RESET_PASSWORD` | 员工重置密码 | 员工或有权限管理员发起 |
-| `ORDER_CREATED` | 下单回执 | 已验证邮箱用户明确订阅，且发送策略已启用 |
-| `ORDER_STATUS_UPDATED` | 订单进度 | 已验证邮箱用户明确订阅，且发送策略已启用 |
-| `REFERRAL_REWARD_GRANTED` | 邀请奖励到账 | 已验证邮箱用户明确订阅，且发送策略已启用 |
+| `ADMIN_ORDER_CREATED` | 新订单通知（管理员） | 订单创建，发给有接单/打印权限且邮箱已验证的管理员；含客户昵称、电话与添加微信提示 |
+| `COURIER_DISPATCH` | 配送派单通知（配送员） | 配送批次发布，只发给该批次的配送员；含日期、时段、订单数 |
+| `DELIVERY_UPDATED` | 配送信息变更 | 配送楼栋/时段变更，发给订单客户 |
+| `PAYMENT_SUCCESS` | 付款成功 | 订单确认收款，事务性发给客户，不受订阅开关影响 |
+| `ORDER_DELIVERED` | 签收成功 | 配送签收，事务性发给客户，不受订阅开关影响 |
+| `REFERRAL_REWARD_GRANTED` | 邀请奖励到账 | 邀请奖励发放，按客户订阅偏好发送 |
+| `ACCOUNT_DELETED` | 账号注销受理 | 客户提交注销申请，事务性发给客户 |
+| `ORDER_CREATED` | 下单回执（已停发） | 保留默认可编辑模板，当前不再向客户发送 |
+| `ORDER_STATUS_UPDATED` | 订单进度（已停发） | 保留默认可编辑模板，当前不再向客户发送 |
 
-- 默认文案必须为完整可编辑的中文版本，支持变量例如 `{{brandName}}`、`{{displayName}}`、`{{expiresMinutes}}`、`{{actionUrl}}`、`{{orderCode}}`、`{{orderStatus}}`、`{{rewardText}}`；变量来自后端返回的 **白名单**，每个模板显示字段说明，不允许管理员通过模板输入任意表达式执行。
+- 默认文案必须为完整可编辑的中文版本，支持变量例如 `{{brandName}}`、`{{displayName}}`、`{{logoUrl}}`、`{{expiresMinutes}}`、`{{actionUrl}}`、`{{orderCode}}`、`{{orderStatus}}`、`{{rewardText}}`、`{{orderAmount}}`、`{{paidAmount}}`、`{{customerNickname}}`、`{{customerPhone}}`、`{{courierName}}`、`{{batchName}}`、`{{deliveryDate}}`、`{{deliverySlot}}`、`{{deliveryLocation}}`、`{{deliveredAt}}`、`{{orderCount}}`、`{{courierLink}}`、`{{deletionDeadline}}`；变量来自后端返回的 **白名单**，每个模板显示字段说明，不允许管理员通过模板输入任意表达式执行。`{{logoUrl}}` 只能作为 `<img src>` 使用，发送时由服务端替换为本站固定品牌图标，不接受自定义远程图片。
 - 提供「变量插入菜单」「预览邮件」「发送测试邮件」「恢复官方默认」「查看最后修改人/时间」「保存版本」。预览仅使用虚拟脱敏数据，不泄露真实用户邮箱、私人文件、订单凭证。
 - 验证/重置类关键安全邮件不能被普通运营开关直接禁用而仍开放对应功能；若模板缺失或 mail 不可用，相关用户操作应安全失败，并给出游客模式回退入口。
 - 预览应以真实后端渲染/校验输出为准；HTML 仅安全模板能力，禁止脚本、任意远程资源和任意未经转义的用户输入。HTML 与纯文本两版都可发送。

@@ -5,6 +5,7 @@ import {
   type PromotionCoupon,
   type PromotionReferral,
 } from "./demo-promotions";
+import { DEFAULT_TEMPLATE_HTML } from "./mailTemplates";
 import type {
   AccessLink,
   Campaign,
@@ -47,76 +48,169 @@ const account: CustomerAccount = {
     referralReward: false,
   },
 };
-const templateDefinitions = [
-  [
-    "CUSTOMER_VERIFY_EMAIL",
-    "验证邮箱",
-    "请验证你的邮箱",
-    "你好，{{displayName}}：\n欢迎使用{{brandName}}。请打开以下链接，并点击页面中的确认按钮验证邮箱：\n{{actionUrl}}\n链接在{{expiresMinutes}}分钟内有效。若非本人操作，请忽略。",
-  ],
-  [
-    "CUSTOMER_RESET_PASSWORD",
-    "重置客户密码",
-    "重置你的登录密码",
-    "你好，{{displayName}}：\n我们收到了你的密码重置申请。请打开{{actionUrl}}，在页面上明确确认并设置新密码。\n链接有效期{{expiresMinutes}}分钟。若非本人操作，请忽略。",
-  ],
-  [
-    "STAFF_INVITE_OR_SETUP",
-    "员工初次设置密码",
-    "你的员工账号邀请",
-    "你好，{{displayName}}：\n管理员邀请你加入{{brandName}}。请通过{{actionUrl}}验证邀请邮箱并设置初始密码。\n链接{{expiresMinutes}}分钟内有效，请勿转发。",
-  ],
-  [
-    "STAFF_RESET_PASSWORD",
-    "员工重置密码",
-    "重置员工账号密码",
-    "你好，{{displayName}}：\n请通过{{actionUrl}}重置员工密码，并在页面上明确提交确认。\n链接{{expiresMinutes}}分钟内有效。若非本人申请，请联系管理员。",
-  ],
-  [
-    "ORDER_CREATED",
-    "下单回执",
-    "订单{{orderCode}}已提交",
-    "你好，{{displayName}}：\n你的订单{{orderCode}}已经提交，当前进度：{{orderStatus}}。请按订单页面说明联系管理员，核对线下结算。\n{{brandName}}",
-  ],
-  [
-    "ORDER_STATUS_UPDATED",
-    "订单进度",
-    "订单{{orderCode}}进度更新",
-    "你好，{{displayName}}：\n你的订单{{orderCode}}当前状态为{{orderStatus}}。请进入你保存的订单页面查看最新安排。\n{{brandName}}",
-  ],
-  [
-    "REFERRAL_REWARD_GRANTED",
-    "邀请奖励到账",
-    "你的邀请奖励已更新",
-    "你好，{{displayName}}：\n{{rewardText}}\n请登录{{brandName}}查看奖励详情及使用条件。",
-  ],
+const templateDefinitions: Array<{
+  key: string;
+  name: string;
+  subject: string;
+  textBody: string;
+  variables: string[];
+  critical?: boolean;
+}> = [
+  {
+    key: "CUSTOMER_VERIFY_EMAIL",
+    name: "验证邮箱",
+    subject: "请验证你的邮箱",
+    textBody:
+      "你好，{{displayName}}：\n欢迎使用{{brandName}}。请打开以下链接，并点击页面中的确认按钮验证邮箱：\n{{actionUrl}}\n链接在{{expiresMinutes}}分钟内有效。若非本人操作，请忽略。",
+    variables: ["brandName", "displayName", "expiresMinutes", "actionUrl"],
+    critical: true,
+  },
+  {
+    key: "CUSTOMER_RESET_PASSWORD",
+    name: "重置客户密码",
+    subject: "重置你的登录密码",
+    textBody:
+      "你好，{{displayName}}：\n我们收到了你的密码重置申请。请打开{{actionUrl}}，在页面上明确确认并设置新密码。\n链接有效期{{expiresMinutes}}分钟。若非本人操作，请忽略。",
+    variables: ["brandName", "displayName", "expiresMinutes", "actionUrl"],
+    critical: true,
+  },
+  {
+    key: "ADMIN_ORDER_CREATED",
+    name: "新订单通知（管理员）",
+    subject: "{{brandName}}｜新订单 {{orderCode}} 待处理",
+    textBody:
+      "{{brandName}} 收到一笔新订单 {{orderCode}}，金额 {{orderAmount}}。\n客户昵称：{{customerNickname}}\n联系电话：{{customerPhone}}\n请及时核对文件并安排打印，留意添加客户微信以便沟通。\n查看订单：{{orderLink}}",
+    variables: [
+      "brandName",
+      "orderCode",
+      "orderAmount",
+      "customerNickname",
+      "customerPhone",
+      "orderLink",
+    ],
+  },
+  {
+    key: "COURIER_DISPATCH",
+    name: "配送派单通知（配送员）",
+    subject:
+      "{{brandName}}｜配送任务 {{batchName}}（{{deliveryDate}} {{deliverySlot}}）",
+    textBody:
+      "{{courierName}}，你好！{{brandName}} 的配送任务已发布。\n批次「{{batchName}}」：{{deliveryDate}} {{deliverySlot}}，共 {{orderCount}} 单。\n请按页面指引领取并配送：{{courierLink}}\n出发前请核对订单数量与包装。",
+    variables: [
+      "brandName",
+      "courierName",
+      "batchName",
+      "deliveryDate",
+      "deliverySlot",
+      "orderCount",
+      "courierLink",
+    ],
+  },
+  {
+    key: "DELIVERY_UPDATED",
+    name: "配送信息变更",
+    subject: "{{brandName}}｜订单 {{orderCode}} 配送信息已更新",
+    textBody:
+      "您好！{{brandName}} 订单 {{orderCode}} 的配送信息已更新。\n配送楼栋：{{deliveryLocation}}\n配送时段：{{deliverySlot}}\n查看订单：{{orderLink}}",
+    variables: [
+      "brandName",
+      "orderCode",
+      "deliveryLocation",
+      "deliverySlot",
+      "orderLink",
+    ],
+  },
+  {
+    key: "PAYMENT_SUCCESS",
+    name: "付款成功",
+    subject: "{{brandName}}｜订单 {{orderCode}} 付款成功",
+    textBody:
+      "您好！{{brandName}} 已确认收到订单 {{orderCode}} 的付款 {{paidAmount}}。\n我们正在安排打印与配送，签收后会再发送确认邮件。\n查看订单：{{orderLink}}",
+    variables: ["brandName", "orderCode", "paidAmount", "orderLink"],
+  },
+  {
+    key: "ORDER_DELIVERED",
+    name: "签收成功",
+    subject: "{{brandName}}｜订单 {{orderCode}} 已签收",
+    textBody:
+      "您好！{{brandName}} 订单 {{orderCode}} 已于 {{deliveredAt}} 签收。\n配送楼栋：{{deliveryLocation}}\n查看订单：{{orderLink}}\n请及时取回资料并妥善保管。",
+    variables: [
+      "brandName",
+      "orderCode",
+      "deliveredAt",
+      "deliveryLocation",
+      "orderLink",
+    ],
+  },
+  {
+    key: "ACCOUNT_DELETED",
+    name: "账号注销受理",
+    subject: "{{brandName}}｜账号注销申请已受理",
+    textBody:
+      "你的 {{brandName}} 账号注销申请已受理。\n我们将在 {{deletionDeadline}} 前完成注销，并停止发送后续通知。\n在此之前登录账号可撤销申请。注销完成后订单、优惠券与历史记录将无法恢复。",
+    variables: ["brandName", "deletionDeadline"],
+  },
+  {
+    key: "ORDER_CREATED",
+    name: "下单回执",
+    subject: "订单{{orderCode}}已提交",
+    textBody:
+      "你好，{{displayName}}：\n你的订单{{orderCode}}已经提交，当前进度：{{orderStatus}}。请按订单页面说明联系管理员，核对线下结算。\n{{brandName}}",
+    variables: ["brandName", "displayName", "orderCode", "orderStatus", "orderLink"],
+  },
+  {
+    key: "ORDER_STATUS_UPDATED",
+    name: "订单进度",
+    subject: "订单{{orderCode}}进度更新",
+    textBody:
+      "你好，{{displayName}}：\n你的订单{{orderCode}}当前状态为{{orderStatus}}。请进入你保存的订单页面查看最新安排。\n{{brandName}}",
+    variables: ["brandName", "displayName", "orderCode", "orderStatus", "orderLink"],
+  },
+  {
+    key: "REFERRAL_REWARD_GRANTED",
+    name: "邀请奖励到账",
+    subject: "你的邀请奖励已更新",
+    textBody:
+      "你好，{{displayName}}：\n{{rewardText}}\n请登录{{brandName}}查看奖励详情及使用条件。",
+    variables: ["brandName", "displayName", "rewardText"],
+  },
 ];
 const variableList = [
   { key: "brandName", description: "品牌名称" },
+  { key: "logoUrl", description: "系统品牌 Logo（固定资源）" },
   { key: "displayName", description: "脱敏展示名" },
   { key: "expiresMinutes", description: "安全链接有效分钟数" },
   { key: "actionUrl", description: "一次性操作链接（测试仅非操作样例）" },
   { key: "orderCode", description: "订单短提取码" },
   { key: "orderStatus", description: "订单状态文字" },
+  { key: "orderLink", description: "订单详情链接" },
+  { key: "orderAmount", description: "订单金额（含币种）" },
+  { key: "paidAmount", description: "实付金额（含币种）" },
+  { key: "customerNickname", description: "客户昵称" },
+  { key: "customerPhone", description: "客户联系电话" },
+  { key: "courierName", description: "配送员称呼" },
+  { key: "courierLink", description: "配送员任务入口" },
+  { key: "batchName", description: "配送批次名称" },
+  { key: "deliveryDate", description: "配送日期" },
+  { key: "deliverySlot", description: "配送时段" },
+  { key: "deliveryLocation", description: "配送楼栋或地点" },
+  { key: "deliveredAt", description: "签收时间" },
+  { key: "orderCount", description: "本批订单数量" },
+  { key: "deletionDeadline", description: "注销完成期限" },
   { key: "rewardText", description: "奖励说明" },
 ];
 const defaults = templateDefinitions.map(
-  ([key, name, subject, textBody], i): MailTemplate => ({
-    key,
-    name,
-    subject,
-    textBody,
-    htmlBody: "",
+  (definition): MailTemplate => ({
+    key: definition.key,
+    name: definition.name,
+    subject: definition.subject,
+    textBody: definition.textBody,
+    htmlBody: DEFAULT_TEMPLATE_HTML[definition.key] ?? "",
     version: 1,
-    enabled: i < 4,
-    critical: i < 4,
-    variables: variableList.filter((v) =>
-      (i < 4
-        ? ["brandName", "displayName", "expiresMinutes", "actionUrl"]
-        : i < 6
-          ? ["brandName", "displayName", "orderCode", "orderStatus"]
-          : ["brandName", "displayName", "rewardText"]
-      ).includes(v.key),
+    enabled: true,
+    critical: definition.critical === true,
+    variables: variableList.filter(
+      (v) => definition.variables.includes(v.key) || v.key === "logoUrl",
     ),
     updatedBy: "系统默认",
     updatedAt: date(),
@@ -469,13 +563,75 @@ function requirePrepPrincipal(prep: Record<string, unknown>) {
   )
     fail("原游客会话已轮换，请重新准备文件并报价", "AUTH_CONTEXT_CHANGED", 409);
 }
+const TEMPLATE_TAGS = new Set([
+  "p", "br", "strong", "b", "em", "i", "h1", "h2", "h3", "h4",
+  "ul", "ol", "li", "blockquote", "pre", "span", "div", "hr", "a",
+  "table", "thead", "tbody", "tfoot", "tr", "td", "th", "img",
+]);
+const TEMPLATE_ATTRIBUTES = new Set([
+  "style", "href", "role", "width", "height", "align", "valign", "bgcolor",
+  "cellpadding", "cellspacing", "border", "colspan", "rowspan",
+  "src", "alt",
+]);
+const BLOCKED_TEMPLATE_TOKENS = [
+  "<script", "<iframe", "<object", "<embed", "<link", "<meta",
+  "javascript:", "vbscript:", "data:text/html", "expression(", "url(",
+  "@import", "-moz-binding",
+];
+const BLOCKED_TEMPLATE_STYLES = [
+  "url(", "expression(", "@import", "javascript:", "vbscript:",
+  "behavior:", "-moz-binding", "position:fixed", "position:absolute",
+];
 function safeTemplateHtml(content: string) {
-  // Same bounded rich-text subset as the editor; no URLs, attributes or active content.
-  if (
-    /<(?!\/?(?:p|br|strong|b|em|i|h[1-4]|ul|ol|li|blockquote|pre|span)\s*\/?\s*>)[^>]*>/i.test(
-      content,
-    )
-  )
+  // Mirrors backend/app/mail.py: a bounded marketing-email subset with inline styles.
+  const lowered = content.toLowerCase();
+  for (const token of BLOCKED_TEMPLATE_TOKENS)
+    if (lowered.includes(token))
+      fail("HTML 模板包含不允许的标签、属性或远程资源");
+  const tagPattern = /<\s*\/?\s*([a-zA-Z][\w-]*)((?:\s[^<>]*?)?)\s*\/?>/g;
+  let cursor = 0;
+  let tag: RegExpExecArray | null;
+  while ((tag = tagPattern.exec(content))) {
+    if (content.slice(cursor, tag.index).includes("<"))
+      fail("HTML 模板包含不允许的标签、属性或远程资源");
+    cursor = tagPattern.lastIndex;
+    if (!TEMPLATE_TAGS.has(tag[1].toLowerCase()))
+      fail("HTML 模板包含不允许的标签、属性或远程资源");
+    const attributes = tag[2] || "";
+    const attrPattern = /([a-zA-Z-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+    let consumed = 0;
+    let attr: RegExpExecArray | null;
+    while ((attr = attrPattern.exec(attributes))) {
+      if (attributes.slice(consumed, attr.index).trim())
+        fail("HTML 模板包含不允许的标签、属性或远程资源");
+      consumed = attrPattern.lastIndex;
+      const name = attr[1].toLowerCase();
+      const value = (attr[2] ?? attr[3] ?? attr[4] ?? "").trim();
+      if (!TEMPLATE_ATTRIBUTES.has(name) || name.startsWith("on"))
+        fail("HTML 模板包含不允许的标签、属性或远程资源");
+      if (name === "src" && tag[1].toLowerCase() !== "img")
+        fail("HTML 模板只允许品牌 Logo 使用图片地址");
+      if (
+        tag[1].toLowerCase() === "img" &&
+        name === "src" &&
+        value !== "{{logoUrl}}"
+      )
+        fail("HTML 模板的图片只允许使用系统品牌 Logo");
+      if (
+        name === "href" &&
+        !/^(https?:|mailto:)/i.test(value) &&
+        !/^\{\{\s*[A-Za-z][A-Za-z0-9_]*\s*\}\}$/.test(value)
+      )
+        fail("HTML 模板包含不允许的链接协议");
+      if (name === "style")
+        for (const blocked of BLOCKED_TEMPLATE_STYLES)
+          if (value.toLowerCase().includes(blocked))
+            fail("HTML 模板包含不允许的样式");
+    }
+    if (attributes.slice(consumed).trim())
+      fail("HTML 模板包含不允许的标签、属性或远程资源");
+  }
+  if (content.slice(cursor).includes("<"))
     fail("HTML 模板包含不允许的标签、属性或远程资源");
   return content;
 }
@@ -1165,11 +1321,26 @@ export async function demoRequest(
       const text = body.textBody ?? item!.textBody;
       const sample = {
         brandName: "DormPrint",
+        logoUrl: "/assets/icon-192.png",
         displayName: "示例同学",
         expiresMinutes: "示例有效期",
         actionUrl: "[不可操作的安全样例链接]",
         orderCode: "DEMO",
         orderStatus: "待人工核对",
+        orderLink: "[不可操作的订单样例链接]",
+        orderAmount: "¥36.00",
+        paidAmount: "¥36.00",
+        customerNickname: "示例同学",
+        customerPhone: "138****0000",
+        courierName: "示例配送员",
+        courierLink: "[不可操作的配送样例链接]",
+        batchName: "10月31日 晚班",
+        deliveryDate: "2026-10-31",
+        deliverySlot: "19:00–20:00",
+        deliveryLocation: "示例公寓 3 栋",
+        deliveredAt: "2026-10-31 20:12",
+        orderCount: "6",
+        deletionDeadline: "2026-11-14",
         rewardText: "奖励以真实活动规则为准",
       };
       const render = (value: string) =>
@@ -1197,7 +1368,7 @@ export async function demoRequest(
         if (!item!.variables.some((v) => v.key === match[1]))
           fail("模板存在未授权变量");
     const content = safeTemplateHtml(String(body.htmlBody || ""));
-    if (/<script|on\w+\s*=|javascript:|<iframe|<img/i.test(content))
+    if (/<script|on\w+\s*=|javascript:|<iframe/i.test(content))
       fail("HTML 模板包含不允许的脚本或远程资源");
     Object.assign(item!, body, {
       version: item!.version + 1,

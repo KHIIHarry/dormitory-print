@@ -1072,6 +1072,8 @@ def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(ge
     batch.reason = payload.reason or batch.reason
     touch(batch)
     _audit_batch(db, actor, batch, 'BATCH_PUBLISHED', payload.reason or '')
+    from .growth import notify_courier_dispatch
+    notify_courier_dispatch(db, batch)
     return ok(_batch_view(db, batch))
 
 
@@ -1823,8 +1825,8 @@ def _record_delivery_proof(
     db.flush()
     # Optional outbox write: a failed notification must never roll back the
     # delivery fact.  The helper's nested savepoint contains mail failures.
-    from .growth import notify_order_event
-    notify_order_event(db, order, 'STATUS_UPDATED')
+    from .growth import notify_order_delivered
+    notify_order_delivered(db, order, delivered_at=now)
     return proof, now
 
 

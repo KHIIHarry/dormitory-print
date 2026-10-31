@@ -153,12 +153,13 @@ def seed_mail_config(db, port, auth=True, secret='top-secret-token', enabled=Tru
     return row
 
 
-def test_seven_chinese_defaults_are_complete_and_safe():
+def test_chinese_defaults_cover_transactional_and_staff_mail():
     from app.mail import DEFAULT_TEMPLATES
 
     assert list(DEFAULT_TEMPLATES) == [
         'CUSTOMER_VERIFY_EMAIL', 'CUSTOMER_RESET_PASSWORD',
-        'STAFF_INVITE_OR_SETUP', 'STAFF_RESET_PASSWORD',
+        'ADMIN_ORDER_CREATED', 'COURIER_DISPATCH', 'DELIVERY_UPDATED',
+        'PAYMENT_SUCCESS', 'ORDER_DELIVERED', 'ACCOUNT_DELETED',
         'ORDER_CREATED', 'ORDER_STATUS_UPDATED', 'REFERRAL_REWARD_GRANTED',
     ]
     for key, template in DEFAULT_TEMPLATES.items():
@@ -167,9 +168,11 @@ def test_seven_chinese_defaults_are_complete_and_safe():
         assert '{{' in template['textBody']
         assert template['variables'], key
     assert '{{actionUrl}}' in DEFAULT_TEMPLATES['CUSTOMER_VERIFY_EMAIL']['textBody']
-    assert '{{orderCode}}' in DEFAULT_TEMPLATES['ORDER_CREATED']['subject']
+    assert '{{customerPhone}}' in DEFAULT_TEMPLATES['ADMIN_ORDER_CREATED']['textBody']
+    assert '{{orderCount}}' in DEFAULT_TEMPLATES['COURIER_DISPATCH']['textBody']
+    assert '{{paidAmount}}' in DEFAULT_TEMPLATES['PAYMENT_SUCCESS']['textBody']
     assert DEFAULT_TEMPLATES['CUSTOMER_VERIFY_EMAIL']['critical'] is True
-    assert DEFAULT_TEMPLATES['ORDER_CREATED']['critical'] is False
+    assert DEFAULT_TEMPLATES['PAYMENT_SUCCESS']['critical'] is False
 
 
 def test_render_escapes_html_and_rejects_missing_or_unknown_variables():
@@ -223,6 +226,109 @@ def test_html_validation_rejects_scripts_handlers_and_remote_images():
         validate_template_content({**template, 'textBody': '缺少必要变量'})
 
 
+def test_html_validation_accepts_only_the_fixed_brand_logo_image():
+    from app.mail import validate_template_content
+    from app.core import DomainError
+
+    template = {
+        'subject': '测试', 'textBody': '正文 {{brandName}}',
+        'htmlBody': '<p>{{brandName}}</p>',
+        'variables': ['brandName', 'logoUrl'], 'critical': False,
+    }
+    good = ('<p><img src="{{logoUrl}}" width="30" height="30" alt="" '
+            'style="border:0;border-radius:8px"></p>')
+    validate_template_content({**template, 'htmlBody': good})
+    for bad in [
+        '<img src="https://tracker.invalid/pixel">',
+        '<img src="//evil.invalid/logo.png">',
+        '<img src="{{brandName}}">',
+        '<img src="data:image/png;base64,AAAA">',
+    ]:
+        with pytest.raises(DomainError) as error:
+            validate_template_content({**template, 'htmlBody': bad})
+        assert error.value.code == 'MAIL_TEMPLATE_INVALID'
+
+
+def test_default_html_templates_are_styled_and_render_cleanly():
+    from app.mail import (DEFAULT_TEMPLATES, SAMPLE_VARIABLES, render_template,
+                          validate_template_content)
+
+    for key, template in DEFAULT_TEMPLATES.items():
+        html = template['htmlBody']
+        assert html.startswith('<table'), key
+        assert '{{brandName}}' in html
+        validate_template_content(template)
+        variables = {item: SAMPLE_VARIABLES[item] for item in template['variables']}
+        rendered = render_template(template, variables)
+        assert '{{' not in rendered['htmlBody'], key
+        assert rendered['htmlBody'].count('<table') >= 2, key
+        assert 'DormPrint 示例' in rendered['htmlBody'], key
+    assert '{{actionUrl}}' in DEFAULT_TEMPLATES['CUSTOMER_VERIFY_EMAIL']['htmlBody']
+    assert '{{orderLink}}' in DEFAULT_TEMPLATES['ORDER_CREATED']['htmlBody']
+
+
+def test_html_validation_accepts_layout_tables_and_blocks_active_markup():
+    from app.mail import validate_template_content
+    from app.core import DomainError
+
+    base = {
+        'subject': '测试', 'textBody': '正文 {{brandName}} {{actionUrl}}',
+        'htmlBody': '', 'variables': ['brandName', 'actionUrl'],
+        'critical': True,
+    }
+    good = (
+        '<table role="presentation" width="600" cellpadding="0" '
+        'cellspacing="0" border="0" style="background:#fff">'
+        '<tr><td align="center">'
+        '<a href="{{actionUrl}}" style="color:#c67c4e">继续</a>'
+        '</td></tr></table>'
+    )
+    validate_template_content({**base, 'htmlBody': good})
+    for bad in [
+        '<a href="//evil.invalid/x">x</a>',
+        '<a href="data:text/html;base64,PHNjcmlwdD4=">x</a>',
+        '<div style="background-image:url(https://evil.invalid/p)">x</div>',
+        '<div style="position: fixed;top:0">x</div>',
+        '<p class="hero">x</p>',
+        '<a href="https://example.invalid" target="_blank">x</a>',
+        '<svg><rect></rect></svg>',
+    ]:
+        with pytest.raises(DomainError) as error:
+            validate_template_content({**base, 'htmlBody': bad})
+        assert error.value.code == 'MAIL_TEMPLATE_INVALID'
+
+
+def test_seed_backfills_html_only_for_untouched_defaults(db):
+    from app.mail import DEFAULT_TEMPLATES, seed_templates
+    from app.models import MailTemplate
+
+    legacy = MailTemplate(
+        key='ORDER_CREATED', subject='旧主题 {{brandName}}',
+        text_body='旧正文 {{brandName}}', html_body='<p>旧默认 HTML</p>', enabled=True,
+        data={'name': '下单回执', 'variables': [{'key': 'brandName'}],
+              'isDefault': True, 'critical': False},
+        version=3,
+    )
+    edited = MailTemplate(
+        key='CUSTOMER_VERIFY_EMAIL', subject='自定义',
+        text_body='自定义 {{brandName}}', html_body='', enabled=True,
+        data={'name': '验证邮箱', 'variables': [{'key': 'brandName'}],
+              'isDefault': False, 'critical': True},
+        version=2,
+    )
+    db.add_all([legacy, edited])
+    db.flush()
+    seed_templates(db)
+    db.refresh(legacy)
+    db.refresh(edited)
+    assert legacy.html_body == DEFAULT_TEMPLATES['ORDER_CREATED']['htmlBody']
+    assert '{{logoUrl}}' in legacy.html_body
+    assert legacy.subject == '旧主题 {{brandName}}'
+    assert legacy.version == 3
+    assert edited.html_body == ''
+    assert edited.version == 2
+
+
 def test_mail_available_requires_valid_enabled_config(db, smtp_server, settings_allow_local):
     from app.mail import mail_available
 
@@ -257,6 +363,25 @@ def test_enqueue_is_idempotent_encrypts_payload_and_hides_contact(db, smtp_serve
     assert 'example.invalid/orders/1' not in job.protected_payload
     assert 'student' not in str(job.data)
     assert job.status == 'QUEUED'
+
+
+def test_enqueue_injects_absolute_brand_logo_url(db, smtp_server,
+                                                 settings_allow_local):
+    from app.core import unseal
+    from app.mail import enqueue_email, seed_templates
+    from app.settings import get_settings
+
+    state, port = smtp_server
+    seed_mail_config(db, port)
+    seed_templates(db)
+    job = enqueue_email(db, 'CUSTOMER_VERIFY_EMAIL', 'student@example.invalid', {
+        'brandName': 'DormPrint',
+        'actionUrl': 'https://example.invalid/verify#token=secret-token-value',
+        'expiresMinutes': '30',
+    }, business_key='mail-logo-1')
+    payload = unseal(job.protected_payload)
+    origin = get_settings().public_origin.rstrip('/')
+    assert f'{origin}/assets/icon-192.png' in payload['htmlBody']
 
 
 def test_process_email_job_really_sends_and_destroys_secret_payload(db, smtp_server,
@@ -413,11 +538,11 @@ def test_mail_config_route_is_admin_only(admin_client, client, api):
     assert denied.status_code in (401, 403)
 
 
-def test_template_routes_list_seven_and_preview_uses_safe_sample(admin_client, api):
+def test_template_routes_list_all_and_preview_uses_safe_sample(admin_client, api):
     listing = api(admin_client, '/admin/mail/templates', method='GET')
     assert listing.status_code == 200, listing.text
     items = listing.json()['data']['items']
-    assert len(items) == 7
+    assert len(items) == 11
     verify = next(item for item in items if item['key'] == 'CUSTOMER_VERIFY_EMAIL')
     assert verify['critical'] is True
     preview = api(admin_client,
@@ -681,24 +806,6 @@ def test_optional_notification_requires_subscription_and_uses_safe_payload(
     assert other is None
 
 
-def test_staff_reset_template_accepts_optional_role_name_variable(db, smtp_server,
-                                                                  settings_allow_local):
-    from app.mail import enqueue_email, process_email_job
-
-    state, port = smtp_server
-    seed_mail_config(db, port)
-    job = enqueue_email(db, 'STAFF_RESET_PASSWORD', 'staff@example.invalid', {
-        'brandName': 'DormPrint',
-        'actionUrl': 'https://example.invalid/staff/reset#token=staff-token',
-        'expiresMinutes': '30',
-        'roleName': '管理员',
-    }, business_key='staff-reset-optional-1')
-    process_email_job(db, job.id)
-    db.refresh(job)
-    assert job.status == 'SMTP_ACCEPTED'
-    assert len(state.messages) == 1
-
-
 def test_courier_cannot_read_or_write_mail_admin(client_factory, staff_factory, db, api):
     from datetime import timedelta
     from app.core import token_hash
@@ -743,58 +850,113 @@ def test_failed_connection_test_disables_registration_availability(db, smtp_serv
 
 def _order_stub(account, status='PENDING_PRINT', version=3):
     from types import SimpleNamespace
-    return SimpleNamespace(checkout_account_id=account.id, id='order-notify-1',
-                           pickup_code='ABC123', status=status, version=version)
+    return SimpleNamespace(
+        checkout_account_id=account.id, id='order-notify-1',
+        pickup_code='ABC123', status=status, version=version,
+        total_cents=3600, cash_received_cents=3600,
+        nickname='测试同学', phone='13800000000', location_id=None,
+        data={'deliveredAt': utcnow().isoformat()},
+    )
 
 
-def test_notify_order_event_defaults_off_and_subscribed_account_creates_outbox(
-        db, smtp_server, settings_allow_local, account_factory):
+def test_new_order_notifies_permitted_staff_not_customer(
+        db, smtp_server, settings_allow_local, account_factory, staff_factory):
     from sqlalchemy import func as sql_func, select as sql_select
     from app.growth import notify_order_event
     from app.models import EmailJob, Job
 
     state, port = smtp_server
     seed_mail_config(db, port)
-    off = account_factory(email='notify-off@example.invalid',
-                          invite_code='NOTIFYOFF1',
-                          preferences={'orderCreated': False,
-                                       'orderStatusUpdated': False,
-                                       'referralReward': False})
-    assert notify_order_event(db, _order_stub(off), 'ORDER_CREATED') is None
-    on = account_factory(email='notify-on@example.invalid',
-                         invite_code='NOTIFYON1',
-                         preferences={'orderCreated': True,
-                                      'orderStatusUpdated': True,
-                                      'referralReward': False})
-    job = notify_order_event(db, _order_stub(on), 'ORDER_CREATED')
-    assert job is not None and job.template_key == 'ORDER_CREATED'
-    assert job.status == 'QUEUED'
-    same = notify_order_event(db, _order_stub(on), 'ORDER_CREATED')
-    assert same.id == job.id
+    customer = account_factory(
+        email='notify-customer@example.invalid', invite_code='NOTIFYCUST1',
+        preferences={'orderCreated': True, 'orderStatusUpdated': True,
+                     'referralReward': False})
+    order = _order_stub(customer)
+    orders_staff = staff_factory(
+        username='orders_mail', email='orders-mail@example.invalid',
+        email_verified=True, capabilities=['orders.manage'])
+    production = staff_factory(
+        username='prod_mail', email='prod-mail@example.invalid',
+        email_verified=True, capabilities=['production.manage'])
+    staff_factory(role='COURIER', username='courier_mail',
+                  email='courier-mail@example.invalid', email_verified=True,
+                  capabilities=['delivery.manage'])
+    jobs = notify_order_event(db, order, 'CREATED')
+    assert isinstance(jobs, list) and len(jobs) == 2
+    assert {job.template_key for job in jobs} == {'ADMIN_ORDER_CREATED'}
+    assert {job.business_key for job in jobs} == {
+        f'admin-order-email:{order.id}:{orders_staff.id}',
+        f'admin-order-email:{order.id}:{production.id}',
+    }
     assert db.scalar(sql_select(sql_func.count()).select_from(EmailJob).where(
-        EmailJob.business_key == 'order-email:ORDER_CREATED:order-notify-1:created')) == 1
+        EmailJob.business_key.like('order-email:%'))) == 0
+    again = notify_order_event(db, order, 'CREATED')
+    assert {job.id for job in again} == {job.id for job in jobs}
     assert db.scalar(sql_select(sql_func.count()).select_from(Job).where(
-        Job.kind == 'EMAIL')) == 1
-    status_job = notify_order_event(db, _order_stub(on, 'DELIVERED', 4),
-                                    'DELIVERED')
-    assert status_job is not None and status_job.template_key == 'ORDER_STATUS_UPDATED'
-    assert 'status:4' in status_job.business_key
+        Job.kind == 'EMAIL')) == 2
+    assert notify_order_event(db, order, 'STATUS_UPDATED') is None
 
 
-def test_notify_order_event_mail_failure_does_not_rollback_order_work(
-        db, account_factory):
+def test_notify_order_mail_failure_does_not_rollback_order_work(
+        db, account_factory, staff_factory):
     from sqlalchemy import func as sql_func, select as sql_select
     from app.growth import notify_order_event
     from app.models import EmailJob
 
-    on = account_factory(email='notify-fail@example.invalid',
-                         invite_code='NOTIFYFAIL1',
-                         preferences={'orderCreated': True,
-                                      'orderStatusUpdated': True,
-                                      'referralReward': False})
-    on.display_name = '事务内修改'
+    customer = account_factory(
+        email='notify-fail@example.invalid', invite_code='NOTIFYFAIL1',
+        preferences={'orderCreated': True})
+    staff_factory(username='fail_mail', email='fail-mail@example.invalid',
+                  email_verified=True, capabilities=['orders.manage'])
+    customer.display_name = '事务内修改'
     db.flush()
     before = db.scalar(sql_select(sql_func.count()).select_from(EmailJob))
-    assert notify_order_event(db, _order_stub(on), 'ORDER_CREATED') is None
-    assert on.display_name == '事务内修改'
+    assert notify_order_event(db, _order_stub(customer), 'CREATED') == []
+    assert customer.display_name == '事务内修改'
     assert db.scalar(sql_select(sql_func.count()).select_from(EmailJob)) == before
+
+
+def test_payment_delivery_and_account_mail_are_transactional(
+        db, smtp_server, settings_allow_local, account_factory):
+    from app.growth import (
+        notify_account_deleted, notify_order_delivered, notify_payment_success,
+    )
+
+    state, port = smtp_server
+    seed_mail_config(db, port)
+    account = account_factory(email='txn-mail@example.invalid',
+                              invite_code='TXNMAIL1', preferences={})
+    order = _order_stub(account, version=7)
+    payment = notify_payment_success(db, order)
+    assert payment is not None and payment.template_key == 'PAYMENT_SUCCESS'
+    assert f'PAYMENT_SUCCESS:{order.id}:7' in payment.business_key
+    assert notify_payment_success(db, order).id == payment.id
+    delivered = notify_order_delivered(db, order, delivered_at=utcnow())
+    assert delivered is not None and delivered.template_key == 'ORDER_DELIVERED'
+    assert 'ORDER_DELIVERED:order-notify-1:7' in delivered.business_key
+    deleted = notify_account_deleted(db, account, utcnow() + timedelta(days=14))
+    assert deleted is not None and deleted.template_key == 'ACCOUNT_DELETED'
+
+
+def test_courier_dispatch_goes_only_to_the_assigned_courier(
+        db, smtp_server, settings_allow_local, staff_factory):
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.growth import notify_courier_dispatch
+
+    state, port = smtp_server
+    seed_mail_config(db, port)
+    courier = staff_factory(
+        role='COURIER', username='dispatch_courier',
+        email='dispatch@example.invalid', email_verified=True)
+    staff_factory(role='COURIER', username='other_courier',
+                  email='other@example.invalid', email_verified=True)
+    batch_id = str(uuid4())
+    batch = SimpleNamespace(
+        id=batch_id, name='晚班', starts_at=utcnow(),
+        ends_at=utcnow() + timedelta(hours=2), courier_id=courier.id,
+        version=2)
+    job = notify_courier_dispatch(db, batch)
+    assert job is not None and job.template_key == 'COURIER_DISPATCH'
+    assert job.business_key == f'courier-dispatch:{batch_id}:2'
+    assert notify_courier_dispatch(db, batch).id == job.id

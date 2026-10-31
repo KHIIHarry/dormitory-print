@@ -350,8 +350,6 @@ function MailSettingsForm() {
 const templateNames: Record<string, string> = {
   CUSTOMER_VERIFY_EMAIL: "验证邮箱",
   CUSTOMER_RESET_PASSWORD: "用户重置密码",
-  STAFF_INVITE_OR_SETUP: "员工初次设置密码",
-  STAFF_RESET_PASSWORD: "员工重置密码",
   ORDER_CREATED: "下单回执",
   ORDER_STATUS_UPDATED: "订单进度",
   REFERRAL_REWARD_GRANTED: "邀请奖励到账",
@@ -640,7 +638,7 @@ export function MailTemplatesPage() {
                 className="growth-mail-preview"
                 sandbox=""
                 referrerPolicy="no-referrer"
-                srcDoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'"><body>${preview.htmlBody}</body>`}
+                srcDoc={`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:; form-action 'none'; base-uri 'none'"><body style="margin:0;background:#fbfaf8">${preview.htmlBody}</body>`}
               />
             )}
           </div>

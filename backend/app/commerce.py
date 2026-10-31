@@ -746,6 +746,8 @@ def change_location(order_id:str,body:LocationInput,db=Depends(get_db),actor:Act
     order.data={**order.data,'locationSnapshot':{'id':location.id,'name':location.name,'mapVersion':location.map_version}}
     if assignment:assignment.address_review=True;order.address_review=True;touch(assignment)
     add_history(order,'配送楼栋已修改','已分配的配送安排须管理员复核');touch(order)
+    from .growth import notify_delivery_updated
+    notify_delivery_updated(db,order)
     return ok(order_view(db,order,actor))
 
 
@@ -834,8 +836,8 @@ def settle_order(db,actor,order,body):
     from .production import refresh_production
     db.flush();refresh_production(db,order)
     audit(db,actor,'PAYMENT_CONFIRMED','ORDER',order.id)
-    from .growth import notify_order_event
-    notify_order_event(db,order,'STATUS_UPDATED')
+    from .growth import notify_payment_success
+    notify_payment_success(db,order)
     return order
 
 

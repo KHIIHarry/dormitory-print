@@ -154,6 +154,25 @@ describe("v1.3续作回归", () => {
       }),
     ).rejects.toThrow();
   });
+  it("默认模板自带可预览的品牌化HTML", async () => {
+    const list = (await demoRequest("/admin/mail/templates")) as any;
+    for (const template of list.items) {
+      expect(template.htmlBody).toContain("{{brandName}}");
+      const preview = (await demoRequest(
+        `/admin/mail/templates/${template.key}/preview`,
+        {
+          method: "POST",
+          body: {
+            subject: template.subject,
+            textBody: template.textBody,
+            htmlBody: template.htmlBody,
+          },
+        },
+      )) as any;
+      expect(preview.htmlBody).not.toContain("{{");
+      expect(preview.htmlBody).toContain("DormPrint");
+    }
+  });
 });
 
 it("导入的只读范围不会变成所有权，也不暴露原件与未授权PDF", async () => {

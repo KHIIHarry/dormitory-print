@@ -533,7 +533,7 @@ def _enable_order_notifications(db, account):
     db.commit()
 
 
-def test_start_and_proof_queue_one_status_notification_per_order(
+def test_start_and_proof_queue_only_a_delivered_mail(
         db, api, admin_client, client_factory, staff_factory, account_factory):
     courier = make_courier(staff_factory)
     account = account_factory()
@@ -545,9 +545,9 @@ def test_start_and_proof_queue_one_status_notification_per_order(
 
     batch, assignments = _batch(db, api, admin_client, courier, [order])
     db.refresh(order)
-    jobs = list(db.scalars(select(EmailJob).order_by(EmailJob.created_at)))
-    assert len(jobs) == 1
-    assert jobs[0].business_key ==         f'order-email:ORDER_STATUS_UPDATED:{order.id}:status:{order.version}'
+    # Batch start and order status transitions deliberately no longer mail the
+    # customer; only payment and signed delivery are transactional.
+    assert list(db.scalars(select(EmailJob))) == []
 
     photo = _proof_asset(db, courier, assignments[0])
     courier_client = _staff_client(client_factory, db, courier)
@@ -557,16 +557,17 @@ def test_start_and_proof_queue_one_status_notification_per_order(
     assert response.status_code == 200, response.text
     db.expire_all()
     jobs = list(db.scalars(select(EmailJob).order_by(EmailJob.created_at)))
-    assert len(jobs) == 2
+    assert len(jobs) == 1
     delivered = db.get(type(order), order.id)
-    assert jobs[-1].business_key ==         f'order-email:ORDER_STATUS_UPDATED:{order.id}:status:{delivered.version}'
+    assert jobs[0].template_key == 'ORDER_DELIVERED'
+    assert jobs[0].business_key ==         f'order-email:ORDER_DELIVERED:{order.id}:{delivered.version}'
 
     replay = _post(api, courier_client, batch, body, key=key)
     assert replay.status_code == 200, replay.text
-    assert len(list(db.scalars(select(EmailJob)))) == 2
+    assert len(list(db.scalars(select(EmailJob)))) == 1
 
 
-def test_admin_exception_resolve_queues_status_notification(
+def test_admin_exception_resolve_sends_no_customer_mail(
         db, api, admin_client, client_factory, staff_factory, account_factory):
     courier = make_courier(staff_factory)
     account = account_factory()
@@ -594,14 +595,11 @@ def test_admin_exception_resolve_queues_status_notification(
     })
     assert resolved.status_code == 200, resolved.text
     db.expire_all()
-    rows = list(db.scalars(select(EmailJob).order_by(EmailJob.created_at)))
-    assert len(rows) == 2
-    current = db.get(type(order), order.id)
-    assert current.status == 'READY_FOR_DELIVERY'
-    assert rows[-1].business_key ==         f'order-email:ORDER_STATUS_UPDATED:{order.id}:status:{current.version}'
+    assert list(db.scalars(select(EmailJob))) == []
+    assert db.get(type(order), order.id).status == 'READY_FOR_DELIVERY'
 
 
-def test_auto_unpaid_timeout_close_queues_status_notification(
+def test_auto_unpaid_timeout_close_sends_no_customer_mail(
         db, account_factory):
     from app.maintenance import _close_expired_orders
 
@@ -618,12 +616,8 @@ def test_auto_unpaid_timeout_close_queues_status_notification(
 
     assert _close_expired_orders(db, utcnow()) == 1
     db.expire_all()
-    current = db.get(type(order), order.id)
-    assert current.status == 'CANCELLED'
-    rows = list(db.scalars(select(EmailJob)))
-    assert len(rows) == 1
-    assert rows[0].business_key ==         f'order-email:ORDER_STATUS_UPDATED:{order.id}:status:{current.version}'
-
+    assert db.get(type(order), order.id).status == 'CANCELLED'
+    assert list(db.scalars(select(EmailJob))) == []
 
 
 def test_batch_proof_requires_and_enforces_assignment_version(

@@ -366,7 +366,7 @@ SMTP 密钥仅加密存储；验证码、订单令牌、重置令牌的长期验
 - 原 `POST /auth/login`、`POST /auth/logout`、`GET /auth/me` **保留 username/password**；客户邮箱注册不能进入该认证域。
 - 原 `GET/POST /admin/staff`、`PATCH /admin/staff/{id}` 保留原语义，增加可选员工邮箱、展示名、状态、权限能力、强制改密标记、停用/启用、查会话和撤销会话。角色仍 `ADMIN / COURIER`；权限能力只能缩小/细分管理员权限，不允许 COURIER 获得管理业务能力。
 - 任何管理员都应可执行原配送员业务；**仅具备 `staff.manage`、`mail.manage`、`promotion.manage` 等管理能力的 ADMIN** 可管理相应敏感配置；初始安全管理员具备所需管理能力。若现有系统没有细分能力，初版可由全部 ADMIN 执行管理动作，但必须保留管理员身份和完整审计，禁止在 COURIER 开后门。
-- 首个管理员只能由原一次性安全初始化流程生成，不允许默认口令或开放员工自注册。新增管理员/配送员由有权限的管理员创建；有邮箱时可发送一次性 `STAFF_INVITE_OR_SETUP` 邮件设置密码；无邮箱或邮件不可用时由 `POST /admin/staff/{id}/issue-temporary-password` 生成一次性随机临时凭据，管理员**仅看到一次**、带外传达并强制首次改密；仅存 hash、限时有效、不可从 GET 重新读取。
+- 首个管理员只能由原一次性安全初始化流程生成，不允许默认口令或开放员工自注册。新增管理员/配送员由有权限的管理员创建；员工统一使用基础客户账号密码，不再发送独立的员工设置/重置邮件，也不再签发员工临时密码。
 - 员工可自助修改密码、查看/撤销自身会话，绑定邮箱后可通过验证流程找回；管理员强制重置、改角色、停用、撤权时立即递增 `sessionVersion`/撤销会话；不得导致「被改派配送员还能提交旧 proof」。
 - 后端强制保护最后一个有效、拥有完整管理员能力的账户不被停用/删除/降权；不能依赖前端按钮禁用。
 - 邮箱密码与员工密码使用独立命名空间和会话 Cookies，可同浏览器并存，但 CUSTOMER 身份绝不能访问 `/admin`、`/courier` 员工接口；权限每次按授权对象检查，不因在同一浏览器出现其他 Cookie 而混用主体。
@@ -514,11 +514,15 @@ type MailConfigPublicAdminView = {
 |---|---|---|---|
 | `CUSTOMER_VERIFY_EMAIL` | `{{brandName}}｜请验证您的邮箱` | brandName, actionUrl, expiresMinutes | 账号注册/邮箱变更确认 |
 | `CUSTOMER_RESET_PASSWORD` | `{{brandName}}｜重置账号密码` | brandName, actionUrl, expiresMinutes | 重设密码 |
-| `STAFF_INVITE_OR_SETUP` | `{{brandName}}｜设置员工账号密码` | brandName, actionUrl, expiresMinutes, roleName | 管理员邀请员工 |
-| `STAFF_RESET_PASSWORD` | `{{brandName}}｜员工账号密码重置` | brandName, actionUrl, expiresMinutes | 员工重置 |
-| `ORDER_CREATED` | `{{brandName}}｜订单 {{orderCode}} 已创建` | brandName, orderCode, orderStatus, orderLink | 已订阅的注册客户订单回执 |
-| `ORDER_STATUS_UPDATED` | `{{brandName}}｜订单 {{orderCode}} 进度更新` | brandName, orderCode, orderStatus, orderLink | 已订阅的注册客户订单状态更新 |
+| `ADMIN_ORDER_CREATED` | `{{brandName}}｜新订单 {{orderCode}} 待处理` | brandName, orderCode, orderAmount, customerNickname, customerPhone, orderLink | 新订单创建，发给有接单/打印权限的管理员，含添加客户微信提示 |
+| `COURIER_DISPATCH` | `{{brandName}}｜配送任务 {{batchName}}` | brandName, courierName, batchName, deliveryDate, deliverySlot, orderCount, courierLink | 配送批次发布，只发该批次配送员 |
+| `DELIVERY_UPDATED` | `{{brandName}}｜订单 {{orderCode}} 配送信息已更新` | brandName, orderCode, deliveryLocation, deliverySlot, orderLink | 配送楼栋/时段变更，发给客户 |
+| `PAYMENT_SUCCESS` | `{{brandName}}｜订单 {{orderCode}} 付款成功` | brandName, orderCode, paidAmount, orderLink | 确认收款，事务性发给客户 |
+| `ORDER_DELIVERED` | `{{brandName}}｜订单 {{orderCode}} 已签收` | brandName, orderCode, deliveredAt, deliveryLocation, orderLink | 签收完成，事务性发给客户 |
 | `REFERRAL_REWARD_GRANTED` | `{{brandName}}｜邀请奖励已发放` | brandName, rewardText | 已订阅注册客户奖励通知 |
+| `ACCOUNT_DELETED` | `{{brandName}}｜账号注销申请已受理` | brandName, deletionDeadline | 客户提交注销申请，事务性发送 |
+| `ORDER_CREATED` | `{{brandName}}｜订单 {{orderCode}} 已创建` | brandName, orderCode, orderStatus, orderLink | 保留模板，当前不再向客户发送 |
+| `ORDER_STATUS_UPDATED` | `{{brandName}}｜订单 {{orderCode}} 进度更新` | brandName, orderCode, orderStatus, orderLink | 保留模板，当前不再向客户发送 |
 
 **默认纯文本正文**（种子数据须真实包含，不可只生成 key 名）：
 
@@ -537,19 +541,6 @@ type MailConfigPublicAdminView = {
 链接将在 {{expiresMinutes}} 分钟后失效，且只能使用一次。
 如果不是您本人申请，请忽略本邮件。任何工作人员都不会索要您的密码。
 
-[STAFF_INVITE_OR_SETUP]
-您好！您已受邀成为 {{brandName}} 的 {{roleName}}。
-请打开以下一次性链接设置员工账号密码：
-{{actionUrl}}
-链接将在 {{expiresMinutes}} 分钟后失效。
-若您不了解此次邀请，请联系项目管理员，不要设置密码。
-
-[STAFF_RESET_PASSWORD]
-您好！这是您的 {{brandName}} 员工账号密码重置链接：
-{{actionUrl}}
-链接将在 {{expiresMinutes}} 分钟后失效，且只能使用一次。
-如非本人申请，请立即联系管理员。
-
 [ORDER_CREATED]
 您好！您在 {{brandName}} 的订单 {{orderCode}} 已提交。
 当前状态：{{orderStatus}}
@@ -567,10 +558,11 @@ type MailConfigPublicAdminView = {
 请登录「我的优惠券」查看使用条件、有效期与活动说明。
 ```
 
-- **模板来源不等于可执行代码**：仅实现 `{{approvedVar}}` 变量替换，禁止任意模板表达式、任意代码、读取服务器环境、网络请求、JS、未授权 HTML 标签。纯文本防邮件头注入；HTML 强制安全转义用户值/有限安全标签，不允许远程图片、第三方脚本或跟踪像素。渲染前校验所需变量与格式，测试预览使用样例脱敏变量。
-- 系统安全邮件（验证、密码重置、员工初始化）即使管理员改模板，也必须维持必要的一次性操作链接、安全声明与有效期。若必需变量被删除，更新返回 422，不能保存一份无法找回账号的坏模板。
+- **模板来源不等于可执行代码**：仅实现 `{{approvedVar}}` 变量替换，禁止任意模板表达式、任意代码、读取服务器环境、网络请求、JS、未授权 HTML 标签。纯文本防邮件头注入；HTML 强制安全转义用户值/有限安全标签。图片只允许系统内置的品牌 Logo：模板必须且只能使用 `{{logoUrl}}` 作为 `<img src>`，发送时由服务端替换为本站固定图标地址；不允许管理员自定义远程图片、第三方脚本或跟踪像素。渲染前校验所需变量与格式，测试预览使用样例脱敏变量。
+- 系统安全邮件（验证、密码重置）即使管理员改模板，也必须维持必要的一次性操作链接、安全声明与有效期。若必需变量被删除，更新返回 422，不能保存一份无法找回账号的坏模板。
 - 预览/测试邮件均使用单独安全测试变量及特定测试 token（不代表真实可操作凭据），不能误触发真实邮箱验证或生成账户。模板版本写入 `email_outbox`，已经排队的消息按其已快照模板/变量发送，不因后台新编辑意外改内容。
-- 邮件通知只发送给**已验证邮箱且明确订阅**的账户；订阅默认关闭，通过 `PATCH /customer/account/notification-preferences` 管理，并按最后一次同意时间与类别审计；订单消息不能默认向游客手机号/微信号发送邮件，也不能自动发管理员微信。订单邮件的 `orderLink` 使用已登录用户入口或有权限的有限信息页面，**不能发送管理员用的单订单高熵链接给无关收件人**；不在邮件内嵌原文档、完整电话、定位坐标或交付照片。
+- 通知策略按收件人区分：新订单只发有接单/打印权限且邮箱已验证的管理员，主体含客户昵称、电话与“留意添加客户微信”的提示，不发客户；配送批次发布只发该批次配送员；付款成功、签收成功、账号注销受理属于事务性邮件，直接发给对应客户，不受订阅开关影响；邀请奖励到账仍按客户订阅偏好发送。下单回执与订单进度邮件已停发，保留模板但不再产生客户投递，避免高频状态邮件推高成本。
+- 运营订阅通过 `PATCH /customer/account/notification-preferences` 管理，并按最后一次同意时间与类别审计；订单消息不能默认向游客手机号/微信号发送邮件，也不能自动发管理员微信。订单邮件的 `orderLink` 使用已登录用户入口或有权限的有限信息页面，**不能发送管理员用的单订单高熵链接给无关收件人**；不在邮件内嵌原文档、完整电话、定位坐标或交付照片。
 - `mail_template_versions` 支持 edit、preview、test-send、restore-default、启停**非关键**运营模板。关闭订单通知不能关闭验证/找回安全邮件，除非同时安全关闭依赖它们的注册/找回能力。
 
 ## 7. 权限矩阵新增项与数据保护

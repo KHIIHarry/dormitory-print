@@ -1316,6 +1316,9 @@ def customer_deletion_request(payload: DeletionRequestInput, response: Response,
     result = request_self_deletion(db, db.get(Account, actor.account_id),
                                    reason=payload.reason, actor=actor)
     if result['status'] == 'RECOVERY':
+        from .growth import notify_account_deleted
+        notify_account_deleted(db, db.get(Account, actor.account_id),
+                               result.get('recoveryUntil'))
         # The recovery window already revoked every normal session; remove the
         # stale browser cookie as well so it cannot be replayed.
         _clear_cookie(response, ACCOUNT_COOKIE)
