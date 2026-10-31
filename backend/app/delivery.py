@@ -27,6 +27,17 @@ from .core import (
     touch,
 )
 from .db import get_db
+from .campuses import (
+    admin_campuses_data,
+    admin_map_data,
+    create_campus,
+    delete_campus,
+    ensure_default_campus,
+    location_view,
+    public_map_data,
+    publish_campus,
+    update_campus,
+)
 from .delivery_schemas import (
     AdminMapView,
     AddressReviewInput,
@@ -41,6 +52,11 @@ from .delivery_schemas import (
     BatchUpdate,
     BatchVersionInput,
     BatchView,
+    CampusCreateInput,
+    CampusListView,
+    CampusMapPublishInput,
+    CampusUpdateInput,
+    CampusView,
     CourierBatchDetailView,
     CourierExceptionInput,
     DeliveryExceptionListView,
@@ -170,10 +186,7 @@ def _workflow_limits(db) -> tuple[int, float]:
 
 
 def _location_view(location: Location, map_version: int) -> dict:
-    return {'id': location.id, 'name': location.name, 'type': location.type,
-            'x': round(location.x * 100, 4), 'y': round(location.y * 100, 4),
-            'enabled': location.enabled, 'mapVersion': location.map_version,
-            'version': location.version}
+    return location_view(location, map_version)
 
 
 def _slot_archived(slot: DeliverySlot) -> bool:
@@ -395,6 +408,14 @@ def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignme
         blockers.append(_blocker('COURIER_REQUIRED', '批次未分配有效配送员', batch.id))
     if not assignments:
         blockers.append(_blocker('BATCH_EMPTY', '批次没有可配送订单', batch.id))
+    batch_campuses = {
+        campus_id
+        for order in orders_by_id.values()
+        if (campus_id := _order_campus_id(db, order))
+    }
+    if len(batch_campuses) > 1:
+        blockers.append(_blocker('CAMPUS_MIXED',
+                                 '批次包含多个校区的订单，请先拆分后再配送', batch.id))
     for assignment in assignments:
         if assignment.batch_id != batch.id or not assignment.active:
             blockers.append(_blocker('ASSIGNMENT_INVALID', '配送执行关联无效', assignment.id))
@@ -505,19 +526,8 @@ def _valid_courier(db, courier_id: str | None) -> Staff | None:
 
 @router.get('/public/map', response_model=Envelope[PublicMapView])
 def public_map(db=Depends(get_db)):
-    row = get_config(db, 'map')
-    data = row.data or {}
-    version = int(data.get('mapVersion') or 1)
-    items = [_location_view(location, version) for location in db.scalars(
-        select(Location).where(Location.enabled.is_(True)).order_by(Location.name, Location.id))]
-    published_at = data.get('publishedAt')
-    return ok({
-        'version': version,
-        'mapAssetId': data.get('assetId'),
-        'mapUrl': data.get('mapUrl') or None,
-        'publishedAt': datetime.fromisoformat(published_at) if isinstance(published_at, str) else published_at,
-        'items': items,
-    })
+    ensure_default_campus(db)
+    return ok(public_map_data(db))
 
 
 @router.get('/public/slots', response_model=Envelope[SlotListView])
@@ -541,20 +551,8 @@ def public_slots(date: str | None = None, db=Depends(get_db)):
 @router.get('/admin/maps', response_model=Envelope[AdminMapView])
 def admin_map(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    row = get_config(db, 'map')
-    data = row.data or {}
-    version = int(data.get('mapVersion') or 1)
-    locations = list(db.scalars(select(Location).order_by(Location.name, Location.id)))
-    items = [_location_view(location, version) for location in locations]
-    published_at = data.get('publishedAt')
-    return ok({
-        'version': version,
-        'mapAssetId': data.get('assetId'),
-        'mapUrl': data.get('mapUrl') or None,
-        'publishedAt': datetime.fromisoformat(published_at) if isinstance(published_at, str) else published_at,
-        'items': items,
-        'hotspots': items,
-    })
+    ensure_default_campus(db)
+    return ok(admin_map_data(db))
 
 
 def _check_public_map_asset(db, asset_id: str) -> Asset:
@@ -569,11 +567,12 @@ def _check_public_map_asset(db, asset_id: str) -> Asset:
 def admin_map_publish(payload: MapPublishInput, db=Depends(get_db),
                       actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
+    campus = ensure_default_campus(db)
     row = get_config(db, 'map')
     lock(db, type(row), row.id, payload.expected_version)
     data = deepcopy(row.data or {})
-    current_version = int(data.get('mapVersion') or 1)
-    current_asset = data.get('assetId')
+    current_version = campus.map_version
+    current_asset = campus.map_asset_id
     if payload.map_asset_id and payload.map_asset_id != current_asset:
         if not payload.migration_confirmed:
             raise DomainError('MAP_MIGRATION_REQUIRED', '更换底图前必须确认热点已迁移', 422)
@@ -585,7 +584,8 @@ def admin_map_publish(payload: MapPublishInput, db=Depends(get_db),
     if payload.version < current_version:
         raise DomainError('MAP_VERSION_CONFLICT', '地图版本不能倒退', 409, {'currentVersion': current_version})
 
-    existing = {location.id: location for location in db.scalars(select(Location))}
+    existing = {location.id: location for location in db.scalars(
+        select(Location).where(Location.campus_id == campus.id))}
     seen: set[str] = set()
     changed = payload.map_asset_id not in (None, current_asset)
     for hotspot in payload.hotspots:
@@ -593,7 +593,8 @@ def admin_map_publish(payload: MapPublishInput, db=Depends(get_db),
             raise DomainError('MAP_HOTSPOT_DUPLICATE', '楼栋热点重复', 422, {'id': hotspot.id})
         location = existing.get(hotspot.id) if hotspot.id else None
         if location is None:
-            location = Location(id=hotspot.id or None, name=hotspot.name, type=hotspot.type,
+            location = Location(id=hotspot.id or None, campus_id=campus.id,
+                                name=hotspot.name, type=hotspot.type,
                                 x=hotspot.x / 100, y=hotspot.y / 100,
                                 enabled=hotspot.enabled, map_version=payload.version)
             db.add(location)
@@ -622,10 +623,15 @@ def admin_map_publish(payload: MapPublishInput, db=Depends(get_db),
     new_version = max(payload.version, current_version + 1 if changed and payload.version <= current_version
                       else payload.version)
     if new_version != payload.version:
-        for location in db.scalars(select(Location)):
+        for location in db.scalars(select(Location).where(Location.campus_id == campus.id)):
             if location.id in seen:
                 location.map_version = new_version
                 touch(location)
+    campus.map_version = new_version
+    campus.map_asset_id = data.get('assetId')
+    campus.map_url = data.get('mapUrl') or ''
+    campus.published_at = utcnow()
+    touch(campus)
     data.update({'mapVersion': new_version, 'publishedAt': utcnow().isoformat(),
                  'migrationConfirmed': payload.migration_confirmed,
                  'hotspotCount': len(seen), 'publishedBy': actor.id})
@@ -684,6 +690,40 @@ def admin_map_delete(location_id: str, db=Depends(get_db), actor: Actor = Depend
     db.delete(location)
     audit(db, actor, 'MAP_HOTSPOT_DELETED', 'DELIVERY_LOCATION', location_id)
     return ok({'id': location_id, 'deleted': True})
+
+
+@router.get('/admin/campuses', response_model=Envelope[CampusListView])
+def admin_campuses(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    return ok(admin_campuses_data(db))
+
+
+@router.post('/admin/campuses', response_model=Envelope[CampusView])
+def admin_campus_create(payload: CampusCreateInput, db=Depends(get_db),
+                        actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    return ok(create_campus(db, payload, actor))
+
+
+@router.patch('/admin/campuses/{campus_id}', response_model=Envelope[CampusView])
+def admin_campus_update(campus_id: str, payload: CampusUpdateInput, db=Depends(get_db),
+                        actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    return ok(update_campus(db, campus_id, payload, actor))
+
+
+@router.delete('/admin/campuses/{campus_id}', response_model=Envelope[dict])
+def admin_campus_delete(campus_id: str, db=Depends(get_db),
+                        actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    return ok(delete_campus(db, campus_id, actor))
+
+
+@router.post('/admin/campuses/{campus_id}/map', response_model=Envelope[CampusView])
+def admin_campus_publish(campus_id: str, payload: CampusMapPublishInput,
+                         db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    return ok(publish_campus(db, campus_id, payload, actor))
 
 
 # ---------------------------------------------------------------------------
@@ -1215,6 +1255,37 @@ def _slot_mismatch_blocker(target: DeliveryBatch, order: Order) -> dict | None:
     return None
 
 
+def _order_campus_id(db, order: Order) -> str | None:
+    if not order.location_id:
+        return None
+    location = db.get(Location, order.location_id)
+    return location.campus_id if location is not None else None
+
+
+def _batch_campus_ids(db, batch: DeliveryBatch) -> set[str]:
+    ids: set[str] = set()
+    for assignment in _active_batch_assignments(db, batch.id):
+        order = db.get(Order, assignment.order_id)
+        campus_id = _order_campus_id(db, order) if order is not None else None
+        if campus_id:
+            ids.add(campus_id)
+    return ids
+
+
+def _campus_mismatch_blocker(db, target: DeliveryBatch, order: Order) -> dict | None:
+    order_campus = _order_campus_id(db, order)
+    if order_campus is None:
+        return None
+    batch_campuses = _batch_campus_ids(db, target)
+    if len(batch_campuses) > 1:
+        return _blocker('CAMPUS_MIXED',
+                        '批次已包含多个校区的订单，请先拆分后配送', order.id)
+    if batch_campuses and order_campus not in batch_campuses:
+        return _blocker('CAMPUS_MISMATCH',
+                        '订单属于其他校区，不能加入该批次', order.id)
+    return None
+
+
 def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict:
     blockers: list[dict] = []
     impacts: list[dict] = []
@@ -1249,6 +1320,14 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
         else:
             orders[order_id] = order
 
+    selected_campuses = {
+        campus_id
+        for order in orders.values()
+        if (campus_id := _order_campus_id(db, order))
+    }
+    if action in ('ADD', 'TRANSFER', 'MERGE') and len(selected_campuses) > 1:
+        blockers.append(_blocker('CAMPUS_MIXED',
+                                 '所选订单包含多个校区，不能放入同一批次'))
     if action in ('ADD',):
         if not target_batch and len(source_batches) == 1:
             target_batch = source_batches[0]
@@ -1268,6 +1347,9 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                     mismatch = _slot_mismatch_blocker(target_batch, order)
                     if mismatch is not None:
                         blockers.append(mismatch)
+                    campus_mismatch = _campus_mismatch_blocker(db, target_batch, order)
+                    if campus_mismatch is not None:
+                        blockers.append(campus_mismatch)
                     impacts.append({'batchId': target_batch.id, 'orderId': order.id,
                                     'pickupCode': order.pickup_code, 'message': '将加入批次'})
     elif action in ('REMOVE', 'TRANSFER', 'SPLIT', 'MERGE'):
@@ -1300,6 +1382,9 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                     mismatch = _slot_mismatch_blocker(target_batch, order)
                     if mismatch is not None:
                         blockers.append(mismatch)
+                    campus_mismatch = _campus_mismatch_blocker(db, target_batch, order)
+                    if campus_mismatch is not None:
+                        blockers.append(campus_mismatch)
                 impacts.append({'batchId': target_batch.id if target_batch else None,
                                 'orderId': order.id, 'pickupCode': order.pickup_code,
                                 'message': {'REMOVE': '将移出批次', 'TRANSFER': '将转移到目标批次',
@@ -1407,6 +1492,10 @@ def _assign_order(db, batch: DeliveryBatch, order: Order, actor: Actor,
     if mismatch is not None:
         raise DomainError('ORDER_SLOT_MISMATCH', mismatch['message'], 409,
                           {'orderId': order.id, 'slotId': _batch_slot_id(batch)})
+    campus_mismatch = _campus_mismatch_blocker(db, batch, order)
+    if campus_mismatch is not None:
+        raise DomainError(campus_mismatch['code'], campus_mismatch['message'], 409,
+                          {'orderId': order.id, 'campusId': _order_campus_id(db, order)})
     assignment = DeliveryAssignment(
         order_id=order.id, batch_id=batch.id, courier_id=batch.courier_id,
         status='PLANNED', active=True, address_review=bool(order.address_review),

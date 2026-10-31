@@ -23,7 +23,7 @@ import { getIdentityGeneration } from "../growth/client";
 import { useLocation } from "react-router-dom";
 import { DEMO, ADMIN, mutation, request, now } from "./api";
 import { trashBlockers } from "./trash-blockers";
-import type { DataState, Config, PrintFile, Role, Order } from "./types";
+import type { DataState, Config, PrintFile, Role, Order, Campus } from "./types";
 const emptyConfig: Config = {
   serviceEnabled: false,
   announcement: "",
@@ -51,6 +51,7 @@ const initial: DataState = {
   orders: [],
   batches: [],
   buildings: [],
+  campuses: [],
   slots: [],
   staff: [],
   exceptions: [],
@@ -290,6 +291,7 @@ export function Provider({ children }: { children: ReactNode }) {
             const payload = result as {
               items?: unknown[];
               batches?: DataState["batches"];
+              campuses?: Campus[];
             };
             setData((state) => {
               if (!owns()) return state;
@@ -299,7 +301,20 @@ export function Provider({ children }: { children: ReactNode }) {
                 value = [value];
               return {
                 ...state,
-                [resource.name]: value,
+                [resource.name]:
+                  resource.name === "buildings" &&
+                  DEMO &&
+                  state.buildings.length
+                    ? state.buildings
+                    : value,
+                ...(resource.name === "buildings" && Array.isArray(payload.campuses)
+                  ? {
+                      campuses:
+                        DEMO && state.campuses.length
+                          ? state.campuses
+                          : payload.campuses,
+                    }
+                  : {}),
                 ...(payload.batches ? { batches: payload.batches } : {}),
               };
             });
@@ -318,6 +333,7 @@ export function Provider({ children }: { children: ReactNode }) {
               setData((state) => ({
                 ...state,
                 [resource.name]: resource.name === "config" ? emptyConfig : [],
+                ...(resource.name === "buildings" ? { campuses: [] } : {}),
               }));
               queryClient.clear();
               if (item.status === 401 && realm !== "customer")

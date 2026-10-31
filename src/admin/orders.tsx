@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 import { ADMIN, useStore } from "../lib/store";
 import { money } from "../lib/api";
+import { campusOfOrder } from "../lib/campus";
+import { CampusFilter, CampusTag } from "./campus-filter";
 import {
   hasWageBlocker,
   trashBlockers,
@@ -57,6 +59,7 @@ export function AdminOrders() {
   const [more, setMore] = useState(false);
   const q = params.get("q") || "";
   const status = params.get("status") || "";
+  const campus = params.get("campus") || "";
   const building = params.get("building") || "";
   const patch = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -64,9 +67,18 @@ export function AdminOrders() {
     else next.delete(key);
     setParams(next);
   };
+  const patchCampus = (value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set("campus", value);
+    else next.delete("campus");
+    next.delete("building");
+    setParams(next);
+    setPage(1);
+  };
   const filtered = data.orders.filter(
     (o) =>
       (!status || o.status === status) &&
+      (!campus || campusOfOrder(data.campuses, data.buildings, o)?.id === campus) &&
       (!building || o.locationId === building) &&
       `${o.pickupCode} ${o.nickname} ${o.phone} ${o.files.map((f) => f.name).join(" ")}`
         .toLowerCase()
@@ -115,13 +127,20 @@ export function AdminOrders() {
               </option>
             ))}
           </select>
+          <CampusFilter
+            campuses={data.campuses}
+            value={campus}
+            onChange={patchCampus}
+          />
           <select
             aria-label="楼栋筛选"
             value={building}
             onChange={(e) => patch("building", e.target.value)}
           >
             <option value="">全部楼栋</option>
-            {data.buildings.map((b) => (
+            {data.buildings
+              .filter((b) => !campus || b.campusId === campus)
+              .map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
               </option>
@@ -255,12 +274,15 @@ export function AdminOrders() {
                         </small>
                       </td>
                       <td>
-                        {
-                          data.buildings.find((b) => b.id === o.locationId)
-                            ?.name
-                        }
+                        <CampusTag
+                          campus={campusOfOrder(data.campuses, data.buildings, o)}
+                        />
                         <small>
-                          {data.slots.find((s) => s.id === o.slotId)?.name}{" "}
+                          {
+                            data.buildings.find((b) => b.id === o.locationId)
+                              ?.name
+                          }{" "}
+                          · {data.slots.find((s) => s.id === o.slotId)?.name}{" "}
                           {o.addressReview && "· 地址待复核"}
                         </small>
                       </td>
@@ -639,10 +661,19 @@ export function AdminOrderDetail() {
                 <div>
                   <dt>目标楼栋</dt>
                   <dd>
-                    {
-                      data.buildings.find((b) => b.id === order.locationId)
-                        ?.name
-                    }
+                    <CampusTag
+                      campus={campusOfOrder(
+                        data.campuses,
+                        data.buildings,
+                        order,
+                      )}
+                    />
+                    <div>
+                      {
+                        data.buildings.find((b) => b.id === order.locationId)
+                          ?.name
+                      }
+                    </div>
                   </dd>
                 </div>
                 <div>

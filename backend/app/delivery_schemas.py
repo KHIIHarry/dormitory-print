@@ -373,6 +373,47 @@ class MapHotspotUpdate(DTO):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class CampusCreateInput(DTO):
+    name: str = Field(min_length=1, max_length=120)
+    theme_color: str = Field(default='#C67C4E', pattern=r'^#[0-9A-Fa-f]{6}$')
+    selection_enabled: bool = True
+    sort_order: int = Field(default=0, ge=0, le=10000)
+
+    @field_validator('name')
+    @classmethod
+    def _trim_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('校区名称不能为空')
+        return value
+
+
+class CampusUpdateInput(DTO):
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    theme_color: str | None = Field(default=None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    selection_enabled: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0, le=10000)
+
+    @field_validator('name')
+    @classmethod
+    def _trim_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError('校区名称不能为空')
+        return value
+
+
+class CampusMapPublishInput(DTO):
+    version: int = Field(ge=1)
+    hotspots: list[MapHotspotInput] = Field(default_factory=list)
+    migration_confirmed: bool = False
+    map_asset_id: str | None = None
+    expected_version: int = Field(ge=1)
+
+
 class DeliveryProofInput(DTO):
     expected_version: int = Field(ge=1)
     delivery_assignment_id: str = Field(min_length=1, max_length=64)
@@ -477,6 +518,20 @@ class LocationView(DTO):
     enabled: bool
     map_version: int
     version: int
+    campus_id: str | None = None
+
+
+class PublicCampusView(DTO):
+    id: str
+    name: str
+    theme_color: str
+    selection_enabled: bool
+    sort_order: int
+    map_version: int
+    map_asset_id: str | None = None
+    map_url: str | None = None
+    published_at: datetime | None = None
+    items: list[LocationView] = Field(default_factory=list)
 
 
 class PublicMapView(DTO):
@@ -485,10 +540,29 @@ class PublicMapView(DTO):
     map_url: str | None = None
     published_at: datetime | None = None
     items: list[LocationView]
+    campuses: list[PublicCampusView] = Field(default_factory=list)
 
 
 class AdminMapView(PublicMapView):
     hotspots: list[LocationView]
+
+
+class CampusView(DTO):
+    id: str
+    name: str
+    theme_color: str
+    selection_enabled: bool
+    sort_order: int
+    version: int
+    map_version: int
+    map_asset_id: str | None = None
+    map_url: str | None = None
+    published_at: datetime | None = None
+    hotspots: list[LocationView] = Field(default_factory=list)
+
+
+class CampusListView(DTO):
+    items: list[CampusView]
 
 
 class SlotView(DTO):

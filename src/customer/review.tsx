@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -17,7 +17,7 @@ import { DEMO, useStore } from "../lib/store";
 import { photoCrop, photoPaper } from "../lib/photo-layout";
 import { parseRanges, pricingErrors } from "../lib/domain";
 import { isUncertainSubmission, money, now } from "../lib/api";
-import type { Order } from "../lib/types";
+import type { Order, Campus } from "../lib/types";
 import type { Artifact } from "../lib/artifacts";
 import {
   Button,
@@ -34,6 +34,7 @@ import {
 } from "../components/ui";
 import { TaskStatus } from "../components/feedback";
 import { CampusMap } from "../components/campus-map";
+import { MotionFold } from "../components/motion-fold";
 import { DocPreview } from "../components/doc-preview";
 import { growthRequest, useGrowthResource } from "../growth/client";
 import { useIdentity } from "../growth/identity";
@@ -79,6 +80,7 @@ type CheckoutSnapshot = {
   name: string;
   phone: string;
   building: string;
+  campus?: string;
   slot: string;
   customerNote?: string;
 };
@@ -162,6 +164,7 @@ function ReviewContent() {
     [building, setBuilding] = useState(
       saved?.building || original?.locationId || "",
     ),
+    [campus, setCampus] = useState(saved?.campus || ""),
     [slot, setSlot] = useState(saved?.slot || original?.slotId || ""),
     [customerNote, setCustomerNote] = useState(
       saved?.customerNote ?? original?.customerNote ?? "",
@@ -180,6 +183,40 @@ function ReviewContent() {
     [submitting, setSubmitting] = useState(false),
     [submissionIssue, setSubmissionIssue] = useState(""),
     [clock, setClock] = useState(Date.now());
+
+  useEffect(() => {
+    if (!data.campuses.length) return;
+    const known = data.campuses.find((item) => item.id === campus);
+    if (campus && (!known || !known.selectionEnabled)) {
+      setCampus("");
+      setBuilding("");
+      return;
+    }
+    if (!campus && building) {
+      const location = data.buildings.find((item) => item.id === building);
+      const owner = location?.campusId
+        ? data.campuses.find((item) => item.id === location.campusId)
+        : undefined;
+      if (owner?.selectionEnabled) setCampus(owner.id);
+    }
+  }, [building, campus, data.buildings, data.campuses]);
+
+  const selectCampus = (next: Campus) => {
+    if (!next.selectionEnabled) return;
+    setCampus(next.id);
+    setSearch("");
+    setFields((current) => ({ ...current, campus: "" }));
+    const currentBuilding = data.buildings.find((item) => item.id === building);
+    if (currentBuilding && currentBuilding.campusId !== next.id) setBuilding("");
+  };
+
+  const selectBuilding = (next: string) => {
+    setBuilding(next);
+    setFields((current) => ({ ...current, building: "" }));
+    const location = data.buildings.find((item) => item.id === next);
+    if (location?.campusId) setCampus(location.campusId);
+  };
+
   const verified =
     identity.customer.authKind === "REGISTERED" &&
     !!identity.customer.account?.verified;
@@ -466,6 +503,7 @@ function ReviewContent() {
       acceptQuote(next);
       setContentGeneration(generation);
       setContentReadiness(configEpoch);
+
     } catch (e) {
       if (
         current() &&
@@ -580,6 +618,7 @@ function ReviewContent() {
         name,
         phone,
         building,
+        campus,
         slot,
         customerNote,
       } satisfies CheckoutSnapshot,
@@ -594,6 +633,7 @@ function ReviewContent() {
     name,
     phone,
     building,
+    campus,
     slot,
     customerNote,
     setCheckoutMemory,
@@ -639,6 +679,23 @@ function ReviewContent() {
           .sort((a, b) => a.minSheets - b.minSheets)[0]
       : undefined;
 
+  const hasCampusChoices = data.campuses.length > 0;
+  const selectedCampus = data.campuses.find((item) => item.id === campus);
+  const activeCampus = selectedCampus?.selectionEnabled
+    ? selectedCampus
+    : undefined;
+  const campusBuildings = hasCampusChoices
+    ? data.buildings.filter(
+        (item) =>
+          item.campusId === activeCampus?.id ||
+          (data.campuses.length === 1 && !item.campusId),
+      )
+    : data.buildings;
+  const visibleBuildings = campusBuildings.filter(
+    (item) => item.enabled && item.name.includes(search),
+  );
+  const mapUrl = activeCampus?.mapUrl || data.config.mapUrl;
+
   const submit = async () => {
     if (
       !configReadyRef.current ||
@@ -649,6 +706,21 @@ function ReviewContent() {
       error
     )
       return;
+    if (hasCampusChoices && !activeCampus) {
+      const message =
+        campus && selectedCampus && !selectedCampus.selectionEnabled
+          ? "该校区暂未开放选点，请选择其他校区"
+          : "请选择校区";
+      setFields({ campus: message });
+      requestAnimationFrame(() => {
+        const target = document.querySelector<HTMLElement>(
+          "[data-checkout-field=\"campus\"]",
+        );
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
+      return;
+    }
     const result = contactSchema.safeParse({
       nickname: name,
       phone,
@@ -978,7 +1050,10 @@ function ReviewContent() {
                           }
                           onClick={() => {
                             adoptForAccount.current = null;
-                            void refreshQuote({ selectionMode: "AUTO" }, true);
+                            void refreshQuote(
+                              { selectionMode: "AUTO" },
+                              true,
+                            );
                           }}
                         >
                           重新关联账号并报价
@@ -1177,41 +1252,102 @@ function ReviewContent() {
             </div>
           </Panel>
           <Panel title="把资料送到哪里？">
-            <div data-checkout-field="building" tabIndex={-1} className="map-search">
-              <Search size={17} />
-              <input
-                placeholder="搜索宿舍楼或教学楼"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            <CampusMap
-              buildings={data.buildings}
-              value={building}
-              onChange={setBuilding}
-              mapUrl={data.config.mapUrl}
-            />
-            <div className="building-choices">
-              {data.buildings
-                .filter((b) => b.enabled && b.name.includes(search))
-                .map((b) => (
-                  <button
-                    key={b.id}
-                    className={b.id === building ? "selected" : ""}
-                    onClick={() => setBuilding(b.id)}
-                  >
-                    <MapPin size={15} />
-                    {b.name}
-                    {building === b.id && <Check size={14} />}
-                  </button>
-                ))}
-            </div>
-            {fields.building && (
-              <p className="field-error">{fields.building}</p>
+            {hasCampusChoices && (
+              <div
+                data-checkout-field="campus"
+                tabIndex={-1}
+                className="campus-picker"
+              >
+                <div className="campus-picker-head">
+                  <span>选择校区</span>
+                </div>
+                <div className="campus-choices">
+                  {data.campuses.map((item) => {
+                    const unavailable = !item.selectionEnabled;
+                    return (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className={[
+                          "campus-choice",
+                          item.id === campus ? "selected" : "",
+                          unavailable ? "unavailable" : "",
+                        ].join(" ")}
+                        style={
+                          { "--campus-color": item.themeColor } as CSSProperties
+                        }
+                        disabled={unavailable}
+                        aria-pressed={item.id === campus}
+                        aria-disabled={unavailable}
+                        onClick={() => selectCampus(item)}
+                      >
+                        <span className="campus-dot" />
+                        <span className="campus-name">{item.name}</span>
+                        {unavailable ? (
+                          <span className="campus-state">暂未开放</span>
+                        ) : item.id === campus ? (
+                          <Check size={16} />
+                        ) : (
+                          <ChevronRight size={15} />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {fields.campus && (
+                  <p className="field-error">{fields.campus}</p>
+                )}
+              </div>
             )}
-            <p className="form-hint">
-              送达楼栋公共区域，不需要填写楼层与门牌号。
-            </p>
+            <MotionFold open={!hasCampusChoices || !!activeCampus}>
+              {(!hasCampusChoices || activeCampus) && (
+                <div
+                  key={activeCampus?.id || "legacy"}
+                  className={hasCampusChoices ? "campus-map-content" : ""}
+                >
+                <div
+                  data-checkout-field="building"
+                  tabIndex={-1}
+                  className="map-search"
+                >
+                  <Search size={17} />
+                  <input
+                    placeholder="搜索宿舍楼或教学楼"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <CampusMap
+                  buildings={campusBuildings}
+                  value={building}
+                  onChange={selectBuilding}
+                  mapUrl={mapUrl}
+                />
+                <div className="building-choices">
+                  {visibleBuildings.map((b) => (
+                    <button
+                      key={b.id}
+                      className={b.id === building ? "selected" : ""}
+                      onClick={() => selectBuilding(b.id)}
+                    >
+                      <MapPin size={15} />
+                      {b.name}
+                      {building === b.id && <Check size={14} />}
+                    </button>
+                  ))}
+                </div>
+                {activeCampus && !campusBuildings.some((item) => item.enabled) && (
+                  <Notice>该校区暂未配置可选点位，请切换其他校区或联系管理员。</Notice>
+                )}
+                {fields.building && (
+                  <p className="field-error">{fields.building}</p>
+                )}
+                <p className="form-hint">
+                  送达楼栋公共区域，不需要填写楼层与门牌号。
+                </p>
+                </div>
+              )}
+            </MotionFold>
           </Panel>
           <Panel title="选择预约配送时段">
             <div data-checkout-field="slot" tabIndex={-1} className="slot-choices">

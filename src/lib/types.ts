@@ -123,6 +123,23 @@ export type Building = {
   x: number;
   y: number;
   enabled: boolean;
+  campusId?: string | null;
+};
+export type Campus = {
+  id: string;
+  name: string;
+  themeColor: string;
+  selectionEnabled: boolean;
+  sortOrder: number;
+  mapVersion: number;
+  mapAssetId?: string | null;
+  mapUrl?: string;
+  publishedAt?: string | null;
+  items: Building[];
+};
+export type AdminCampus = Omit<Campus, "items"> & {
+  version: number;
+  hotspots: Building[];
 };
 export type Slot = {
   id: string;
@@ -223,6 +240,7 @@ export type DataState = {
   orders: Order[];
   batches: Batch[];
   buildings: Building[];
+  campuses: Campus[];
   slots: Slot[];
   staff: Staff[];
   exceptions: ExceptionItem[];

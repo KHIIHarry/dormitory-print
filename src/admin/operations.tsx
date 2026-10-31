@@ -52,7 +52,13 @@ import {
   qrUploadFile,
   type AssetUploadState,
 } from "./image-upload";
+import { CampusMapAdmin } from "./campus-map";
+
 export function MapEditor() {
+  return <CampusMapAdmin />;
+}
+
+function LegacyMapEditor() {
   const { data, act, toast, pendingActions, actionIssues } = useStore();
   const [buildings, setBuildings] = useState(
     data.buildings.map((b) => ({ ...b })),

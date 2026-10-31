@@ -10,6 +10,7 @@ from .config import get_config, public_config
 from .core import (Actor, DTO, DomainError, Envelope, actor_dep, audit, authorize_order,
                    grant_scopes, lock, ok, owns_principal, require_admin, require_customer, touch)
 from .db import get_db
+from .campuses import campus_is_open
 from .models import (AccessGrant, Account, AnonymousLedger, Artifact, Asset, BindingTask, BusinessException, DeliveryAssignment,
     DeliveryProof, DeliverySlot, Location, Order, OrderFile, OrderRevision, PackingTask, Payment, Preparation,
     Principal, PrintAttempt, PrintTask, Quote, Receipt, ReceiptAdjustment, utcnow)
@@ -468,6 +469,8 @@ def _current_ready(db,actor,payload,order=None):
         raise
     if not location or not location.enabled:
         raise DomainError('LOCATION_UNAVAILABLE','所选楼栋当前不可用',409)
+    if not campus_is_open(db, location):
+        raise DomainError('CAMPUS_UNAVAILABLE','所选校区暂未开放选点',409)
     if not slot.enabled or slot.ends_at<=utcnow():
         raise DomainError('SLOT_UNAVAILABLE','所选申请时段已关闭，请重新选择',409)
     cutoff=(slot.data or {}).get('cutoffAt')
@@ -740,6 +743,7 @@ def change_location(order_id:str,body:LocationInput,db=Depends(get_db),actor:Act
         raise DomainError('INVALID_TRANSITION','实际配送开始后不能自行修改楼栋',409)
     location=db.get(Location,body.location_id)
     if not location or not location.enabled:raise DomainError('LOCATION_UNAVAILABLE','楼栋不可用',409)
+    if not campus_is_open(db,location):raise DomainError('CAMPUS_UNAVAILABLE','所选校区暂未开放选点',409)
     assignment=db.scalar(select(DeliveryAssignment).where(DeliveryAssignment.order_id==order.id,DeliveryAssignment.active.is_(True)).with_for_update())
     if assignment and assignment.status=='STARTED':raise DomainError('INVALID_TRANSITION','已开始配送',409)
     order.location_id=location.id

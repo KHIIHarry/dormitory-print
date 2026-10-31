@@ -1459,3 +1459,79 @@ def test_batch_courier_name_uses_linked_account_nickname(
                             capabilities=[])
     batch = create_batch(api, client, courier)
     assert batch['courierName'] == '客户昵称'
+
+
+def test_cross_campus_order_cannot_join_existing_batch(db, api, client, act_as,
+                                                       staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    east = api(client, '/admin/campuses', {
+        'name': '东校区', 'themeColor': '#C67C4E', 'selectionEnabled': True,
+    }).json()['data']
+    west = api(client, '/admin/campuses', {
+        'name': '西校区', 'themeColor': '#7E8A63', 'selectionEnabled': True,
+    }).json()['data']
+    east_order = make_ready_order(db)
+    west_order = make_ready_order(db)
+    db.get(Location, east_order.location_id).campus_id = east['id']
+    db.get(Location, west_order.location_id).campus_id = west['id']
+    db.commit()
+
+    courier = make_courier(staff_factory)
+    batch = create_batch(api, client, courier)
+    add_orders(api, client, batch, [east_order.id])
+
+    preview = api(client, '/admin/batch-operations/preview', {
+        'action': 'ADD',
+        'orderIds': [west_order.id],
+        'sourceBatchIds': [batch['id']],
+        'targetBatchId': None,
+        'versions': {batch['id']: batch['version']},
+        'payload': {'reason': '测试跨校区'},
+    })
+    assert preview.status_code == 200, preview.text
+    blockers = preview.json()['data']['blockers']
+    assert any(blocker['code'] == 'CAMPUS_MISMATCH' for blocker in blockers), blockers
+
+
+def test_mixed_campus_batch_is_blocked_from_start(db, api, client, act_as,
+                                                  staff_factory):
+    from app.delivery import _start_blockers
+
+    act_as(staff_factory(role='ADMIN'))
+    east = api(client, '/admin/campuses', {
+        'name': '东校区', 'themeColor': '#C67C4E', 'selectionEnabled': True,
+    }).json()['data']
+    west = api(client, '/admin/campuses', {
+        'name': '西校区', 'themeColor': '#7E8A63', 'selectionEnabled': True,
+    }).json()['data']
+    east_order = make_ready_order(db)
+    west_order = make_ready_order(db)
+    db.get(Location, east_order.location_id).campus_id = east['id']
+    db.get(Location, west_order.location_id).campus_id = west['id']
+    courier = make_courier(staff_factory)
+    batch = DeliveryBatch(
+        name='跨校区测试批次', courier_id=courier.id,
+        starts_at=utcnow() + timedelta(hours=1),
+        ends_at=utcnow() + timedelta(hours=2),
+        status='PUBLISHED',
+    )
+    db.add(batch)
+    db.flush()
+    db.add_all([
+        DeliveryAssignment(order_id=east_order.id, batch_id=batch.id,
+                           courier_id=courier.id, status='PLANNED', active=True),
+        DeliveryAssignment(order_id=west_order.id, batch_id=batch.id,
+                           courier_id=courier.id, status='PLANNED', active=True),
+    ])
+    db.commit()
+    assignments = (
+        db.query(DeliveryAssignment)
+        .filter(DeliveryAssignment.batch_id == batch.id)
+        .all()
+    )
+    orders = {order.id: order for order in (east_order, west_order)}
+    codes = {
+        blocker['code']
+        for blocker in _start_blockers(db, batch, assignments, orders)
+    }
+    assert 'CAMPUS_MIXED' in codes, codes

@@ -543,6 +543,13 @@
       "AdminMapView": {
         "additionalProperties": false,
         "properties": {
+          "campuses": {
+            "items": {
+              "$ref": "#/components/schemas/PublicCampusView"
+            },
+            "title": "Campuses",
+            "type": "array"
+          },
           "hotspots": {
             "items": {
               "$ref": "#/components/schemas/LocationView"
@@ -2748,6 +2755,250 @@
         "title": "CampaignUpdateInput",
         "type": "object"
       },
+      "CampusCreateInput": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "selectionEnabled": {
+            "default": true,
+            "title": "Selectionenabled",
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "default": 0,
+            "maximum": 10000,
+            "minimum": 0,
+            "title": "Sortorder",
+            "type": "integer"
+          },
+          "themeColor": {
+            "default": "#C67C4E",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "title": "Themecolor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CampusCreateInput",
+        "type": "object"
+      },
+      "CampusListView": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CampusView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CampusListView",
+        "type": "object"
+      },
+      "CampusMapPublishInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "hotspots": {
+            "items": {
+              "$ref": "#/components/schemas/MapHotspotInput"
+            },
+            "title": "Hotspots",
+            "type": "array"
+          },
+          "mapAssetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapassetid"
+          },
+          "migrationConfirmed": {
+            "default": false,
+            "title": "Migrationconfirmed",
+            "type": "boolean"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "expectedVersion"
+        ],
+        "title": "CampusMapPublishInput",
+        "type": "object"
+      },
+      "CampusUpdateInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "selectionEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selectionenabled"
+          },
+          "sortOrder": {
+            "anyOf": [
+              {
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortorder"
+          },
+          "themeColor": {
+            "anyOf": [
+              {
+                "pattern": "^#[0-9A-Fa-f]{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Themecolor"
+          }
+        },
+        "required": [
+          "expectedVersion"
+        ],
+        "title": "CampusUpdateInput",
+        "type": "object"
+      },
+      "CampusView": {
+        "additionalProperties": false,
+        "properties": {
+          "hotspots": {
+            "items": {
+              "$ref": "#/components/schemas/LocationView"
+            },
+            "title": "Hotspots",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mapAssetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapassetid"
+          },
+          "mapUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapurl"
+          },
+          "mapVersion": {
+            "title": "Mapversion",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "publishedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publishedat"
+          },
+          "selectionEnabled": {
+            "title": "Selectionenabled",
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "title": "Sortorder",
+            "type": "integer"
+          },
+          "themeColor": {
+            "title": "Themecolor",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "themeColor",
+          "selectionEnabled",
+          "sortOrder",
+          "version",
+          "mapVersion"
+        ],
+        "title": "CampusView",
+        "type": "object"
+      },
       "CaseAction": {
         "additionalProperties": false,
         "properties": {
@@ -4072,6 +4323,17 @@
             "maxLength": 512,
             "title": "Password",
             "type": "string"
+          },
+          "replaceSessionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacesessionid"
           }
         },
         "required": [
@@ -5918,6 +6180,42 @@
           "requestId"
         ],
         "title": "Envelope[CampaignList]",
+        "type": "object"
+      },
+      "Envelope_CampusListView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CampusListView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[CampusListView]",
+        "type": "object"
+      },
+      "Envelope_CampusView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CampusView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[CampusView]",
         "type": "object"
       },
       "Envelope_CaseList_": {
@@ -8429,6 +8727,17 @@
       "LocationView": {
         "additionalProperties": false,
         "properties": {
+          "campusId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -12393,6 +12702,86 @@
         "title": "PromotionSummary",
         "type": "object"
       },
+      "PublicCampusView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LocationView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "mapAssetId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapassetid"
+          },
+          "mapUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapurl"
+          },
+          "mapVersion": {
+            "title": "Mapversion",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "publishedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publishedat"
+          },
+          "selectionEnabled": {
+            "title": "Selectionenabled",
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "title": "Sortorder",
+            "type": "integer"
+          },
+          "themeColor": {
+            "title": "Themecolor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "themeColor",
+          "selectionEnabled",
+          "sortOrder",
+          "mapVersion"
+        ],
+        "title": "PublicCampusView",
+        "type": "object"
+      },
       "PublicConfigView": {
         "additionalProperties": false,
         "properties": {
@@ -12618,6 +13007,13 @@
       "PublicMapView": {
         "additionalProperties": false,
         "properties": {
+          "campuses": {
+            "items": {
+              "$ref": "#/components/schemas/PublicCampusView"
+            },
+            "title": "Campuses",
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/LocationView"
@@ -19575,6 +19971,399 @@
           }
         },
         "summary": "Complete Binding"
+      }
+    },
+    "/admin/campuses": {
+      "get": {
+        "operationId": "admin_campuses_api_v1_admin_campuses_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CampusListView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Campuses"
+      },
+      "post": {
+        "operationId": "admin_campus_create_api_v1_admin_campuses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CampusCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CampusView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Campus Create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/admin/campuses/{campus_id}": {
+      "delete": {
+        "operationId": "admin_campus_delete_api_v1_admin_campuses__campus_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campus_id",
+            "required": true,
+            "schema": {
+              "title": "Campus Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Campus Delete"
+      },
+      "patch": {
+        "operationId": "admin_campus_update_api_v1_admin_campuses__campus_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campus_id",
+            "required": true,
+            "schema": {
+              "title": "Campus Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CampusUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CampusView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Campus Update"
+      }
+    },
+    "/admin/campuses/{campus_id}/map": {
+      "post": {
+        "operationId": "admin_campus_publish_api_v1_admin_campuses__campus_id__map_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campus_id",
+            "required": true,
+            "schema": {
+              "title": "Campus Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CampusMapPublishInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CampusView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Campus Publish"
       }
     },
     "/admin/config": {

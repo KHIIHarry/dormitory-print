@@ -22,6 +22,8 @@ import {
   type TrashBlocker,
 } from "../lib/trash-blockers";
 import { growthRequest } from "../growth/client";
+import { campusOfOrder, campusesOfBatch } from "../lib/campus";
+import { CampusFilter, CampusTag } from "./campus-filter";
 import { batchPrimaryAction, canStartBatch } from "../lib/domain";
 import type { Batch, DataState, Slot } from "../lib/types";
 import {
@@ -97,6 +99,14 @@ export function Batches() {
   const { data } = useStore();
   const [create, setCreate] = useState(false);
   const [status, setStatus] = useState("");
+  const [campus, setCampus] = useState("");
+  const batchCampuses = (batch: Batch) =>
+    campusesOfBatch(data.campuses, data.buildings, data.orders, batch);
+  const visibleBatches = data.batches.filter(
+    (batch) =>
+      (!status || batch.status === status) &&
+      (!campus || batchCampuses(batch).some((item) => item.id === campus)),
+  );
   return (
     <>
       <PageHeading
@@ -111,19 +121,22 @@ export function Batches() {
       />
       <div className="production-stats">
         {[
-          ["今日批次", data.batches.length],
-          ["规划中", data.batches.filter((b) => b.status === "PLANNED").length],
+          ["今日批次", visibleBatches.length],
+          [
+            "规划中",
+            visibleBatches.filter((b) => b.status === "PLANNED").length,
+          ],
           [
             "已延期",
-            data.batches.filter((b) => b.status === "POSTPONED").length,
+            visibleBatches.filter((b) => b.status === "POSTPONED").length,
           ],
           [
             "配送中",
-            data.batches.filter((b) => b.status === "DELIVERING").length,
+            visibleBatches.filter((b) => b.status === "DELIVERING").length,
           ],
           [
             "已完成",
-            data.batches.filter((b) => b.status === "COMPLETED").length,
+            visibleBatches.filter((b) => b.status === "COMPLETED").length,
           ],
         ].map(([l, n]) => (
           <div key={l}>
@@ -132,6 +145,20 @@ export function Batches() {
           </div>
         ))}
       </div>
+      {!!(data.campuses?.length ?? 0) && (
+        <Panel className="filter-panel">
+          <div className="filter-row">
+            <CampusFilter
+              campuses={data.campuses}
+              value={campus}
+              onChange={setCampus}
+            />
+            <span className="muted">
+              配送批次只能安排同一校区的订单，跨校区订单不会被加入批次。
+            </span>
+          </div>
+        </Panel>
+      )}
       <div className="tabs">
         {[
           ["", "全部批次"],
@@ -152,8 +179,7 @@ export function Batches() {
         ))}
       </div>
       <div className="batch-grid">
-        {data.batches
-          .filter((b) => !status || b.status === status)
+        {visibleBatches
           .map((b) => {
             const ready = b.orderIds.filter(
               (id) =>
@@ -173,6 +199,18 @@ export function Batches() {
                   <Badge status={b.status} />
                 </div>
                 <h2>{b.name}</h2>
+                <div className="batch-campus">
+                  {batchCampuses(b).length ? (
+                    batchCampuses(b).map((item) => (
+                      <CampusTag key={item.id} campus={item} />
+                    ))
+                  ) : (
+                    <span className="muted">校区待定</span>
+                  )}
+                  {batchCampuses(b).length > 1 && (
+                    <span className="red-text">跨校区，请拆分后再配送</span>
+                  )}
+                </div>
                 <p>
                   <CalendarDays size={15} />
                   {b.date} <span>{b.time}</span>
@@ -198,11 +236,15 @@ export function Batches() {
             );
           })}
       </div>
-      {!data.batches.length && (
+      {!visibleBatches.length && (
         <Panel>
           <Empty
-            title="还没有配送批次"
-            text="选择订单与配送时间，创建第一个配送计划。"
+            title={data.batches.length ? "该校区暂无配送批次" : "还没有配送批次"}
+            text={
+              data.batches.length
+                ? "切换校区或清除筛选查看其他批次。"
+                : "选择订单与配送时间，创建第一个配送计划。"
+            }
           />
         </Panel>
       )}
@@ -413,6 +455,7 @@ export function BatchDetail() {
   const [mode, setMode] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [target, setTarget] = useState("");
+  const [candidateCampus, setCandidateCampus] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [reason, setReason] = useState("");
@@ -423,14 +466,31 @@ export function BatchDetail() {
   const [commitBlockers, setCommitBlockers] = useState<TrashBlocker[]>([]);
   if (!batch) return <Empty title="配送批次不存在" />;
   const orders = data.orders.filter((o) => batch.orderIds.includes(o.id));
-  const canStart = canStartBatch(orders);
+  const batchCampusList = campusesOfBatch(
+    data.campuses,
+    data.buildings,
+    data.orders,
+    batch,
+  );
+  const batchCampusId = batchCampusList[0]?.id || "";
+  const mixedCampus = batchCampusList.length > 1;
+  const canStart = canStartBatch(orders) && !mixedCampus;
   const candidates =
     mode === "ADD"
-      ? data.orders.filter(
-          (o) =>
-            !o.batchId &&
-            !["CANCELLED", "DELIVERED", "DELIVERING"].includes(o.status),
-        )
+      ? data.orders.filter((o) => {
+          if (o.batchId) return false;
+          if (["CANCELLED", "DELIVERED", "DELIVERING"].includes(o.status)) {
+            return false;
+          }
+          const orderCampus = campusOfOrder(
+            data.campuses,
+            data.buildings,
+            o,
+          )?.id;
+          if (batchCampusId && orderCampus !== batchCampusId) return false;
+          if (candidateCampus && orderCampus !== candidateCampus) return false;
+          return true;
+        })
       : orders;
   const labels: Record<string, string> = {
     ADD: "添加订单",
@@ -447,6 +507,7 @@ export function BatchDetail() {
   const begin = (m: string) => {
     setMode(m);
     setSelected(m === "MERGE" ? batch.orderIds : []);
+    setCandidateCampus(m === "ADD" ? batchCampusId : "");
     setPreview(null);
     setCommitBlockers([]);
     setReason("");
@@ -478,13 +539,40 @@ export function BatchDetail() {
       return;
     }
     let blockers: string[] = [];
+    if (mode === "ADD" && selected.length) {
+      const selectedCampuses = new Set(
+        selected
+          .map((oid) => {
+            const order = data.orders.find((row) => row.id === oid);
+            return campusOfOrder(data.campuses, data.buildings, order)?.id;
+          })
+          .filter(Boolean),
+      );
+      if (selectedCampuses.size > 1) {
+        toast("一个批次只能包含同一校区的订单，请先按校区分批");
+        return;
+      }
+      if (
+        batchCampusId &&
+        selectedCampuses.size === 1 &&
+        !selectedCampuses.has(batchCampusId)
+      ) {
+        toast("所选订单不属于本批次校区，请切换到对应校区");
+        return;
+      }
+    }
+    if (mode === "START" && mixedCampus) {
+      blockers.push("批次包含多个校区的订单，请先拆分为单校区批次再开始配送");
+    }
     if (mode === "START" && !canStart)
-      blockers = orders
-        .filter((o) => o.packingStatus !== "PACKED" || o.addressReview)
-        .map(
-          (o) =>
-            `${o.pickupCode}：${o.packingStatus !== "PACKED" ? "尚未完成装袋" : "地址尚待复核"}`,
-        );
+      blockers = blockers.concat(
+        orders
+          .filter((o) => o.packingStatus !== "PACKED" || o.addressReview)
+          .map(
+            (o) =>
+              `${o.pickupCode}：${o.packingStatus !== "PACKED" ? "尚未完成装袋" : "地址尚待复核"}`,
+          ),
+      );
     if (mode === "DELETE" && batch.status === "DELIVERING")
       blockers.push("配送中批次不能直接删除，请先处理实际配送执行");
     if (!DEMO) {
@@ -639,6 +727,12 @@ export function BatchDetail() {
       />
       <div className="batch-detail-summary">
         <Badge status={batch.status} />
+        {batchCampusList.map((item) => (
+          <CampusTag key={item.id} campus={item} />
+        ))}
+        {!batchCampusList.length && (
+          <span className="muted">校区待定</span>
+        )}
         <span>
           规划订单 <b>{orders.length}</b>
         </span>
@@ -653,7 +747,12 @@ export function BatchDetail() {
           </b>
         </span>
       </div>
-      {!canStart && (
+      {mixedCampus && (
+        <Notice type="error">
+          批次包含多个校区的订单，跨校区无法出发。请先使用“拆分批次”按校区拆开，再安排配送。
+        </Notice>
+      )}
+      {!canStart && !mixedCampus && (
         <Notice>
           批次允许提前规划，但有订单未装袋或地址待复核。开始配送会整批检查，不会静默出发一部分。
         </Notice>
@@ -700,7 +799,12 @@ export function BatchDetail() {
                     <small>{o.phone}</small>
                   </td>
                   <td>
-                    {data.buildings.find((b) => b.id === o.locationId)?.name}
+                    <CampusTag
+                      campus={campusOfOrder(data.campuses, data.buildings, o)}
+                    />
+                    <div>
+                      {data.buildings.find((b) => b.id === o.locationId)?.name}
+                    </div>
                   </td>
                   <td>
                     {(() => {
@@ -903,6 +1007,25 @@ export function BatchDetail() {
             </>
           ) : (
             <>
+              {mode === "ADD" && !batchCampusId && (data.campuses?.length ?? 0) > 1 && (
+                <Field label="按校区筛选可添加订单">
+                  <CampusFilter
+                    campuses={data.campuses}
+                    value={candidateCampus}
+                    onChange={(value) => {
+                      setCandidateCampus(value);
+                      setSelected([]);
+                    }}
+                    allLabel="全部校区（首单将锁定批次校区）"
+                  />
+                </Field>
+              )}
+              {mode === "ADD" && batchCampusId && (
+                <p className="form-hint">
+                  本批次已锁定校区：
+                  {batchCampusList.map((item) => item.name).join(" / ")}
+                </p>
+              )}
               {["ADD", "REMOVE", "TRANSFER", "SPLIT"].includes(mode) && (
                 <div className="select-orders">
                   {candidates.map((o) => (
@@ -944,18 +1067,44 @@ export function BatchDetail() {
                   >
                     <option value="">请选择目标批次</option>
                     {data.batches
-                      .filter(
-                        (b) =>
-                          b.id !== id &&
-                          !["DELIVERING", "COMPLETED", "CANCELLED"].includes(
+                      .filter((b) => {
+                        if (
+                          b.id === id ||
+                          ["DELIVERING", "COMPLETED", "CANCELLED"].includes(
                             b.status,
-                          ),
-                      )
-                      .map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
+                          )
+                        ) {
+                          return false;
+                        }
+                        const targetCampuses = campusesOfBatch(
+                          data.campuses,
+                          data.buildings,
+                          data.orders,
+                          b,
+                        );
+                        return (
+                          !batchCampusId ||
+                          targetCampuses.length === 0 ||
+                          (targetCampuses.length === 1 &&
+                            targetCampuses[0].id === batchCampusId)
+                        );
+                      })
+                      .map((b) => {
+                        const targetCampuses = campusesOfBatch(
+                          data.campuses,
+                          data.buildings,
+                          data.orders,
+                          b,
+                        );
+                        return (
+                          <option key={b.id} value={b.id}>
+                            {targetCampuses.length
+                              ? `${targetCampuses.map((item) => item.name).join(" / ")} · `
+                              : "校区待定 · "}
+                            {b.name}
+                          </option>
+                        );
+                      })}
                   </select>
                 </Field>
               )}

@@ -736,12 +736,25 @@ export function OrderDetail() {
               onChange={(e) => setBuilding(e.target.value)}
             >
               {data.buildings
-                .filter((b) => b.enabled)
-                .map((b) => (
-                  <option value={b.id} key={b.id}>
-                    {b.name}
-                  </option>
-                ))}
+                .filter(
+                  (b) =>
+                    b.enabled &&
+                    (!b.campusId ||
+                      !data.campuses.length ||
+                      data.campuses.some(
+                        (c) => c.id === b.campusId && c.selectionEnabled,
+                      )),
+                )
+                .map((b) => {
+                  const campus = data.campuses.find(
+                    (c) => c.id === b.campusId,
+                  );
+                  return (
+                    <option value={b.id} key={b.id}>
+                      {campus ? `${campus.name} · ${b.name}` : b.name}
+                    </option>
+                  );
+                })}
             </select>
           </Field>
           {order.batchId && (

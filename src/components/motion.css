@@ -312,6 +312,9 @@
   .task-progress > .progress-value {
     transition: none;
   }
+  .campus-map-content {
+    animation: none;
+  }
 }
 
 .file-progress-visual {

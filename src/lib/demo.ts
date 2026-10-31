@@ -132,7 +132,7 @@ export function createDemo(): DataState {
     batches: [
       {
         id: "batch-1",
-        name: "晚间配送 · 东区",
+        name: "晚间配送 · 西区",
         date: "2026-10-29",
         time: "19:00 – 20:00",
         courierId: "staff-2",
@@ -142,7 +142,7 @@ export function createDemo(): DataState {
       },
       {
         id: "batch-2",
-        name: "午后配送 · 西区",
+        name: "午后配送 · 东区",
         date: "2026-10-29",
         time: "17:00 – 18:00",
         courierId: "staff-2",
@@ -159,6 +159,7 @@ export function createDemo(): DataState {
         x: 26,
         y: 30,
         enabled: true,
+        campusId: "campus-east",
       },
       {
         id: "building-2",
@@ -167,6 +168,7 @@ export function createDemo(): DataState {
         x: 40,
         y: 33,
         enabled: true,
+        campusId: "campus-east",
       },
       {
         id: "building-3",
@@ -175,6 +177,7 @@ export function createDemo(): DataState {
         x: 69,
         y: 61,
         enabled: true,
+        campusId: "campus-west",
       },
       {
         id: "building-4",
@@ -183,6 +186,7 @@ export function createDemo(): DataState {
         x: 64,
         y: 27,
         enabled: true,
+        campusId: "campus-east",
       },
       {
         id: "building-5",
@@ -191,6 +195,27 @@ export function createDemo(): DataState {
         x: 30,
         y: 66,
         enabled: true,
+        campusId: "campus-west",
+      },
+    ],
+    campuses: [
+      {
+        id: "campus-east",
+        name: "东校区",
+        themeColor: "#C67C4E",
+        selectionEnabled: true,
+        sortOrder: 0,
+        mapVersion: 1,
+        items: [],
+      },
+      {
+        id: "campus-west",
+        name: "西校区",
+        themeColor: "#7E8A63",
+        selectionEnabled: true,
+        sortOrder: 1,
+        mapVersion: 1,
+        items: [],
       },
     ],
     slots: [

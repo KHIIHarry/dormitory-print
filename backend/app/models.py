@@ -200,6 +200,19 @@ class Quote(Entity, Base):
     __table_args__ = (CheckConstraint('subtotal_cents >= 0 AND discount_cents >= 0 AND total_cents = subtotal_cents - discount_cents AND total_cents >= 0'),)
 
 
+class Campus(Entity, Base):
+    __tablename__ = 'campuses'
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    theme_color: Mapped[str] = mapped_column(String(7), default='#C67C4E')
+    selection_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    map_asset_id: Mapped[str | None] = mapped_column(ForeignKey('assets.id'))
+    map_url: Mapped[str] = mapped_column(String(500), default='')
+    map_version: Mapped[int] = mapped_column(Integer, default=1)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("theme_color ~ '^#[0-9A-Fa-f]{6}$'"),)
+
+
 class Location(Entity, Base):
     __tablename__ = 'delivery_locations'
     name: Mapped[str] = mapped_column(String(120))
@@ -208,6 +221,7 @@ class Location(Entity, Base):
     y: Mapped[float] = mapped_column(default=0.5)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     map_version: Mapped[int] = mapped_column(Integer, default=1)
+    campus_id: Mapped[str | None] = mapped_column(ForeignKey('campuses.id'), index=True)
     __table_args__ = (CheckConstraint('x >= 0 AND x <= 1 AND y >= 0 AND y <= 1'),)
 
 

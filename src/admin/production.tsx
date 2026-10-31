@@ -39,6 +39,8 @@ import { DocPreview } from "../components/doc-preview";
 import { BindingCard } from "../customer/settings";
 import { growthRequest } from "../growth/client";
 import { errorText } from "./growth/common";
+import { campusOfOrder } from "../lib/campus";
+import { CampusFilter, CampusTag } from "./campus-filter";
 import {
   actualStartPayload,
   packPayload,
@@ -67,6 +69,7 @@ function DemoPrintCenter() {
   const view = params.get("view") || "order";
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [campus, setCampus] = useState("");
   const tasks = data.orders
     .filter(
       (o) =>
@@ -76,6 +79,8 @@ function DemoPrintCenter() {
     .flatMap((o) => o.files.map((f) => ({ o, f })))
     .filter(
       ({ o, f }) =>
+        (!campus ||
+          campusOfOrder(data.campuses, data.buildings, o)?.id === campus) &&
         (!status || f.printStatus === status) &&
         `${o.pickupCode} ${f.name}`
           .toLowerCase()
@@ -142,6 +147,11 @@ function DemoPrintCenter() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          <CampusFilter
+            campuses={data.campuses}
+            value={campus}
+            onChange={setCampus}
+          />
           <select
             value={status}
             aria-label="任务状态"
@@ -177,6 +187,9 @@ function DemoPrintCenter() {
                 {o.nickname} ·{" "}
                 {data.buildings.find((b) => b.id === o.locationId)?.name}
               </span>
+              <CampusTag
+                campus={campusOfOrder(data.campuses, data.buildings, o)}
+              />
               {view === "batch" && (
                 <span className="soft-tag">
                   {data.batches.find((b) => b.id === o.batchId)?.name ||
@@ -582,8 +595,14 @@ function DemoBindingCenter() {
   const [selected, setSelected] = useState<{ o: Order; f: PrintFile } | null>(
     null,
   );
+  const [campus, setCampus] = useState("");
   const items = data.orders
-    .filter((o) => o.status === "PENDING_PRINT")
+    .filter(
+      (o) =>
+        o.status === "PENDING_PRINT" &&
+        (!campus ||
+          campusOfOrder(data.campuses, data.buildings, o)?.id === campus),
+    )
     .flatMap((o) =>
       o.files.filter((f) => f.bindingType !== "NONE").map((f) => ({ o, f })),
     );
@@ -593,6 +612,17 @@ function DemoBindingCenter() {
         title="装订中心"
         description="按原始文件分别整理，不同文件不合并成册。"
       />
+      {!!(data.campuses?.length ?? 0) && (
+        <Panel className="filter-panel">
+          <div className="filter-row">
+            <CampusFilter
+              campuses={data.campuses}
+              value={campus}
+              onChange={setCampus}
+            />
+          </div>
+        </Panel>
+      )}
       <Notice>
         同文件的多个打印分段完成后，按原始页序整理，再独立装订。未完成全部打印时不能确认装订。
       </Notice>
@@ -604,6 +634,9 @@ function DemoBindingCenter() {
                 {o.pickupCode}
               </Link>
               <span>{o.nickname}</span>
+              <CampusTag
+                campus={campusOfOrder(data.campuses, data.buildings, o)}
+              />
               <Badge
                 status={
                   f.bindingStatus === "COMPLETED"
@@ -695,8 +728,12 @@ function DemoBindingCenter() {
 function DemoPackingCenter() {
   const { data, act, toast, pendingActions } = useStore();
   const [checked, setChecked] = useState<string[]>([]);
-  const orders = data.orders.filter((o) =>
-    ["PENDING_PRINT", "READY_FOR_DELIVERY"].includes(o.status),
+  const [campus, setCampus] = useState("");
+  const orders = data.orders.filter(
+    (o) =>
+      ["PENDING_PRINT", "READY_FOR_DELIVERY"].includes(o.status) &&
+      (!campus ||
+        campusOfOrder(data.campuses, data.buildings, o)?.id === campus),
   );
   return (
     <>
@@ -704,6 +741,17 @@ function DemoPackingCenter() {
         title="装袋中心"
         description="一单一码，一个塑封袋。核对全部资料后，才能出发。"
       />
+      {(data.campuses?.length ?? 0) > 0 && (
+        <Panel className="filter-panel">
+          <div className="filter-row">
+            <CampusFilter
+              campuses={data.campuses}
+              value={campus}
+              onChange={setCampus}
+            />
+          </div>
+        </Panel>
+      )}
       <Notice>
         打印完成、装订完成、装袋完成分别记录。装袋必须人工核对，不能自动跳过。
       </Notice>
@@ -733,6 +781,9 @@ function DemoPackingCenter() {
               <p className="packing-location">
                 <MapPinIcon />
                 {data.buildings.find((b) => b.id === o.locationId)?.name}
+                <CampusTag
+                  campus={campusOfOrder(data.campuses, data.buildings, o)}
+                />
                 <span>{o.nickname}</span>
               </p>
               <div className="packing-checks">
@@ -927,6 +978,7 @@ function ServerPrintCenter() {
   const [status, setStatus] = useState("");
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
+  const [campus, setCampus] = useState("");
   const path = useMemo(() => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
@@ -935,13 +987,25 @@ function ServerPrintCenter() {
     return `/admin/print-tasks${query ? `?${query}` : ""}`;
   }, [status, kind]);
   const queue = useRemote<PrintQueueView>(path);
-  const tasks = (queue.data?.tasks || []).filter((task) =>
+  const campusTasks = (queue.data?.tasks || []).filter((task) => {
+    if (!campus) return true;
+    const order = storeData.orders.find((row) => row.id === task.orderId);
+    return campusOfOrder(storeData.campuses, storeData.buildings, order)?.id === campus;
+  });
+  const tasks = campusTasks.filter((task) =>
     `${task.pickupCode} ${task.fileName}`.toLowerCase().includes(search.trim().toLowerCase()),
   );
-  const next = queue.data?.nextTaskId
-    ? queue.data.tasks.find((task) => task.id === queue.data?.nextTaskId)
-    : undefined;
-  const counts = queue.data?.counts || {};
+  const next =
+    tasks.find((task) => task.id === queue.data?.nextTaskId) ||
+    tasks.find((task) => task.status === "PENDING");
+  const counts = campus
+    ? {
+        PENDING: campusTasks.filter((task) => task.status === "PENDING").length,
+        ATTEMPTED: campusTasks.filter((task) => task.status === "ATTEMPTED").length,
+        COMPLETED: campusTasks.filter((task) => task.status === "COMPLETED").length,
+        EXCEPTION: campusTasks.filter((task) => task.status === "EXCEPTION").length,
+      }
+    : queue.data?.counts || {};
   return (
     <>
       <PageHeading
@@ -980,6 +1044,11 @@ function ServerPrintCenter() {
               onChange={(event) => setSearch(event.target.value)}
             />
           </div>
+          <CampusFilter
+            campuses={storeData.campuses}
+            value={campus}
+            onChange={setCampus}
+          />
           <select
             aria-label="任务状态"
             value={status}
@@ -1015,6 +1084,11 @@ function ServerPrintCenter() {
       <div className="production-list">
         {tasks.map((task) => {
           const order = storeData.orders.find((row) => row.id === task.orderId);
+          const taskCampus = campusOfOrder(
+            storeData.campuses,
+            storeData.buildings,
+            order,
+          );
           const locked = order?.blockers?.some(
             (blocker) => blocker.code === "REFUND_LOCKED",
           );
@@ -1025,6 +1099,7 @@ function ServerPrintCenter() {
                   {task.pickupCode}
                 </Link>
                 <span>{task.fileName}</span>
+                <CampusTag campus={taskCampus} />
                 <Badge status={task.status} />
                 {task.openAttemptId && (
                   <span className="soft-tag">存在未确认尝试</span>
@@ -1437,9 +1512,10 @@ export function BindingCenter() {
 }
 
 function ServerBindingCenter() {
-  const { refresh } = useStore();
+  const { data: storeData, refresh } = useStore();
   const queue = useRemote<{ tasks: BindingTaskView[] }>("/admin/binding-tasks");
   const [busyId, setBusyId] = useState("");
+  const [campus, setCampus] = useState("");
   const [issue, setIssue] = useState("");
   const complete = async (task: BindingTaskView) => {
     setBusyId(task.id);
@@ -1466,6 +1542,17 @@ function ServerBindingCenter() {
         title="装订中心"
         description="按完整册装订，不同文件不合册；全部有效打印完成后才能确认。"
       />
+      {!!(storeData.campuses?.length ?? 0) && (
+        <Panel className="filter-panel">
+          <div className="filter-row">
+            <CampusFilter
+              campuses={storeData.campuses}
+              value={campus}
+              onChange={setCampus}
+            />
+          </div>
+        </Panel>
+      )}
       {issue && (
         <Notice type="error">
           <span role="alert">{issue}</span>
@@ -1474,17 +1561,51 @@ function ServerBindingCenter() {
       <ServerQueueState
         loading={queue.loading}
         error={queue.error}
-        empty={!queue.loading && !queue.error && !queue.data?.tasks.length}
+        empty={
+          !queue.loading &&
+          !queue.error &&
+          !(queue.data?.tasks || []).some((task) => {
+            if (!campus) return true;
+            const order = storeData.orders.find(
+              (row) => row.id === task.orderId,
+            );
+            return (
+              campusOfOrder(storeData.campuses, storeData.buildings, order)
+                ?.id === campus
+            );
+          })
+        }
         reload={queue.reload}
       />
       <div className="production-list">
-        {queue.data?.tasks.map((task) => (
+        {queue.data?.tasks
+          .filter((task) => {
+            if (!campus) return true;
+            const order = storeData.orders.find(
+              (row) => row.id === task.orderId,
+            );
+            return (
+              campusOfOrder(storeData.campuses, storeData.buildings, order)
+                ?.id === campus
+            );
+          })
+          .map((task) => {
+            const order = storeData.orders.find(
+              (row) => row.id === task.orderId,
+            );
+            const taskCampus = campusOfOrder(
+              storeData.campuses,
+              storeData.buildings,
+              order,
+            );
+            return (
           <Panel key={task.id}>
             <div className="print-task-top">
               <Link className="table-code" to={`${ADMIN}/orders/${task.orderId}`}>
                 {task.pickupCode}
               </Link>
               <span>{task.fileName}</span>
+              <CampusTag campus={taskCampus} />
               <Badge
                 status={
                   task.status === "COMPLETED"
@@ -1519,7 +1640,8 @@ function ServerBindingCenter() {
               </Button>
             </div>
           </Panel>
-        ))}
+            );
+          })}
       </div>
     </>
   );
@@ -1532,8 +1654,9 @@ export function PackingCenter() {
 }
 
 function ServerPackingCenter() {
-  const { refresh } = useStore();
+  const { refresh, data } = useStore();
   const queue = useRemote<{ tasks: PackingTaskView[] }>("/admin/packing-tasks");
+  const [campus, setCampus] = useState("");
   const [checked, setChecked] = useState<Record<string, string[]>>({});
   const [busyId, setBusyId] = useState("");
   const [issue, setIssue] = useState("");
@@ -1556,6 +1679,11 @@ function ServerPackingCenter() {
       setBusyId("");
     }
   };
+  const visibleTasks = (queue.data?.tasks ?? []).filter((task) => {
+    if (!campus) return true;
+    const order = data.orders.find((item) => item.id === task.orderId);
+    return campusOfOrder(data.campuses, data.buildings, order)?.id === campus;
+  });
   return (
     <>
       <PageHeading
@@ -1567,14 +1695,25 @@ function ServerPackingCenter() {
           <span role="alert">{issue}</span>
         </Notice>
       )}
+      {(data.campuses?.length ?? 0) > 0 && (
+        <Panel className="filter-panel">
+          <div className="filter-row">
+            <CampusFilter
+              campuses={data.campuses}
+              value={campus}
+              onChange={setCampus}
+            />
+          </div>
+        </Panel>
+      )}
       <ServerQueueState
         loading={queue.loading}
         error={queue.error}
-        empty={!queue.loading && !queue.error && !queue.data?.tasks.length}
+        empty={!queue.loading && !queue.error && !visibleTasks.length}
         reload={queue.reload}
       />
       <div className="packing-grid">
-        {queue.data?.tasks.map((task) => {
+        {visibleTasks.map((task) => {
           const selected = checked[task.id] || [];
           const allChecked = task.checklist.items.every((item) =>
             selected.includes(item.fileId),
@@ -1589,6 +1728,23 @@ function ServerPackingCenter() {
                 </div>
                 <Badge status={task.status === "PACKED" ? "PACKED" : blocked ? "BLOCKED" : "READY"} />
               </div>
+              <p className="packing-location">
+                <CampusTag
+                  campus={campusOfOrder(
+                    data.campuses,
+                    data.buildings,
+                    data.orders.find((item) => item.id === task.orderId),
+                  )}
+                />
+                <span>
+                  {data.buildings.find(
+                    (building) =>
+                      building.id ===
+                      data.orders.find((item) => item.id === task.orderId)
+                        ?.locationId,
+                  )?.name || "未分校区"}
+                </span>
+              </p>
               <p className="muted">
                 清单版本 {task.checklistVersion} · 装袋任务 {task.id}
               </p>
