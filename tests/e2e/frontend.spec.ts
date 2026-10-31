@@ -314,3 +314,33 @@ test("final PDF checking requires the confirmation preview, while view-only cann
   await ack.uncheck();
   await expect(ack).not.toBeChecked();
 });
+
+test("checkout stays inside the mobile viewport with a long filename", async ({ page }) => {
+  const { PDFDocument } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const bytes = await pdf.save();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/u/new");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "Group10_Stop Buying Eco-Friendly Bags with a long filename for testing.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(bytes),
+  });
+  await page.getByRole("button", { name: "下一步", exact: true }).click();
+  await page.getByRole("button", { name: "生成最终预览" }).click();
+  await expect(page.getByRole("heading", { name: "确认最终打印文件" })).toBeVisible();
+  for (const width of [320, 375, 430, 767]) {
+    await page.setViewportSize({ width, height: 844 });
+    const layout = await page.evaluate(() => {
+      const card = document.querySelector(".checkout-main > .panel")!.getBoundingClientRect();
+      return {
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        left: card.left,
+        right: document.documentElement.clientWidth - card.right,
+      };
+    });
+    expect(layout.overflow, `viewport ${width}px`).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.left - layout.right), `viewport ${width}px`).toBeLessThanOrEqual(1);
+  }
+});

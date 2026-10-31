@@ -61,3 +61,33 @@
     max-height: max(160px, calc(86dvh - 390px));
   }
 }
+
+/* Grid items must be allowed to shrink below their contents on mobile WebKit. */
+.checkout-layout > *,
+.checkout-main,
+.checkout-summary,
+.checkout-main .panel,
+.artifact-row,
+.artifact-row .file-row {
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  .checkout-layout {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+  }
+  .artifact-row .file-info {
+    min-width: 0;
+    width: 0;
+  }
+  .artifact-row .file-info strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .artifact-row .file-row > .text-button {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+}
