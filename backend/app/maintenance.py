@@ -460,9 +460,14 @@ def _delete_blockers(db, target_type: str, target) -> list[str]:
             return ['ALREADY_DELETED']
         if target.status == 'DELIVERING':
             blockers.append('ACTIVE_DELIVERY')
-        if db.scalar(select(DeliveryAssignment.id).where(
-                DeliveryAssignment.batch_id == target.id).limit(1)):
-            blockers.append('BATCH_HAS_ASSIGNMENTS')
+        assignments = list(db.scalars(select(DeliveryAssignment).where(
+            DeliveryAssignment.batch_id == target.id,
+            DeliveryAssignment.active.is_(True))))
+        if any(item.status == 'STARTED' for item in assignments):
+            blockers.append('BATCH_HAS_STARTED_EXECUTIONS')
+        assignment_ids = [item.id for item in assignments]
+        if assignment_ids:
+            blockers.extend(_unsettled_wage_blockers(db, assignment_ids=assignment_ids))
         return blockers
     if target_type == 'ASSET':
         if target.deleted_at is not None:
@@ -566,11 +571,42 @@ def list_trash(cursor: str | None = None, limit: int = Query(default=50, ge=1, l
     return ok(TrashList(items=items, next_cursor=rows[limit - 1].id if len(rows) > limit else None))
 
 
-@router.post('/admin/trash', response_model=Envelope[TrashItemView])
-def create_trash(payload: TrashCreateInput, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
-    require_admin(actor, 'data.manage')
-    target_type = _canonical_target(payload.target_type)
-    target = lock(db, TARGETS[target_type], payload.target_id, payload.expected_version)
+def _release_batch_orders(db, batch: DeliveryBatch, now: datetime) -> list[str]:
+    """Detach active assignments so a trashed batch no longer holds orders.
+
+    Finished deliveries stay untouched: their proof is the payroll and audit
+    evidence.  Everything else returns to the ready-for-delivery pool.
+    """
+    released: list[str] = []
+    assignments = list(db.scalars(select(DeliveryAssignment).where(
+        DeliveryAssignment.batch_id == batch.id,
+        DeliveryAssignment.active.is_(True)).with_for_update()))
+    for assignment in assignments:
+        if assignment.status == 'DELIVERED':
+            continue
+        assignment.active = False
+        assignment.status = 'CANCELLED'
+        touch(assignment)
+        released.append(assignment.order_id)
+        order = db.get(Order, assignment.order_id)
+        if order is not None and order.status in ('READY_FOR_DELIVERY', 'DELIVERY_EXCEPTION'):
+            order.status = 'READY_FOR_DELIVERY'
+            order.data = {**(order.data or {}),
+                          'deliveryReleasedAt': now.isoformat(),
+                          'lastBatchId': batch.id}
+            touch(order)
+    return released
+
+
+def move_to_trash(db, actor: Actor, target_type: str, target, reason: str,
+                  extra: dict | None = None) -> TrashEntry:
+    """Soft delete a locked target and record a recoverable trash entry.
+
+    Callers must already hold the row lock (``lock``/``_lock_batch_context``)
+    and have checked the capability they need.  Only ``deleted_at`` changes on
+    the target so restoring it is lossless.
+    """
+    target_type = _canonical_target(target_type)
     existing = db.scalar(select(TrashEntry).where(
         TrashEntry.target_type == target_type, TrashEntry.target_id == target.id,
         TrashEntry.status.in_(TRASH_STATUSES)))
@@ -584,22 +620,37 @@ def create_trash(payload: TrashCreateInput, db=Depends(get_db), actor: Actor = D
                            'targetId': target.id})
     name = _target_name(db, target_type, target)
     now = _now()
+    data = {'name': name, 'byName': _actor_name(actor), 'actorId': actor.id,
+            'targetVersion': target.version, 'restorable': True,
+            'deletedAt': now.isoformat()}
+    if extra:
+        data.update(extra)
+    if target_type == 'BATCH':
+        data.setdefault('statusBefore', target.status)
+        data['releasedOrderIds'] = _release_batch_orders(db, target, now)
     _soft_delete(db, target_type, target, now)
     entry = TrashEntry(
         target_type=target_type,
         target_id=target.id,
         actor_id=actor.id,
-        reason=payload.reason,
+        reason=reason,
         status='DELETED',
         purge_at=now + timedelta(hours=_trash_hours(db)),
-        data={'name': name, 'byName': _actor_name(actor), 'actorId': actor.id,
-              'targetVersion': target.version, 'restorable': True,
-              'deletedAt': now.isoformat()},
+        data=data,
     )
     db.add(entry)
     db.flush()
     audit(db, actor, 'TRASH_CREATED', 'TRASH', entry.id,
           data={'targetType': target_type, 'targetId': target.id})
+    return entry
+
+
+@router.post('/admin/trash', response_model=Envelope[TrashItemView])
+def create_trash(payload: TrashCreateInput, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'data.manage')
+    target_type = _canonical_target(payload.target_type)
+    target = lock(db, TARGETS[target_type], payload.target_id, payload.expected_version)
+    entry = move_to_trash(db, actor, target_type, target, payload.reason)
     return ok(_entry_view(entry))
 
 
@@ -679,6 +730,10 @@ def restore_trash(entry_id: str, payload: TrashActionInput, db=Depends(get_db),
         target.deleted_at = None
         if target_type == 'ORDER':
             target.purge_at = None
+        if target_type == 'BATCH':
+            status_before = (entry.data or {}).get('statusBefore')
+            if status_before and target.status == 'CANCELLED':
+                target.status = status_before
         touch(target)
     entry.status = 'RESTORED'
     data = dict(entry.data or {})
@@ -1403,10 +1458,14 @@ def _purge_plan(db, entry: TrashEntry, target_type: str, target) -> dict:
         plan['asset_ids'] = {target.id}
         return plan
     if target_type == 'BATCH':
-        if db.scalar(select(DeliveryAssignment.id).where(
-                DeliveryAssignment.batch_id == target.id).limit(1)):
-            raise DomainError('PURGE_BLOCKED', '批次仍有关联配送', 409,
-                              {'blockers': ['BATCH_HAS_ASSIGNMENTS']})
+        assignment_ids = list(db.scalars(select(DeliveryAssignment.id).where(
+            DeliveryAssignment.batch_id == target.id)))
+        if assignment_ids:
+            blockers = _unsettled_wage_blockers(db, assignment_ids=assignment_ids)
+        if blockers:
+            raise DomainError('PURGE_BLOCKED', '批次仍存在未结工资，不能永久清理', 409,
+                              {'blockers': blockers})
+        plan['batch'] = {'assignment_ids': assignment_ids}
         return plan
     if target_type == 'ACCOUNT':
         plan['account_id'] = target.id
@@ -1552,12 +1611,44 @@ def _delete_order_graph(db, order: Order, context: dict) -> None:
             db.execute(delete(Preparation).where(Preparation.id == prep_id))
 
 
+def _delete_batch_graph(db, batch, now: datetime) -> None:
+    """Permanently remove a batch together with its execution facts.
+
+    Delivered proofs and assignments belong to the batch; settled wage entries
+    are immutable payroll facts, so their nullable assignment FK is detached
+    and the original identifiers stay in the snapshot.
+    """
+    assignment_ids = list(db.scalars(select(DeliveryAssignment.id).where(
+        DeliveryAssignment.batch_id == batch.id)))
+    if assignment_ids:
+        for wage in db.scalars(select(WageEntry).where(
+                WageEntry.assignment_id.in_(assignment_ids))):
+            if not _wage_entry_is_settled(db, wage.id):
+                raise DomainError('PURGE_BLOCKED', '工资条目尚未结算，不能清理关联批次', 409,
+                                  {'blockers': [f'WAGE_UNSETTLED:{wage.id}']})
+            snapshot = dict(wage.snapshot or {})
+            snapshot['purgedAssignmentId'] = wage.assignment_id
+            snapshot['purgedBatchId'] = batch.id
+            snapshot['purgedAt'] = now.isoformat()
+            wage.assignment_id = None
+            wage.snapshot = snapshot
+            touch(wage)
+        # The session runs with autoflush=False: flush the detached payroll FKs
+        # before deleting the delivery rows they pointed at.
+        db.flush()
+        db.execute(delete(DeliveryProof).where(
+            DeliveryProof.assignment_id.in_(assignment_ids)))
+        db.execute(delete(DeliveryAssignment).where(
+            DeliveryAssignment.batch_id == batch.id))
+    db.delete(batch)
+
+
 def _delete_simple_target(db, entry: TrashEntry, target_type: str, target, plan: dict) -> None:
     now = _now()
     if target_type == 'ASSET':
         db.delete(target)
     elif target_type == 'BATCH':
-        db.delete(target)
+        _delete_batch_graph(db, target, now)
     elif target_type == 'ACCOUNT':
         staff = _linked_staff(db, target)
         _disable_linked_staff(db, target, now)
@@ -1610,9 +1701,10 @@ def _purge_recheck(db, target_type: str, target) -> None:
     if target_type == 'ORDER':
         blockers = _order_active_blockers(db, target)
     elif target_type == 'BATCH':
-        if db.scalar(select(DeliveryAssignment.id).where(
-                DeliveryAssignment.batch_id == target.id).limit(1)):
-            blockers = ['BATCH_HAS_ASSIGNMENTS']
+        assignment_ids = list(db.scalars(select(DeliveryAssignment.id).where(
+            DeliveryAssignment.batch_id == target.id)))
+        if assignment_ids:
+            blockers = _unsettled_wage_blockers(db, assignment_ids=assignment_ids)
     elif target_type == 'ASSET':
         if _asset_referenced(db, target.id):
             blockers = ['ASSET_IN_USE']

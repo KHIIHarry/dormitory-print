@@ -1629,6 +1629,13 @@ export function Exceptions() {
     </>
   );
 }
+const TRASH_TYPE_LABELS: Record<string, string> = {
+  ORDER: "订单",
+  BATCH: "配送批次",
+  ASSET: "资产",
+  CUSTOMER_ACCOUNT: "客户账号",
+};
+
 export function Trash() {
   const { data, act, toast, pendingActions } = useStore();
   const [item, setItem] = useState<(typeof data.trash)[number] | null>(null);
@@ -1643,7 +1650,7 @@ export function Trash() {
         description="误删可在 24 小时内恢复，过期后由后台清理。"
       />
       <Notice>
-        正在被有效订单引用的资产不可清理。已付款订单删除权限尚未定版，保持禁止。
+        订单与配送批次删除后会进入这里，24 小时内可恢复。履约、售后、退款或工资未结清的对象删除前会被拦下；正在被有效订单引用的资产不可清理。
       </Notice>
       <Panel>
         <div className="table-scroll">
@@ -1668,7 +1675,7 @@ export function Trash() {
                   <tr key={t.id}>
                     <td>
                       <b>{t.name}</b>
-                      <small>{t.type}</small>
+                      <small>{TRASH_TYPE_LABELS[t.type] ?? t.type}</small>
                     </td>
                     <td>{t.by}</td>
                     <td>

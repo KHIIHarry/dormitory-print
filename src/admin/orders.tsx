@@ -310,8 +310,12 @@ export function AdminOrders() {
 }
 export function AdminOrderDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { data, act, updateOrder, toast } = useStore();
   const [payment, setPayment] = useState(false);
+  const [voiding, setVoiding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [reason, setReason] = useState("");
   const [received, setReceived] = useState("");
   const [zeroConfirmed, setZeroConfirmed] = useState(false);
   const { staff } = useIdentity();
@@ -554,8 +558,53 @@ export function AdminOrderDetail() {
               <Button variant="secondary" disabled title="D-01 未批准">
                 付款后替换内容 · 未批准
               </Button>
-              <Button variant="secondary" disabled title="D-05 未批准">
-                删除已付款订单 · 未批准
+              <Button
+                variant="secondary"
+                disabled={
+                  [
+                    "DELIVERING",
+                    "DELIVERED",
+                    "COMPLETED",
+                    "CLOSED",
+                    "CANCELLED",
+                    "REFUNDED",
+                  ].includes(order.status)
+                }
+                title={
+                  [
+                    "DELIVERING",
+                    "DELIVERED",
+                    "COMPLETED",
+                    "CLOSED",
+                    "CANCELLED",
+                    "REFUNDED",
+                  ].includes(order.status)
+                    ? "订单已进入配送或已经结束，不能再作废"
+                    : "生产、配送、收款一旦开始就不能作废，只能走交付或售后"
+                }
+                onClick={() => {
+                  setReason("");
+                  setVoiding(true);
+                }}
+              >
+                作废订单
+              </Button>
+              <Button
+                variant="danger"
+                disabled={
+                  !["DELIVERED", "COMPLETED", "CANCELLED"].includes(order.status)
+                }
+                title={
+                  ["DELIVERED", "COMPLETED", "CANCELLED"].includes(order.status)
+                    ? "删除后进入回收站，24 小时内可恢复"
+                    : "仅已结束的订单可删除；履约未结束不能通过删除中断"
+                }
+                onClick={() => {
+                  setReason("");
+                  setDeleting(true);
+                }}
+              >
+                删除订单
               </Button>
             </div>
           </Panel>
@@ -685,6 +734,106 @@ export function AdminOrderDetail() {
               : order.totalCents === 0
                 ? "已核对，确认零元结算"
                 : "已核对，确认实际收款"}
+          </Button>
+        </Modal>
+      )}
+      {voiding && (
+        <Modal title={`作废订单 · ${order.pickupCode}`} onClose={() => setVoiding(false)}>
+          <Notice>
+            作废只关闭尚未交付的订单，不删除数据。已收款、已开始生产或已开始配送的订单必须走交付或售后，不能作废。
+          </Notice>
+          <Field label="作废原因（必填，写入审计记录）">
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="例如：客户重复下单，本人已知悉"
+            />
+          </Field>
+          <Button
+            busy={busy}
+            disabled={busy || !reason.trim()}
+            onClick={async () => {
+              setBusy(true);
+              const ok = await act(
+                `/admin/orders/${order.id}/void`,
+                { expectedVersion: order.version, reason: reason.trim() },
+                (s) => ({
+                  ...s,
+                  orders: s.orders.map((o) =>
+                    o.id === order.id
+                      ? {
+                          ...o,
+                          status: "CANCELLED",
+                          version: o.version + 1,
+                          history: [
+                            {
+                              title: "订单已作废",
+                              time: new Date().toLocaleString("zh-CN"),
+                              description: reason.trim(),
+                            },
+                            ...o.history,
+                          ],
+                        }
+                      : o,
+                  ),
+                }),
+              );
+              setBusy(false);
+              if (ok) {
+                setVoiding(false);
+                toast("订单已作废");
+              }
+            }}
+          >
+            确认作废
+          </Button>
+        </Modal>
+      )}
+      {deleting && (
+        <Modal title={`删除订单 · ${order.pickupCode}`} onClose={() => setDeleting(false)}>
+          <Notice>
+            订单将移入回收站，24 小时内可恢复；超过保留期会被永久清理。删除前必须确保履约、售后、退款和工资全部结清。
+          </Notice>
+          {!!order.blockers?.length && (
+            <Notice>
+              {order.blockers.map((b) => b.message).join("；")}
+            </Notice>
+          )}
+          <Field label="删除原因（必填，写入审计记录）">
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="例如：测试订单，已完成清理核对"
+            />
+          </Field>
+          <Button
+            variant="danger"
+            busy={busy}
+            disabled={busy || !reason.trim()}
+            onClick={async () => {
+              setBusy(true);
+              const ok = await act(
+                "/admin/trash",
+                {
+                  targetType: "ORDER",
+                  targetId: order.id,
+                  expectedVersion: order.version,
+                  reason: reason.trim(),
+                },
+                (s) => ({
+                  ...s,
+                  orders: s.orders.filter((o) => o.id !== order.id),
+                }),
+              );
+              setBusy(false);
+              if (ok) {
+                setDeleting(false);
+                toast("订单已移入回收站，24 小时内可恢复");
+                navigate(`${ADMIN}/orders`);
+              }
+            }}
+          >
+            确认删除
           </Button>
         </Modal>
       )}

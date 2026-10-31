@@ -268,7 +268,7 @@ def test_trash_rejects_unknown_targets_and_sql_injection_names(admin_client, api
         assert response.json()['error']['code'] == 'UNKNOWN_TRASH_TARGET'
 
 
-def test_asset_and_batch_with_live_references_cannot_be_trashed(admin_client, api, db):
+def test_asset_with_live_references_cannot_be_trashed(admin_client, api, db):
     order = make_order(db, status='PENDING_PRINT')
     asset, _ = link_asset(db, order)
     blocked = api(admin_client, '/admin/trash', {
@@ -278,16 +278,31 @@ def test_asset_and_batch_with_live_references_cannot_be_trashed(admin_client, ap
     assert blocked.status_code == 409
     assert blocked.json()['error']['code'] == 'TRASH_BLOCKED'
 
+
+def test_batch_with_planned_orders_enters_trash_and_releases_them(admin_client, api, db):
+    order = make_order(db, status='READY_FOR_DELIVERY')
     batch = DeliveryBatch(name='待删批次', starts_at=utcnow(), ends_at=utcnow() + timedelta(hours=1))
     db.add(batch)
     db.flush()
-    db.add(DeliveryAssignment(order_id=order.id, batch_id=batch.id, active=True))
+    assignment = DeliveryAssignment(order_id=order.id, batch_id=batch.id, active=True,
+                                    status='ASSIGNED')
+    db.add(assignment)
     db.commit()
-    blocked = api(admin_client, '/admin/trash', {
+    assignment_id = assignment.id
+
+    created = api(admin_client, '/admin/trash', {
         'targetType': 'BATCH', 'targetId': batch.id, 'expectedVersion': batch.version,
         'reason': '清理批次',
     })
-    assert blocked.status_code == 409
+    assert created.status_code == 200, created.text
+    assert created.json()['data']['type'] == 'BATCH'
+
+    refresh(db)
+    assert db.get(DeliveryBatch, batch.id).deleted_at is not None
+    stored = db.get(DeliveryAssignment, assignment_id)
+    assert stored.active is False
+    assert stored.status == 'CANCELLED'
+    assert db.get(Order, order.id).status == 'READY_FOR_DELIVERY'
 
 
 # ---------------------------------------------------------------------------

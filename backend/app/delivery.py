@@ -1000,6 +1000,33 @@ def _batch_delete_or_cancel(db, actor: Actor, batch: DeliveryBatch, reason: str,
                  {'snapshotId': batch.id})
 
 
+def _batch_to_trash(db, actor: Actor, batch: DeliveryBatch, reason: str):
+    """Delete a batch through the recoverable trash instead of hiding it silently."""
+    if batch.deleted_at is not None:
+        raise DomainError('INVALID_TRANSITION', '批次已删除', 409, {'status': batch.status})
+    if batch.status == 'DELIVERING':
+        raise DomainError('INVALID_TRANSITION', '配送中批次不能删除，请先处理实际配送执行', 409,
+                          {'status': batch.status})
+    assignments = _active_batch_assignments(db, batch.id)
+    if any(assignment.status == 'STARTED' for assignment in assignments):
+        raise DomainError('BATCH_HAS_STARTED_EXECUTIONS',
+                          '请先处理已开始的配送执行和已送达凭证', 409)
+    from .maintenance import move_to_trash
+    snapshot = _batch_view(db, batch)
+    entry = move_to_trash(db, actor, 'BATCH', batch, reason,
+                          {'statusBefore': batch.status})
+    history = list((batch.data or {}).get('history') or [])
+    history.append({'action': 'DELETE', 'before': snapshot,
+                    'at': utcnow().isoformat(), 'by': actor.id, 'reason': reason})
+    batch.status = 'CANCELLED'
+    batch.reason = reason
+    batch.data = {**(batch.data or {}), 'history': history[-50:], 'snapshot': snapshot,
+                  'deletedBy': actor.id, 'trashId': entry.id}
+    db.flush()
+    _audit_batch(db, actor, batch, 'BATCH_DELETED', reason, {'snapshotId': batch.id})
+    return entry
+
+
 @router.delete('/admin/batches/{batch_id}', response_model=Envelope[BatchView])
 def admin_batch_delete(batch_id: str, payload: BatchVersionInput | None = None,
                        db=Depends(get_db), actor: Actor = Depends(actor_dep)):
@@ -1007,7 +1034,7 @@ def admin_batch_delete(batch_id: str, payload: BatchVersionInput | None = None,
     batch, _orders, _assignments = _lock_batch_context(
         db, batch_id, payload.expected_version if payload else None, active_only=True)
     reason = (payload.reason if payload else None) or '管理员删除配送批次'
-    _batch_delete_or_cancel(db, actor, batch, reason, delete=True)
+    _batch_to_trash(db, actor, batch, reason)
     return ok(_batch_view(db, batch))
 
 
@@ -1275,15 +1302,23 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
         if not payload.payload.get('reason'):
             blockers.append(_blocker('REASON_REQUIRED', '取消或删除批次必须填写原因'))
         for batch in source_batches:
-            if batch.status in ('DELIVERING', 'COMPLETED'):
-                blockers.append(_blocker('BATCH_NOT_EDITABLE', '配送中或已完成批次不能取消或删除',
+            if batch.status == 'DELIVERING':
+                blockers.append(_blocker('BATCH_NOT_EDITABLE', '配送中批次不能取消或删除',
+                                         batch.id))
+            elif action == 'CANCEL' and batch.status == 'COMPLETED':
+                blockers.append(_blocker('BATCH_NOT_EDITABLE', '已完成批次不能取消，只能删除',
                                          batch.id))
             for assignment in _source_assignments(db, [batch.id]):
-                if assignment.status in ('STARTED', 'DELIVERED'):
+                if assignment.status == 'STARTED':
                     blockers.append(_blocker('BATCH_HAS_STARTED_EXECUTIONS',
                                              '存在已开始的配送执行', assignment.id))
+                elif action == 'CANCEL' and assignment.status == 'DELIVERED':
+                    blockers.append(_blocker('BATCH_HAS_DELIVERED',
+                                             '已完成配送的批次不能取消，只能删除',
+                                             assignment.id))
             impacts.append({'batchId': batch.id,
-                            'message': '将删除批次并保留付款/交付事实' if action == 'DELETE'
+                            'message': '将删除批次并移入回收站，24 小时内可恢复'
+                                       if action == 'DELETE'
                                        else '将取消批次并释放未送达订单'})
     elif action == 'PUBLISH':
         for batch in source_batches:
@@ -1464,7 +1499,10 @@ def _execute_operation(db, actor: Actor, action: str, payload: BatchOperationPre
             affected.append(batch)
     elif action in ('CANCEL', 'DELETE'):
         for batch in source_batches.values():
-            _batch_delete_or_cancel(db, actor, batch, reason, delete=action == 'DELETE')
+            if action == 'DELETE':
+                _batch_to_trash(db, actor, batch, reason)
+            else:
+                _batch_delete_or_cancel(db, actor, batch, reason, delete=False)
             affected.append(batch)
     return affected
 

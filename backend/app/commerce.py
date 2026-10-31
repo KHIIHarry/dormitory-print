@@ -624,6 +624,70 @@ def admin_order(order_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     return ok(order_view(db,db.get(Order,order_id),actor))
 
 
+VOID_TERMINAL_STATUSES=('DELIVERED','COMPLETED','CLOSED','CANCELLED','CANCELED','REFUNDED')
+
+
+class VoidOrderInput(DTO):
+    expected_version:StrictInt
+    reason:str=Field(default='',max_length=1000)
+
+
+def _void_blockers(db,order):
+    """Reasons an unpaid order can no longer be voided by an admin."""
+    if (order.cash_received_cents or 0)>0 or (order.refunded_cents or 0)>0 or db.scalar(
+            select(Receipt.id).where(Receipt.order_id==order.id).limit(1)):
+        return ['CASH_RECEIVED']
+    blockers=[]
+    # Finished print work is not an obligation: the order may still be voided
+    # before the courier leaves. Only an in-flight print job blocks the void.
+    started_print=db.scalar(select(PrintTask.id).where(PrintTask.order_id==order.id,
+        PrintTask.active.is_(True),PrintTask.status.in_(('PRINTING','ATTEMPTED','EXCEPTION'))).limit(1))
+    if started_print:
+        blockers.append('PRINT_STARTED')
+    delivery_started=db.scalar(select(DeliveryAssignment.id).where(
+        DeliveryAssignment.order_id==order.id,
+        DeliveryAssignment.status.in_(('STARTED','DELIVERED'))).limit(1))
+    if delivery_started:
+        blockers.append('DELIVERY_STARTED')
+    if order.refund_locked:
+        blockers.append('REFUND_REVIEW_PENDING')
+    if db.scalar(select(BusinessException.id).where(BusinessException.order_id==order.id,
+            BusinessException.status.in_(('OPEN','IN_PROGRESS'))).limit(1)):
+        blockers.append('OPEN_BUSINESS_EXCEPTION')
+    return blockers
+
+
+@router.post('/admin/orders/{order_id}/void',response_model=Envelope[OrderView])
+def admin_void_order(order_id:str,body:VoidOrderInput,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
+    """作废订单：未收款、未开始的订单由管理员关闭并释放占用，之后可进入回收站。"""
+    require_order_admin(actor)
+    reason=(body.reason or '').strip()
+    if not reason:
+        raise DomainError('REASON_REQUIRED','必须填写作废原因',422)
+    order=lock(db,Order,order_id,body.expected_version)
+    if order.deleted_at is not None:
+        raise DomainError('NOT_FOUND','订单不存在',404)
+    if order.status in VOID_TERMINAL_STATUSES:
+        raise DomainError('INVALID_TRANSITION','该订单当前状态不能作废',409,{'status':order.status})
+    blockers=_void_blockers(db,order)
+    if blockers:
+        raise DomainError('ORDER_VOID_BLOCKED','订单已进入收款或履约环节，不能作废，请按退款/售后处理',409,
+                          {'blockers':blockers})
+    from .growth import release_coupon,notify_order_event
+    release_coupon(db,order)
+    for assignment in db.scalars(select(DeliveryAssignment).where(DeliveryAssignment.order_id==order.id,
+            DeliveryAssignment.active.is_(True)).with_for_update()):
+        assignment.active=False;assignment.status='CANCELLED';touch(assignment)
+    order.status='CANCELLED'
+    data=dict(order.data or {})
+    data['voidReason']=reason;data['voidedAt']=utcnow().isoformat();data['voidedBy']=actor.id
+    order.data=data
+    add_history(order,'订单已作废',reason);touch(order)
+    audit(db,actor,'ORDER_VOIDED','ORDER',order.id,reason)
+    notify_order_event(db,order,'STATUS_UPDATED')
+    return ok(order_view(db,order,actor))
+
+
 @router.post('/orders/{order_id}/revisions',response_model=Envelope[OrderResult])
 def revise_order(order_id:str,body:RevisionSubmit,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id,body.expected_version)

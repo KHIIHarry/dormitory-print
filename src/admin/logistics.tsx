@@ -751,7 +751,16 @@ export function BatchDetail() {
             <Button
               key={m}
               variant={m === "DELETE" ? "danger-outline" : "secondary"}
-              disabled={["DELIVERING", "COMPLETED"].includes(batch.status)}
+              disabled={
+                m === "DELETE"
+                  ? batch.status === "DELIVERING"
+                  : ["DELIVERING", "COMPLETED"].includes(batch.status)
+              }
+              title={
+                m === "DELETE" && batch.status === "DELIVERING"
+                  ? "配送中批次不能删除，请先处理实际配送执行"
+                  : undefined
+              }
               onClick={() => begin(m)}
             >
               {labels[m]}
