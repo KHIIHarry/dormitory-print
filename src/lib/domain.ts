@@ -122,6 +122,12 @@ export function canPack(
     )
   );
 }
+export function batchPrimaryAction(status: string): "PUBLISH" | "START" | null {
+  if (status === "PLANNED" || status === "POSTPONED") return "PUBLISH";
+  if (status === "PUBLISHED") return "START";
+  return null;
+}
+
 export function canStartBatch(
   orders: { packingStatus: string; addressReview: boolean }[],
 ) {

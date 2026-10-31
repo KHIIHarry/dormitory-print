@@ -456,10 +456,19 @@ def _current_ready(db,actor,payload,order=None):
     if not workflow.get('unpaidTimeoutMinutes'):
         raise DomainError('WORKFLOW_NOT_CONFIGURED','管理员尚未配置待确认订单期限',409)
     location=db.get(Location,payload.location_id)
-    slot=db.get(DeliverySlot,payload.slot_id)
+    # Lock the slot before the order insert/update. Without this, an admin
+    # archive can scan (and miss) the not-yet-inserted order between this read
+    # and the FK write, then commit archivedAt on a slot the new order uses.
+    # The lock order is order (when revising) -> slot; submit has no order yet.
+    try:
+        slot=lock(db,DeliverySlot,payload.slot_id)
+    except DomainError as error:
+        if error.code=='NOT_FOUND':
+            raise DomainError('SLOT_UNAVAILABLE','所选申请时段已关闭，请重新选择',409) from error
+        raise
     if not location or not location.enabled:
         raise DomainError('LOCATION_UNAVAILABLE','所选楼栋当前不可用',409)
-    if not slot or not slot.enabled or slot.ends_at<=utcnow():
+    if not slot.enabled or slot.ends_at<=utcnow():
         raise DomainError('SLOT_UNAVAILABLE','所选申请时段已关闭，请重新选择',409)
     cutoff=(slot.data or {}).get('cutoffAt')
     if cutoff and datetime.fromisoformat(cutoff.replace('Z','+00:00'))<=utcnow():

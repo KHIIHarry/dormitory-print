@@ -4,6 +4,7 @@ import React, {
   useEffect,
   useLayoutEffect,
   useRef,
+  useSyncExternalStore,
 } from "react";
 import ReactDOM from "react-dom/client";
 import {
@@ -25,6 +26,7 @@ import "./styles.css";
 import { IdentityProvider, useIdentity } from "./growth/identity";
 import { PreviewHub } from "./preview";
 import { DEMO } from "./lib/api";
+import { requestActivity } from "./lib/request-activity";
 import { bootstrapUnifiedPwa } from "./lib/pwa";
 import { safeStaffReturn } from "./components/role-switch";
 import { Provider, ADMIN } from "./lib/store";
@@ -358,6 +360,11 @@ function LegacyCredentialRedirect({ to }: { to: string }) {
   );
 }
 
+function RequestProgress() {
+  const active = useSyncExternalStore(requestActivity.subscribe, requestActivity.snapshot, () => 0);
+  return active ? <div className="request-progress" role="status" aria-live="polite"><span />正在处理，请稍候</div> : null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -365,6 +372,7 @@ function App() {
         <IdentityProvider>
           <Provider>
             <AppMeta />
+            <RequestProgress />
             <Routes>
               {DEMO && <Route path="/preview" element={<PreviewHub />} />}
               <Route path="/" element={<Navigate to="/u/" replace />} />

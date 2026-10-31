@@ -22,7 +22,7 @@ import {
   expandRanges,
   productionCount,
 } from "../lib/domain";
-import { money } from "../lib/api";
+import { DEMO, money } from "../lib/api";
 import {
   Button,
   Field,
@@ -33,7 +33,34 @@ import {
   Steps,
 } from "../components/ui";
 import { DocPreview } from "../components/doc-preview";
-import { isSpreadsheetUpload } from "../v1/upload-client";
+import { getAsset, isSpreadsheetUpload } from "../v1/upload-client";
+function OriginalDocumentPreview({ file }: { file: PrintFile }) {
+  const [source, setSource] = useState<{ id: string; url?: string; error?: string }>({ id: "" });
+  useEffect(() => {
+    if (DEMO || !file.assetId || file.kind === "PHOTO") return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const asset = await getAsset(file.assetId, controller.signal);
+        if (controller.signal.aborted) return;
+        if (asset.status === "READY") {
+          setSource({ id: file.assetId, url: asset.previewUrl || asset.normalizedUrl || undefined, error: !asset.previewUrl && !asset.normalizedUrl ? "预览暂不可用，请稍后重试。" : undefined });
+        } else if (asset.status === "FAILED" || asset.status === "DELETED" || asset.status === "PURGED") {
+          setSource({ id: file.assetId, error: asset.error || "文件处理失败或已过期，请重新上传。" });
+        } else timer = setTimeout(load, 1200);
+      } catch {
+        if (!controller.signal.aborted) setSource({ id: file.assetId, error: "预览加载失败，请检查网络后重新打开。" });
+      }
+    };
+    void load();
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+  }, [file.assetId, file.kind]);
+  if (!DEMO && file.assetId && file.kind !== "PHOTO" && source.id !== file.assetId)
+    return <div className="document-preview"><p className="pdf-render-status" role="status">正在准备文件预览…</p></div>;
+  if (source.id === file.assetId && source.error) return <p className="field-error" role="alert">{source.error}</p>;
+  return <DocPreview file={file} label="文件预览" pdfUrl={source.id === file.assetId ? source.url : undefined} />;
+}
 export function BindingCard({
   type,
   label,
@@ -466,7 +493,7 @@ export function SettingsPage() {
           </div>
         </div>
         <aside className="preview-aside">
-          <DocPreview file={file} />
+          <OriginalDocumentPreview file={file} />
           <Notice>
             {file.imageSource && file.kind === "DOCUMENT"
               ? "当前预览为图片在 A4 纸上的完整排版。下一步将按份数和单双面设置生成最终 PDF。"

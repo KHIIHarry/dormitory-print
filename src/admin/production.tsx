@@ -1250,7 +1250,10 @@ function ServerPrintTask() {
       )}
       <div className="print-view-layout">
         <Panel title="服务端任务">
-          <dl className="courier-facts">
+          <div className="print-settings" aria-label="打印设置">
+            {[`${task.copies} 份`, task.sides === "DUPLEX" ? "双面" : "单面", task.colorMode === "BW" ? "黑白" : "彩色", `${task.sheetCount} 张纸`, `打印页码 ${task.pageRange || "整文件"}`].map((value, index) => <span key={index}>{value}</span>)}
+          </div>
+          <dl className="courier-facts print-task-facts">
             <div>
               <dt>任务 ID</dt>
               <dd className="numeric">{task.id}</dd>
@@ -1267,15 +1270,8 @@ function ServerPrintTask() {
               <dt>SHA-256</dt>
               <dd className="numeric">{task.artifactSha256}</dd>
             </div>
-            <div>
-              <dt>打印设置</dt>
-              <dd>{taskPaperLabel(task)}</dd>
-            </div>
-            <div>
-              <dt>页码范围</dt>
-              <dd>{task.pageRange || "整文件"}</dd>
-            </div>
           </dl>
+          <DocPreview file={(order?.files.find((item) => item.id === task.fileId) || { id: task.fileId, assetId: task.artifactId, name: task.fileName, kind: "DOCUMENT", pages: task.pages }) as PrintFile} pdfUrl={pdfUrl} />
           <div className="button-row">
             <a className="btn secondary" href={pdfUrl} target="_blank" rel="noreferrer">
               {reprintArtifactId ? "打开补打 PDF" : "打开最终 PDF"}
@@ -1300,7 +1296,7 @@ function ServerPrintTask() {
           <dl className="growth-facts v1-facts">
             <div>
               <dt>订单状态</dt>
-              <dd>{orderMeta?.status || task.orderStatus}</dd>
+              <dd><Badge status={orderMeta?.status || task.orderStatus} /></dd>
             </div>
             <div>
               <dt>实际开印</dt>

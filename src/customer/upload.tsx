@@ -788,6 +788,7 @@ export function UploadPage() {
           }
           patch({
             assetId: asset.assetId,
+            size: asset.size,
             uploadPhase: ready ? "READY" : "PROCESSING",
             error: previewIssue,
             ...(kind === "PHOTO" && !heic

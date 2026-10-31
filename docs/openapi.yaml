@@ -1257,6 +1257,17 @@
             "title": "Reason",
             "type": "string"
           },
+          "slotId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slotid"
+          },
           "startsAt": {
             "anyOf": [
               {
@@ -1815,6 +1826,28 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "slotId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slotid"
+          },
+          "slotName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slotname"
           },
           "startsAt": {
             "format": "date-time",
@@ -14309,6 +14342,31 @@
         "title": "SlotAgreement",
         "type": "object"
       },
+      "SlotDeleteInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedversion"
+          },
+          "reason": {
+            "default": "管理员移除配送时段",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "SlotDeleteInput",
+        "type": "object"
+      },
       "SlotInput": {
         "additionalProperties": false,
         "properties": {
@@ -14555,6 +14613,11 @@
       "SlotView": {
         "additionalProperties": false,
         "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
           "capacity": {
             "title": "Capacity",
             "type": "integer"
@@ -26256,6 +26319,16 @@
               ],
               "title": "Date"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -26421,6 +26494,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SlotDeleteInput"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

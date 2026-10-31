@@ -640,11 +640,14 @@ function ReviewContent() {
       customerNote,
     });
     if (!result.success) {
-      setFields(
-        Object.fromEntries(
-          result.error.issues.map((i) => [i.path[0], i.message]),
-        ),
-      );
+      const nextFields = Object.fromEntries(result.error.issues.map((i) => [i.path[0], i.message]));
+      setFields(nextFields);
+      const first = result.error.issues[0]?.path[0];
+      requestAnimationFrame(() => {
+        const target = typeof first === "string" ? document.querySelector<HTMLElement>(`[data-checkout-field="${first}"]`) : null;
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+        target?.focus({ preventScroll: true });
+      });
       return;
     }
     setFields({});
@@ -1136,6 +1139,7 @@ function ReviewContent() {
             <div className="form-grid">
               <Field label="微信昵称 *" error={fields.nickname}>
                 <input
+                  data-checkout-field="nickname"
                   value={name}
                   maxLength={40}
                   onChange={(e) => setName(e.target.value)}
@@ -1145,6 +1149,7 @@ function ReviewContent() {
               </Field>
               <Field label="手机号码 *" error={fields.phone}>
                 <input
+                  data-checkout-field="phone"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="配送时用于联系"
@@ -1160,6 +1165,7 @@ function ReviewContent() {
                 hint="补充需要管理员留意的事项；打印参数请在上一步设置。"
               >
                 <textarea
+                  data-checkout-field="customerNote"
                   value={customerNote}
                   maxLength={30}
                   rows={3}
@@ -1171,7 +1177,7 @@ function ReviewContent() {
             </div>
           </Panel>
           <Panel title="把资料送到哪里？">
-            <div className="map-search">
+            <div data-checkout-field="building" tabIndex={-1} className="map-search">
               <Search size={17} />
               <input
                 placeholder="搜索宿舍楼或教学楼"
@@ -1208,7 +1214,7 @@ function ReviewContent() {
             </p>
           </Panel>
           <Panel title="选择预约配送时段">
-            <div className="slot-choices">
+            <div data-checkout-field="slot" tabIndex={-1} className="slot-choices">
               {data.slots
                 .filter((s) => s.enabled)
                 .map((s) => (

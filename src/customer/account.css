@@ -435,3 +435,10 @@
     flex-wrap: wrap;
   }
 }
+
+@media (max-width: 767px) {
+  .account-page:not(.account-auth-page) {
+    width: 100%;
+    padding: 24px 20px 36px;
+  }
+}

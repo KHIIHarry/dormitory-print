@@ -1,3 +1,4 @@
+import { formatDisplayTime } from "../lib/display-format";
 import { useGrowthResource } from "../growth/client";
 import {
   demoDashboardSummary,
@@ -322,7 +323,7 @@ export function Dashboard() {
                         >
                           {o.pickupCode}
                         </Link>
-                        <small>{o.createdAt}</small>
+                        <small>{formatDisplayTime(o.createdAt)}</small>
                       </td>
                       <td>
                         {o.nickname}

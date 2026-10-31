@@ -1,3 +1,4 @@
+import { formatDisplayTime } from "../lib/display-format";
 import { CustomerSupplementaryPanel } from "../v1/supplementary";
 import { useIdentity } from "../growth/identity";
 import { canOrderAction, effectiveOrderAccess } from "../growth/order-security";
@@ -167,7 +168,7 @@ export function OrderList() {
                 </span>
                 <span>
                   <Clock size={14} />
-                  {o.createdAt}
+                  {formatDisplayTime(o.createdAt)}
                 </span>
               </div>
               <div className="order-card-footer">
@@ -250,9 +251,11 @@ export function Contact() {
         </div>
         <h1>订单提交成功！</h1>
         <p>
-          {order.totalCents === 0
-            ? "请联系管理员确认零元结算，确认后安排打印。"
-            : "请联系管理员核对线下付款，确认后安排打印。"}
+          {order.settlement?.confirmedAt
+            ? "结算已确认，请在订单详情中查看最新进度。"
+            : order.totalCents === 0
+              ? "请联系管理员确认零元结算，确认后安排打印。"
+              : "请联系管理员核对线下付款，确认后安排打印。"}
         </p>
       </div>
       <div className="contact-grid">
@@ -267,9 +270,11 @@ export function Contact() {
             本次应付<strong>{money(order.totalCents)}</strong>
           </div>
           <Notice>
-            {order.totalCents === 0
-              ? "本单无需转账。请发送提取码，请管理员明确确认零元结算后安排打印。"
-              : "复制提取码并发送给管理员，完成线下付款后，我们会核对收款并安排打印。"}
+            {order.settlement?.confirmedAt
+              ? "本单结算已确认，可通过订单详情查看后续进度。"
+              : order.totalCents === 0
+                ? "本单无需转账。请发送提取码，请管理员明确确认零元结算后安排打印。"
+                : "复制提取码并发送给管理员，完成线下付款后，我们会核对收款并安排打印。"}
           </Notice>
           <div className="contact-text">
             <p>{text}</p>
@@ -325,17 +330,19 @@ export function Contact() {
           查看订单详情
           <ArrowRight size={17} />
         </LinkButton>
-        <Button
-          variant="secondary"
-          busy={refreshing}
-          onClick={async () => {
+        {order.settlement?.confirmedAt ? (
+          <div className="settlement-confirmed" role="status">
+            <CheckCircle2 size={18} />
+            <span>{order.settlement.settlementKind === "ZERO_PAYABLE" ? "零元结算已确认，正在安排打印" : "收款已确认，正在安排打印"}</span>
+          </div>
+        ) : (
+          <Button variant="secondary" busy={refreshing} onClick={async () => {
             await refresh();
             if (DEMO) toast("演示订单等待管理员确认收款");
-          }}
-        >
-          <RefreshCw size={16} />
-          查看是否已确认
-        </Button>
+          }}>
+            <RefreshCw size={16} /> 查看是否已确认
+          </Button>
+        )}
       </div>
       <RefreshStatus loading={false} error={refreshError} retry={refresh} />
       <p className="save-link-note">
@@ -445,7 +452,7 @@ export function OrderDetail() {
       </Link>
       <PageHeading
         title="订单详情"
-        description={`下单时间 ${order.createdAt}`}
+        description={`下单时间 ${formatDisplayTime(order.createdAt)}`}
         action={
           <Button
             variant="secondary"
@@ -629,7 +636,7 @@ export function OrderDetail() {
                 <dl className="detail-dl">
                   <div>
                     <dt>交付时间</dt>
-                    <dd>{order.proof.deliveredAt}</dd>
+                    <dd>{formatDisplayTime(order.proof.deliveredAt)}</dd>
                   </div>
                   <div>
                     <dt>实际位置</dt>
@@ -653,7 +660,7 @@ export function OrderDetail() {
                   <i />
                   <div>
                     <strong>{h.title}</strong>
-                    <span>{h.time}</span>
+                    <span>{formatDisplayTime(h.time)}</span>
                     {h.description && <p>{h.description}</p>}
                   </div>
                 </div>

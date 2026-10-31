@@ -50,7 +50,7 @@ def public_config(db):
     result = {}
     for name in ('services','photo','contact','announcement','map'):
         result.update(sections[name].data)
-    result['prices'] = sections['prices'].data.copy()
+    result['prices'] = dict(sections['prices'].data or {})
     result['versions'] = {name:row.version for name,row in sections.items()}
     result['version'] = max(row.version for row in sections.values())
     workflow = sections['workflow'].data
@@ -67,8 +67,9 @@ def public_config(db):
         pass
     result['decisions'] = {'D-01':'EXCLUDED','D-02':'APPROVED','D-03':'APPROVED','D-04':'APPROVED',
         'D-05':'APPROVED','D-06A':'APPROVED','D-06B':'APPROVED','D-06C':'EXCLUDED','D-07':'APPROVED','D-08':'APPROVED'}
-    # Only delivery acceptance limits are public so clients mirror current validation; SMTP, security secrets and storage paths stay private.
-    return result
+    # Only fields accepted by PublicConfigView are public. SMTP, security
+    # secrets, storage paths and map publication metadata stay private.
+    return {key:value for key,value in result.items() if key in PUBLIC_FIELD_NAMES}
 
 
 class PricePatch(DTO):
@@ -222,6 +223,22 @@ class PublicConfigView(DTO):
     pauses:PauseConfig
     features:ConfigFeatures
     decisions:dict[str,str]
+
+
+# Public config is an allowlist derived from the response model, not a
+# flattening of stored section data. ConfigSection.data may contain
+# operator/audit metadata (for example map publishedBy, hotspotCount and
+# migrationConfirmed) that must never reach the public DTO. Nested values are
+# still validated by their original DTOs (Margins, PricesView, PauseConfig,
+# ConfigFeatures), so nested extras fail closed instead of leaking.
+PUBLIC_FIELD_NAMES = frozenset(
+    set(PublicConfigView.model_fields)
+    | {
+        field.alias
+        for field in PublicConfigView.model_fields.values()
+        if field.alias
+    }
+)
 
 
 SECTION_VIEWS={}

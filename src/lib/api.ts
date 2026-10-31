@@ -1,3 +1,4 @@
+import { requestActivity } from "./request-activity";
 export const DEMO =
   import.meta.env.MODE === "demo" ||
   (import.meta.env.DEV && import.meta.env.VITE_DEMO_MODE !== "false");
@@ -99,6 +100,7 @@ export async function request<T>(
       : options.body
         ? JSON.stringify(options.body)
         : undefined;
+  const finishActivity = method !== "GET" && path !== "/customer/session" ? requestActivity.begin() : () => {};
   try {
     if (controller.signal.aborted)
       throw new DOMException("请求已取消", "AbortError");
@@ -190,6 +192,7 @@ export async function request<T>(
       throw new DOMException("请求已取消", "AbortError");
     return decodeResponse<T>(response.status, json);
   } finally {
+    finishActivity();
     activeRequests.delete(controller);
     options.signal?.removeEventListener("abort", abort);
   }

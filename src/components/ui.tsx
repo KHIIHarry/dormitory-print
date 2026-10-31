@@ -1,3 +1,4 @@
+import { formatFileSize } from "../lib/display-format";
 import { getIdentityGeneration } from "../growth/client";
 import { MOTION, usePresence } from "./presence";
 import { exitOverlay, registerOverlay } from "./overlay-stack";
@@ -288,6 +289,7 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  fullscreen = false,
   open = true,
   focusKey,
 }: {
@@ -295,6 +297,7 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  fullscreen?: boolean;
   open?: boolean;
   focusKey?: string;
 }) {
@@ -393,7 +396,7 @@ export function Modal({
     >
       <section
         ref={modalRef}
-        className={`modal ${wide ? "wide" : ""}`}
+        className={`modal ${wide ? "wide" : ""} ${fullscreen ? "fullscreen" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -552,7 +555,7 @@ export function FileRow({
       <div className="file-info">
         <strong>{file.name}</strong>
         <small>
-          {(file.size / 1024 / 1024).toFixed(1)} MB <i>·</i>{" "}
+          {formatFileSize(file.size)} <i>·</i>{" "}
           {file.imagePrintMedium === "PENDING"
             ? "图片 · 待选择纸张"
             : file.kind === "PHOTO"

@@ -15,6 +15,7 @@ export async function renderPage(
   canvas: HTMLCanvasElement,
   page = 1,
   signal?: AbortSignal,
+  maxWidth = 720,
 ) {
   const check = () => {
     if (signal?.aborted)
@@ -39,7 +40,7 @@ export async function renderPage(
     const p = await pdf.getPage(Math.max(1, Math.min(page, pdf.numPages)));
     check();
     const viewport = p.getViewport({
-      scale: Math.min(1.5, 720 / p.getViewport({ scale: 1 }).width),
+      scale: Math.min(3, maxWidth / p.getViewport({ scale: 1 }).width),
     });
     // PDF.js owns only a private canvas until this complete, current render commits.
     const buffer = document.createElement("canvas");

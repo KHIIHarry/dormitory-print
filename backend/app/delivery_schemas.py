@@ -213,6 +213,7 @@ class PositionInput(DTO):
 
 class BatchCreate(DTO):
     name: str = Field(min_length=1, max_length=120)
+    slot_id: str | None = None
     date: str | None = None
     time: str | None = None
     starts_at: datetime | None = None
@@ -228,7 +229,16 @@ class BatchCreate(DTO):
             raise ValueError('批次名称不能为空')
         return value
 
+    @model_validator(mode='after')
+    def _slot_or_window(self):
+        if self.slot_id and (self.date is not None or self.time is not None
+                             or self.starts_at is not None or self.ends_at is not None):
+            raise ValueError('选择预置配送时段后不能同时提交日期或时间')
+        return self
+
     def window(self) -> tuple[datetime, datetime]:
+        if self.slot_id:
+            raise ValueError('选择预置配送时段时由服务端填充日期与时间')
         return batch_window(self.date, self.time, self.starts_at, self.ends_at)
 
 
@@ -246,6 +256,11 @@ class BatchUpdate(DTO):
 class BatchVersionInput(DTO):
     expected_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=2000)
+
+
+class SlotDeleteInput(DTO):
+    expected_version: int | None = Field(default=None, ge=1)
+    reason: str = Field(default='管理员移除配送时段', max_length=2000)
 
 
 class BatchOperationPreview(DTO):
@@ -490,6 +505,7 @@ class SlotView(DTO):
     remaining: int
     enabled: bool
     selectable: bool
+    archived: bool = False
     version: int
 
 
@@ -504,6 +520,8 @@ class BatchView(DTO):
     time: str
     starts_at: datetime
     ends_at: datetime
+    slot_id: str | None = None
+    slot_name: str | None = None
     courier_id: str | None = None
     courier_name: str | None = None
     status: str

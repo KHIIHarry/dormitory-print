@@ -18,7 +18,7 @@ import { ADMIN, DEMO, useStore } from "../lib/store";
 import { mutation } from "../lib/api";
 import { growthRequest } from "../growth/client";
 import { useIdentity } from "../growth/identity";
-import { canStartBatch } from "../lib/domain";
+import { batchPrimaryAction, canStartBatch } from "../lib/domain";
 import type { Batch, DataState, Slot } from "../lib/types";
 import {
   eligibleCouriers,
@@ -120,6 +120,7 @@ export function Batches() {
         {[
           ["今日批次", data.batches.length],
           ["规划中", data.batches.filter((b) => b.status === "PLANNED").length],
+          ["已延期", data.batches.filter((b) => b.status === "POSTPONED").length],
           [
             "配送中",
             data.batches.filter((b) => b.status === "DELIVERING").length,
@@ -140,6 +141,7 @@ export function Batches() {
           ["", "全部批次"],
           ["PLANNED", "规划中"],
           ["PUBLISHED", "已发布"],
+          ["POSTPONED", "已延期"],
           ["DELIVERING", "配送中"],
           ["COMPLETED", "已完成"],
           ["CANCELLED", "已取消"],
@@ -219,6 +221,17 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
     ? data.staff.filter((s) => s.enabled && s.role === "COURIER")
     : catalog.options;
   const [name, setName] = useState(batch?.name || "");
+  const [slotId, setSlotId] = useState("");
+  const [availableSlots, setAvailableSlots] = useState<Slot[]>(DEMO ? data.slots : []);
+  const [slotsError, setSlotsError] = useState("");
+  useEffect(() => {
+    if (DEMO || batch) return;
+    const controller = new AbortController();
+    growthRequest<{ items: Slot[] }>("/admin/slots", { signal: controller.signal })
+      .then((result) => setAvailableSlots(result.items || []))
+      .catch((error) => { if (!controller.signal.aborted) setSlotsError((error as Error).message); });
+    return () => controller.abort();
+  }, [batch]);
   const [date, setDate] = useState(batch?.date || "");
   const [time, setTime] = useState(batch?.time || "");
   const [courier, setCourier] = useState(batch?.courierId || "");
@@ -232,7 +245,19 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
           placeholder="例如 晚间配送 · 东区"
         />
       </Field>
-      <div className="form-grid">
+      {!batch && <Field label="配送时段" hint="选择已配置的预计配送时段；配送可根据实际情况提前开始。">
+        <select value={slotId} onChange={(event) => {
+          const selected = availableSlots.find((item) => item.id === event.target.value);
+          setSlotId(event.target.value);
+          setDate(selected?.date || "");
+          setTime(selected ? `${selected.start} – ${selected.end}` : "");
+        }}>
+          <option value="">请选择配送时段</option>
+          {availableSlots.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.date} · {item.name} · {item.start}–{item.end}</option>)}
+        </select>
+      </Field>}
+      {!batch && slotsError && <Notice type="error">配送时段加载失败：{slotsError}</Notice>}
+      {batch && <div className="form-grid">
         <Field label="配送日期">
           <input
             type="date"
@@ -247,7 +272,7 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
             placeholder="例如 19:00 – 20:00"
           />
         </Field>
-      </div>
+      </div>}
       <Field label="配送员">
         <select
           value={courier}
@@ -292,6 +317,7 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
         onClick={async () => {
           if (
             !name.trim() ||
+            (!batch && !slotId) ||
             !date ||
             !time ||
             !courier ||
@@ -306,8 +332,7 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
               batch ? `/admin/batches/${id}` : "/admin/batches",
               {
                 name,
-                date,
-                time,
+                ...(batch ? (date !== batch.date || time !== batch.time ? { date, time } : {}) : { slotId }),
                 courierId: courier,
                 expectedVersion: batch?.version,
                 reason,
@@ -568,17 +593,15 @@ export function BatchDetail() {
             <Button variant="secondary" onClick={() => setEdit(true)}>
               编辑批次 / 指派配送员
             </Button>
-            <Button
-              onClick={() =>
-                begin(batch.status === "PLANNED" ? "PUBLISH" : "START")
-              }
-              disabled={["DELIVERING", "COMPLETED", "CANCELLED"].includes(
-                batch.status,
-              )}
+            {batchPrimaryAction(batch.status) && <Button
+              onClick={() => {
+                const action = batchPrimaryAction(batch.status);
+                if (action) begin(action);
+              }}
             >
               <Send size={16} />
-              {batch.status === "PLANNED" ? "发布计划" : "开始配送"}
-            </Button>
+              {batchPrimaryAction(batch.status) === "PUBLISH" ? "发布计划" : "开始配送"}
+            </Button>}
           </div>
         }
       />
@@ -916,6 +939,8 @@ export function Slots() {
   const [edit, setEdit] = useState<Partial<Slot> | null>(null);
   const [slots, setSlots] = useState<Slot[]>(data.slots);
   const [slotError, setSlotError] = useState("");
+  const [removeSlot, setRemoveSlot] = useState<Slot | null>(null);
+  const [removeReason, setRemoveReason] = useState("");
   useEffect(() => setSlots(data.slots), [data.slots]);
   useEffect(() => {
     if (DEMO) return;
@@ -1063,9 +1088,10 @@ export function Slots() {
                     </button>
                   </td>
                   <td>
-                    <button className="text-button" onClick={() => setEdit(s)}>
-                      编辑时段
-                    </button>
+                    <div className="button-row">
+                      <button className="text-button" onClick={() => setEdit(s)}>编辑时段</button>
+                      <button className="text-button" onClick={() => { setRemoveSlot(s); setRemoveReason(""); }}>移除时段</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1075,6 +1101,18 @@ export function Slots() {
         {!slots.length && <Empty title="尚未配置配送时段" />}
       </Panel>
       {!DEMO && <SlotProposals slots={slots} />}
+      {removeSlot && <Modal title="移除配送时段" onClose={() => setRemoveSlot(null)}>
+        <Notice>将归档「{removeSlot.name}」，保留历史记录；有关联中的订单或批次时无法移除。</Notice>
+        <Field label="移除原因（选填）"><input value={removeReason} onChange={(event) => setRemoveReason(event.target.value)} /></Field>
+        <Button busy={pendingActions[`/admin/slots/${removeSlot.id}`]} onClick={async () => {
+          const selected = removeSlot;
+          const ok = await act(`/admin/slots/${selected.id}`, { expectedVersion: (selected as Record<string, any>).version, reason: removeReason }, (current) => ({ ...current, slots: current.slots.filter((item) => item.id !== selected.id) }), "DELETE");
+          if (!ok) return;
+          setSlots((current) => current.filter((item) => item.id !== selected.id));
+          setRemoveSlot(null);
+          toast("配送时段已移除，历史记录保留");
+        }}>确认移除</Button>
+      </Modal>}
       {edit && (
         <Modal
           title={edit.id ? "编辑配送时段" : "新建配送时段"}

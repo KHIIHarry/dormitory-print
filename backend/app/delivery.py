@@ -56,6 +56,7 @@ from .delivery_schemas import (
     MapHotspotUpdate,
     MapPublishInput,
     PublicMapView,
+    SlotDeleteInput,
     SlotInput,
     SlotListView,
     SlotUpdate,
@@ -161,9 +162,33 @@ def _location_view(location: Location, map_version: int) -> dict:
             'version': location.version}
 
 
+def _slot_archived(slot: DeliverySlot) -> bool:
+    return bool((slot.data or {}).get('archivedAt'))
+
+
+def _slot_snapshot(slot: DeliverySlot) -> dict:
+    return {
+        'id': slot.id, 'date': slot.date, 'weekday': slot_weekday(slot.date),
+        'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
+        'end': to_shanghai_hhmm(slot.ends_at),
+        'startsAt': slot.starts_at.isoformat(), 'endsAt': slot.ends_at.isoformat(),
+        'capacity': slot.capacity, 'version': slot.version,
+    }
+
+
+def _batch_slot_id(batch: DeliveryBatch) -> str | None:
+    data = batch.data or {}
+    return data.get('slotId') or data.get('slot_id') or (data.get('slotSnapshot') or {}).get('id')
+
+
+def _order_effective_slot_id(order: Order) -> str | None:
+    return order.confirmed_slot_id or order.requested_slot_id
+
+
 def _slot_view(slot: DeliverySlot, now: datetime, *, public: bool = False) -> dict:
     remaining = max(0, slot.capacity - slot.occupied)
-    selectable = bool(slot.enabled and slot.ends_at > now and remaining > 0)
+    archived = _slot_archived(slot)
+    selectable = bool(slot.enabled and not archived and slot.ends_at > now and remaining > 0)
     return {
         'id': slot.id,
         'date': slot.date,
@@ -178,6 +203,7 @@ def _slot_view(slot: DeliverySlot, now: datetime, *, public: bool = False) -> di
         'remaining': remaining,
         'enabled': slot.enabled,
         'selectable': selectable,
+        'archived': archived,
         'version': slot.version,
     }
 
@@ -186,6 +212,10 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
     assignments = _active_batch_assignments(db, batch.id)
     courier = db.get(Staff, batch.courier_id) if batch.courier_id else None
     published_at = (batch.data or {}).get('publishedAt')
+    slot_id = _batch_slot_id(batch)
+    slot_snapshot = (batch.data or {}).get('slotSnapshot') or {}
+    slot = db.get(DeliverySlot, slot_id) if slot_id else None
+    slot_name = slot_snapshot.get('name') or (slot.name if slot else None)
     return {
         'id': batch.id,
         'name': batch.name,
@@ -193,6 +223,8 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
         'time': to_shanghai_window(batch.starts_at, batch.ends_at),
         'startsAt': batch.starts_at.isoformat(),
         'endsAt': batch.ends_at.isoformat(),
+        'slotId': slot_id,
+        'slotName': slot_name,
         'courierId': batch.courier_id,
         'courierName': courier.name if courier else None,
         'status': batch.status,
@@ -336,7 +368,7 @@ def _order_blockers(db, order: Order, assignment: DeliveryAssignment | None = No
 
 
 def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignment],
-                    orders_by_id: dict[str, Order], now: datetime) -> list[dict]:
+                    orders_by_id: dict[str, Order]) -> list[dict]:
     blockers: list[dict] = []
     pauses = (get_config(db, 'workflow').data or {}).get('pauses') or {}
     if pauses.get('delivery'):
@@ -345,10 +377,6 @@ def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignme
         blockers.append(_blocker('BATCH_DELETED', '批次已删除', batch.id))
     if batch.status != 'PUBLISHED':
         blockers.append(_blocker('BATCH_NOT_PUBLISHED', '批次尚未发布，不能开始配送', batch.id))
-    if now < batch.starts_at:
-        blockers.append(_blocker('BATCH_WINDOW_NOT_STARTED', '未到批次安排时间', batch.id))
-    if now >= batch.ends_at:
-        blockers.append(_blocker('BATCH_WINDOW_ELAPSED', '批次安排时间已结束，请先改期', batch.id))
     if _valid_courier(db, batch.courier_id) is None:
         blockers.append(_blocker('COURIER_REQUIRED', '批次未分配有效配送员', batch.id))
     if not assignments:
@@ -367,6 +395,9 @@ def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignme
             continue
         if order.status != 'READY_FOR_DELIVERY':
             blockers.append(_blocker('ORDER_NOT_READY', '订单当前不在待配送状态', order.id))
+        mismatch = _slot_mismatch_blocker(batch, order)
+        if mismatch is not None:
+            blockers.append(mismatch)
         blockers.extend(_order_blockers(db, order, assignment))
     return blockers
 
@@ -484,7 +515,8 @@ def public_slots(date: str | None = None, db=Depends(get_db)):
     else:
         query = query.where(DeliverySlot.date >= to_shanghai_date(now))
     slots = list(db.scalars(query.order_by(DeliverySlot.starts_at, DeliverySlot.id)))
-    return ok({'items': [_slot_view(slot, now, public=True) for slot in slots]})
+    return ok({'items': [_slot_view(slot, now, public=True) for slot in slots
+                         if not _slot_archived(slot)]})
 
 
 # ---------------------------------------------------------------------------
@@ -671,14 +703,17 @@ def admin_delivery_staff(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
 
 
 @router.get('/admin/slots', response_model=Envelope[SlotListView])
-def admin_slots(date: str | None = None, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+def admin_slots(date: str | None = None, include_archived: bool = False,
+                db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
     query = select(DeliverySlot)
     if date:
         query = query.where(DeliverySlot.date == date)
     now = utcnow()
     slots = list(db.scalars(query.order_by(DeliverySlot.starts_at, DeliverySlot.id)))
-    return ok({'items': [_slot_view(slot, now) for slot in slots]})
+    items = [_slot_view(slot, now) for slot in slots
+             if include_archived or not _slot_archived(slot)]
+    return ok({'items': items})
 
 
 def _validate_slot_capacity(slot: DeliverySlot, capacity: int) -> None:
@@ -709,6 +744,9 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
                       actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
     slot = lock(db, DeliverySlot, slot_id, payload.expected_version)
+    if _slot_archived(slot):
+        raise DomainError('SLOT_ARCHIVED', '时段已归档，不能继续编辑', 409,
+                          {'slotId': slot.id})
     history = list((slot.data or {}).get('history') or [])
     before = {'date': slot.date, 'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
               'end': to_shanghai_hhmm(slot.ends_at), 'capacity': slot.capacity,
@@ -745,16 +783,39 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
 
 
 @router.delete('/admin/slots/{slot_id}', response_model=Envelope[dict])
-def admin_slot_delete(slot_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+def admin_slot_delete(slot_id: str, payload: SlotDeleteInput | None = None,
+                      db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    slot = lock(db, DeliverySlot, slot_id)
-    referenced = db.scalar(select(func.count(Order.id)).where(
-        (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id)))
-    if referenced:
-        raise DomainError('RESOURCE_REFERENCED', '时段仍被订单引用，请改为关闭', 409)
-    db.delete(slot)
-    audit(db, actor, 'DELIVERY_SLOT_DELETED', 'DELIVERY_SLOT', slot_id)
-    return ok({'id': slot_id, 'deleted': True})
+    slot = lock(db, DeliverySlot, slot_id,
+                payload.expected_version if payload else None)
+    if _slot_archived(slot):
+        return ok({'id': slot_id, 'deleted': True, 'archived': True})
+    live_orders = list(db.scalars(select(Order).where(
+        (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id),
+        Order.deleted_at.is_(None),
+        Order.status.notin_(('CANCELLED', 'DELIVERED')))))
+    live_batches = [batch for batch in db.scalars(select(DeliveryBatch).where(
+        DeliveryBatch.deleted_at.is_(None),
+        DeliveryBatch.status.notin_(('CANCELLED', 'COMPLETED'))))
+        if _batch_slot_id(batch) == slot.id]
+    if live_orders or live_batches:
+        raise DomainError('SLOT_IN_USE', '时段仍被进行中订单或批次引用，不能删除',
+                          409, {'slotId': slot.id,
+                                'orderIds': sorted(order.id for order in live_orders),
+                                'batchIds': sorted(batch.id for batch in live_batches)})
+    reason = (payload.reason if payload else None) or '管理员移除配送时段'
+    data = deepcopy(slot.data or {})
+    history = list(data.get('history') or [])
+    history.append({'action': 'ARCHIVE', 'before': _slot_snapshot(slot),
+                    'at': utcnow().isoformat(), 'by': actor.id, 'reason': reason})
+    data.update({'archivedAt': utcnow().isoformat(), 'archivedBy': actor.id,
+                 'archiveReason': reason, 'history': history[-50:]})
+    slot.data = data
+    slot.enabled = False
+    touch(slot)
+    audit(db, actor, 'DELIVERY_SLOT_ARCHIVED', 'DELIVERY_SLOT', slot.id,
+          reason=reason, data={'orderIds': [], 'batchIds': []})
+    return ok({'id': slot_id, 'deleted': True, 'archived': True})
 
 
 # ---------------------------------------------------------------------------
@@ -791,17 +852,38 @@ def admin_batch(batch_id: str, db=Depends(get_db), actor: Actor = Depends(actor_
 def admin_batch_create(payload: BatchCreate, db=Depends(get_db),
                        actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    starts_at, ends_at = payload.window()
+    slot = None
+    if payload.slot_id:
+        slot = db.get(DeliverySlot, payload.slot_id, with_for_update=True)
+        if slot is None:
+            raise DomainError('SLOT_NOT_FOUND', '配送时段不存在', 404,
+                              {'slotId': payload.slot_id})
+        if _slot_archived(slot):
+            raise DomainError('SLOT_UNAVAILABLE', '配送时段已移除，不能创建批次', 409,
+                              {'slotId': slot.id})
+        if not slot.enabled:
+            raise DomainError('SLOT_UNAVAILABLE', '配送时段已关闭，不能创建批次', 409,
+                              {'slotId': slot.id})
+        starts_at, ends_at = slot.starts_at, slot.ends_at
+    else:
+        try:
+            starts_at, ends_at = payload.window()
+        except ValueError as error:
+            raise DomainError('INVALID_WINDOW', str(error), 422) from error
     courier_id = payload.courier_id or None
     if courier_id and _valid_courier(db, courier_id) is None:
         raise DomainError('COURIER_INVALID', '配送员不可用', 422)
+    data = {'createdBy': actor.id, 'history': []}
+    if slot is not None:
+        data.update({'slotId': slot.id, 'slotSnapshot': _slot_snapshot(slot)})
     batch = DeliveryBatch(name=payload.name, courier_id=courier_id, starts_at=starts_at,
                           ends_at=ends_at, status='PLANNED', reason=payload.reason,
-                          data={'createdBy': actor.id, 'history': []})
+                          data=data)
     db.add(batch)
     db.flush()
     _audit_batch(db, actor, batch, 'BATCH_CREATED', payload.reason,
-                 {'startsAt': starts_at.isoformat(), 'endsAt': ends_at.isoformat()})
+                 {'startsAt': starts_at.isoformat(), 'endsAt': ends_at.isoformat(),
+                  'slotId': slot.id if slot is not None else None})
     return ok(_batch_view(db, batch))
 
 
@@ -854,10 +936,16 @@ def admin_batch_update(batch_id: str, payload: BatchUpdate, db=Depends(get_db),
                                'reassignmentReason': payload.reason}
             touch(assignment)
     batch.reason = payload.reason
-    history = list((batch.data or {}).get('history') or [])
+    data = deepcopy(batch.data or {})
+    if window_fields and data.get('slotId'):
+        data['detachedSlotId'] = data.pop('slotId')
+        data.pop('slotSnapshot', None)
+        data['slotDetachedAt'] = utcnow().isoformat()
+    history = list(data.get('history') or [])
     history.append({'action': 'EDIT', 'before': before, 'at': utcnow().isoformat(),
                     'by': actor.id, 'reason': payload.reason})
-    batch.data = {**(batch.data or {}), 'history': history[-50:]}
+    data['history'] = history[-50:]
+    batch.data = data
     touch(batch)
     _audit_batch(db, actor, batch, 'BATCH_UPDATED', payload.reason,
                  {'fields': sorted(payload.model_fields_set - {'expected_version', 'reason'})})
@@ -933,8 +1021,6 @@ def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(ge
                           {'status': batch.status})
     if _valid_courier(db, batch.courier_id) is None:
         raise DomainError('COURIER_REQUIRED', '发布前必须分配有效配送员', 422)
-    if batch.ends_at <= utcnow():
-        raise DomainError('BATCH_WINDOW_ELAPSED', '批次安排时间已结束，请先改期', 422)
     batch.status = 'PUBLISHED'
     data = deepcopy(batch.data or {})
     data['publishedAt'] = utcnow().isoformat()
@@ -1018,7 +1104,7 @@ def batch_start(batch_id: str, payload: BatchVersionInput, db=Depends(get_db),
         raise DomainError('FORBIDDEN', '只能开始分配给自己的配送批次', 403)
     for order in orders.values():
         _refresh_production_safely(db, order)
-    blockers = _start_blockers(db, batch, assignments, orders, utcnow())
+    blockers = _start_blockers(db, batch, assignments, orders)
     if blockers:
         raise DomainError('BATCH_NOT_READY', '批次仍有未满足条件的订单，整批未开始配送',
                           409, {'blockers': blockers})
@@ -1077,8 +1163,16 @@ def _source_assignments(db, source_ids) -> list[DeliveryAssignment]:
                            .order_by(DeliveryAssignment.id)))
 
 
+def _slot_mismatch_blocker(target: DeliveryBatch, order: Order) -> dict | None:
+    slot_id = _batch_slot_id(target)
+    order_slot_id = _order_effective_slot_id(order)
+    if slot_id and order_slot_id and slot_id != order_slot_id:
+        return _blocker('ORDER_SLOT_MISMATCH',
+                        '订单所选时段与批次时段不一致，请先由客户确认新时段', order.id)
+    return None
+
+
 def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict:
-    now = utcnow()
     blockers: list[dict] = []
     impacts: list[dict] = []
     source_batches = []
@@ -1125,6 +1219,9 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                     blockers.append(_blocker('ORDER_ALREADY_ASSIGNED',
                                              '订单已有有效配送执行', order.id))
                 else:
+                    mismatch = _slot_mismatch_blocker(target_batch, order)
+                    if mismatch is not None:
+                        blockers.append(mismatch)
                     impacts.append({'batchId': target_batch.id, 'orderId': order.id,
                                     'pickupCode': order.pickup_code, 'message': '将加入批次'})
     elif action in ('REMOVE', 'TRANSFER', 'SPLIT', 'MERGE'):
@@ -1153,6 +1250,10 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                 blockers.append(_blocker('ASSIGNMENT_STARTED', '已经开始配送的执行不能转移', assignment.id))
             order = orders.get(order_id)
             if order is not None:
+                if target_batch is not None and action in ('TRANSFER', 'MERGE'):
+                    mismatch = _slot_mismatch_blocker(target_batch, order)
+                    if mismatch is not None:
+                        blockers.append(mismatch)
                 impacts.append({'batchId': target_batch.id if target_batch else None,
                                 'orderId': order.id, 'pickupCode': order.pickup_code,
                                 'message': {'REMOVE': '将移出批次', 'TRANSFER': '将转移到目标批次',
@@ -1190,8 +1291,6 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                 blockers.append(_blocker('INVALID_TRANSITION', '只有规划中或已延期批次可以发布', batch.id))
             if _valid_courier(db, batch.courier_id) is None:
                 blockers.append(_blocker('COURIER_REQUIRED', '发布前必须分配有效配送员', batch.id))
-            if batch.ends_at <= now:
-                blockers.append(_blocker('BATCH_WINDOW_ELAPSED', '批次时间已结束', batch.id))
             impacts.append({'batchId': batch.id, 'message': '将发布配送计划，不标记订单配送中'})
     elif action == 'START':
         if not source_batches:
@@ -1202,7 +1301,7 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                             for assignment in assignments}
             blockers.extend(_start_blockers(db, batch, assignments,
                                             {key: value for key, value in batch_orders.items()
-                                             if value is not None}, now))
+                                             if value is not None}))
             impacts.append({'batchId': batch.id, 'message': '将整批开始配送'})
     else:
         blockers.append(_blocker('UNKNOWN_ACTION', '不支持的批量操作'))
@@ -1250,6 +1349,10 @@ def _assign_order(db, batch: DeliveryBatch, order: Order, actor: Actor,
             return existing
         raise DomainError('BATCH_CONFLICT', '订单已有其他有效配送批次', 409,
                           {'orderId': order.id, 'batchId': existing.batch_id})
+    mismatch = _slot_mismatch_blocker(batch, order)
+    if mismatch is not None:
+        raise DomainError('ORDER_SLOT_MISMATCH', mismatch['message'], 409,
+                          {'orderId': order.id, 'slotId': _batch_slot_id(batch)})
     assignment = DeliveryAssignment(
         order_id=order.id, batch_id=batch.id, courier_id=batch.courier_id,
         status='PLANNED', active=True, address_review=bool(order.address_review),
@@ -1299,10 +1402,14 @@ def _execute_operation(db, actor: Actor, action: str, payload: BatchOperationPre
         by_order = {assignment.order_id: assignment for assignment in source_assignments}
         if action == 'SPLIT':
             source = next(iter(source_batches.values()))
+            source_data = source.data or {}
+            split_data = {'splitFrom': source.id, 'createdBy': actor.id}
+            if source_data.get('slotId'):
+                split_data.update({'slotId': source_data['slotId'],
+                                   'slotSnapshot': source_data.get('slotSnapshot')})
             split = DeliveryBatch(name=f'{source.name} · 拆分', courier_id=source.courier_id,
                                   starts_at=source.starts_at, ends_at=source.ends_at,
-                                  status='PLANNED', reason=reason,
-                                  data={'splitFrom': source.id, 'createdBy': actor.id})
+                                  status='PLANNED', reason=reason, data=split_data)
             db.add(split)
             db.flush()
             target_batch = split
@@ -1343,10 +1450,16 @@ def _execute_operation(db, actor: Actor, action: str, payload: BatchOperationPre
             batch.starts_at, batch.ends_at = starts_at, ends_at
             batch.status = 'POSTPONED'
             batch.reason = reason
-            history = list((batch.data or {}).get('history') or [])
+            data = deepcopy(batch.data or {})
+            if data.get('slotId'):
+                data['detachedSlotId'] = data.pop('slotId')
+                data.pop('slotSnapshot', None)
+                data['slotDetachedAt'] = utcnow().isoformat()
+            history = list(data.get('history') or [])
             history.append({'action': 'RESCHEDULE', 'before': before,
                             'at': utcnow().isoformat(), 'by': actor.id, 'reason': reason})
-            batch.data = {**(batch.data or {}), 'history': history[-50:]}
+            data['history'] = history[-50:]
+            batch.data = data
             touch(batch)
             affected.append(batch)
     elif action in ('CANCEL', 'DELETE'):

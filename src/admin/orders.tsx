@@ -1,3 +1,4 @@
+import { formatDisplayTime } from "../lib/display-format";
 import { AdminSupplementaryPanel } from "../v1/supplementary";
 import { assertQuote, settlementInput } from "../growth/pricing";
 import { AdminAccessLinks } from "../growth/order-links";
@@ -229,7 +230,7 @@ export function AdminOrders() {
                           {o.pickupCode}
                           {o.priority && <Star size={12} fill="currentColor" />}
                         </Link>
-                        <small>{o.createdAt}</small>
+                        <small>{formatDisplayTime(o.createdAt)}</small>
                       </td>
                       <td>
                         {o.nickname}
@@ -406,7 +407,7 @@ export function AdminOrderDetail() {
       </Link>
       <PageHeading
         title={`订单 ${order.pickupCode}`}
-        description={`下单 ${order.createdAt} · 内容版本 v${order.contentRevision}`}
+        description={`下单 ${formatDisplayTime(order.createdAt)} · 内容版本 v${order.contentRevision}`}
         action={
           <div className="button-row">
             <Button
@@ -535,7 +536,7 @@ export function AdminOrderDetail() {
                   <i />
                   <div>
                     <strong>{h.title}</strong>
-                    <span>{h.time}</span>
+                    <span>{formatDisplayTime(h.time)}</span>
                     <p>{h.description}</p>
                   </div>
                 </div>

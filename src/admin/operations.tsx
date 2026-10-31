@@ -1,3 +1,4 @@
+import { formatDisplayTime } from "../lib/display-format";
 import { AuditPage } from "./audit";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -1500,7 +1501,7 @@ export function Exceptions() {
                 <div>
                   <h2>{row.type}</h2>
                   <p>
-                    {(row as Record<string, any>).createdAt || row.time} ·{" "}
+                    {formatDisplayTime((row as Record<string, any>).createdAt || row.time)} ·{" "}
                     <Link
                       className="text-link"
                       to={`${ADMIN}/orders/${row.orderId}`}

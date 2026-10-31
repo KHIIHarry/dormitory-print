@@ -1,3 +1,4 @@
+import { formatDisplayTime } from "../lib/display-format";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -200,7 +201,9 @@ export function CourierBatch() {
           ? "批次已开始配送，请按楼栋完成交付。"
           : batch.status === "PUBLISHED"
             ? "批次已发布，确认后整批开始配送；开始后才能提交交付。"
-            : "此批次仍在计划中，待管理员发布后才能开始配送。"}
+            : batch.status === "POSTPONED"
+              ? "批次已延期，请等待管理员重新发布配送计划。"
+              : "此批次仍在计划中，待管理员发布后才能开始配送。"}
       </Notice>
       {role === "ADMIN" && !adminCapable ? (
         <Notice>
@@ -368,7 +371,7 @@ export function CourierOrder() {
         </dl>
       </Panel>
       {order.status === "DELIVERED" ? (
-        <Notice>此订单已完成交付，交付时间 {order.proof?.deliveredAt}。</Notice>
+        <Notice>此订单已完成交付，交付时间 {formatDisplayTime(order.proof?.deliveredAt)}。</Notice>
       ) : (
         <div className="courier-action-stack">
           {order.status === "DELIVERING" && order.packingStatus === "PACKED" ? (

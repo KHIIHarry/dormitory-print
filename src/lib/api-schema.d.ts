@@ -3793,6 +3793,8 @@ export interface components {
              * @default
              */
             reason: string;
+            /** Slotid */
+            slotId?: string | null;
             /** Startsat */
             startsAt?: string | null;
             /** Time */
@@ -3954,6 +3956,10 @@ export interface components {
             publishedAt?: string | null;
             /** Reason */
             reason: string;
+            /** Slotid */
+            slotId?: string | null;
+            /** Slotname */
+            slotName?: string | null;
             /**
              * Startsat
              * Format: date-time
@@ -8390,6 +8396,16 @@ export interface components {
             /** Slotid */
             slotId: string;
         };
+        /** SlotDeleteInput */
+        SlotDeleteInput: {
+            /** Expectedversion */
+            expectedVersion?: number | null;
+            /**
+             * Reason
+             * @default 管理员移除配送时段
+             */
+            reason: string;
+        };
         /** SlotInput */
         SlotInput: {
             /** Capacity */
@@ -8453,6 +8469,11 @@ export interface components {
         };
         /** SlotView */
         SlotView: {
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
             /** Capacity */
             capacity: number;
             /** Date */
@@ -14945,6 +14966,7 @@ export interface operations {
         parameters: {
             query?: {
                 date?: string | null;
+                include_archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -15055,7 +15077,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SlotDeleteInput"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

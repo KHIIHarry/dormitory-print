@@ -249,7 +249,7 @@ from app.models import (
     Staff,
     utcnow,
 )
-from app.delivery_schemas import to_shanghai_date, to_shanghai_window
+from app.delivery_schemas import to_shanghai_date, to_shanghai_hhmm, to_shanghai_window
 
 APP_MODULES = ['delivery', 'production']
 
@@ -321,6 +321,31 @@ def create_batch(api, client, courier, *, offset_hours=-1, duration=3):
         'courierId': courier.id,
         'reason': '',
     })
+    assert response.status_code == 200, response.text
+    return response.json()['data']
+
+
+def create_batch_fixed(api, client, courier, starts_at, *, duration=1):
+    ends_at = starts_at + timedelta(hours=duration)
+    response = api(client, '/admin/batches', {
+        'name': f'测试批次 {uuid4().hex[:6]}',
+        'date': to_shanghai_date(starts_at),
+        'time': f'{to_shanghai_hhmm(starts_at)} – {to_shanghai_hhmm(ends_at)}',
+        'courierId': courier.id,
+        'reason': '',
+    })
+    assert response.status_code == 200, response.text
+    return response.json()['data']
+
+
+def create_slot(api, client, *, offset_hours=48, capacity=4, name='测试时段'):
+    starts_at = (utcnow() + timedelta(hours=offset_hours)).replace(
+        hour=2, minute=0, second=0, microsecond=0)
+    ends_at = starts_at + timedelta(hours=1)
+    response = api(client, '/admin/slots', {
+        'date': to_shanghai_date(starts_at), 'name': name,
+        'start': to_shanghai_hhmm(starts_at), 'end': to_shanghai_hhmm(ends_at),
+        'capacity': capacity, 'enabled': True, 'reason': '测试时段'})
     assert response.status_code == 200, response.text
     return response.json()['data']
 
@@ -786,6 +811,216 @@ def courier_client(client_factory, db, courier):
     return client
 
 
+def test_start_before_estimated_window_is_allowed_but_other_guards_remain(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    order = make_ready_order(db)
+    starts_at = (utcnow() + timedelta(days=1)).replace(
+        hour=2, minute=0, second=0, microsecond=0)
+    batch = create_batch_fixed(api, client, courier, starts_at)
+    add_orders(api, client, batch, [order.id])
+    published = publish_batch(api, client, batch['id'])
+    started = start_batch(api, client, batch['id'], published['version'])
+    assert started.status_code == 200, started.text
+    db.expire_all()
+    assert db.get(DeliveryBatch, batch['id']).status == 'DELIVERING'
+    assert db.get(Order, order.id).status == 'DELIVERING'
+    assignment = db.scalar(select(DeliveryAssignment).where(
+        DeliveryAssignment.order_id == order.id,
+        DeliveryAssignment.active.is_(True)))
+    assert assignment is not None and assignment.status == 'STARTED'
+
+
+def test_publish_and_start_after_estimated_window_are_allowed(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    order = make_ready_order(db)
+    starts_at = (utcnow() - timedelta(days=2)).replace(
+        hour=2, minute=0, second=0, microsecond=0)
+    batch = create_batch_fixed(api, client, courier, starts_at)
+    add_orders(api, client, batch, [order.id])
+    published = publish_batch(api, client, batch['id'])
+    started = start_batch(api, client, batch['id'], published['version'])
+    assert started.status_code == 200, started.text
+    db.expire_all()
+    assert db.get(DeliveryBatch, batch['id']).status == 'DELIVERING'
+    assert db.get(Order, order.id).status == 'DELIVERING'
+
+
+def test_postponed_batch_can_be_republished_and_started_outside_window(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    order = make_ready_order(db)
+    starts_at = (utcnow() - timedelta(days=2)).replace(
+        hour=2, minute=0, second=0, microsecond=0)
+    batch = create_batch_fixed(api, client, courier, starts_at)
+    add_orders(api, client, batch, [order.id])
+
+    # Rescheduling moves the batch to POSTPONED; republish remains valid even
+    # though both estimated windows are already in the past.
+    reschedule = api(client, '/admin/batch-operations/preview', {
+        'action': 'RESCHEDULE',
+        'orderIds': [],
+        'sourceBatchIds': [batch['id']],
+        'versions': {batch['id']: batch['version']},
+        'payload': {
+            'reason': '天气原因延期',
+            'startsAt': (starts_at + timedelta(hours=1)).isoformat(),
+            'endsAt': (starts_at + timedelta(hours=2)).isoformat(),
+        },
+    })
+    assert reschedule.status_code == 200, reschedule.text
+    assert reschedule.json()['data']['blockers'] == []
+    committed = api(client, '/admin/batch-operations/commit',
+                    {'planId': reschedule.json()['data']['planId']})
+    assert committed.status_code == 200, committed.text
+    db.expire_all()
+    assert db.get(DeliveryBatch, batch['id']).status == 'POSTPONED'
+
+    republished = publish_batch(api, client, batch['id'])
+    assert republished['status'] == 'PUBLISHED'
+    started = start_batch(api, client, batch['id'], republished['version'])
+    assert started.status_code == 200, started.text
+    db.expire_all()
+    assert db.get(DeliveryBatch, batch['id']).status == 'DELIVERING'
+    assert db.get(Order, order.id).status == 'DELIVERING'
+
+
+def test_batch_create_uses_existing_slot_as_authoritative_snapshot(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    slot = create_slot(api, client)
+    response = api(client, '/admin/batches', {
+        'name': '按时段创建批次', 'slotId': slot['id'], 'courierId': courier.id,
+        'reason': ''})
+    assert response.status_code == 200, response.text
+    batch = response.json()['data']
+    assert batch['date'] == slot['date']
+    assert batch['time'] == f"{slot['start']} – {slot['end']}"
+    assert batch['slotId'] == slot['id']
+    assert batch['slotName'] == slot['name']
+    stored = db.get(DeliveryBatch, batch['id'])
+    assert stored.starts_at == datetime.fromisoformat(slot['startsAt'])
+    assert stored.ends_at == datetime.fromisoformat(slot['endsAt'])
+    assert (stored.data or {})['slotId'] == slot['id']
+    assert (stored.data or {})['slotSnapshot']['name'] == slot['name']
+
+    # Date/time cannot override the selected configured slot.
+    conflict = api(client, '/admin/batches', {
+        'name': '冲突批次', 'slotId': slot['id'], 'courierId': courier.id,
+        'date': slot['date'], 'time': '08:00 – 09:00'})
+    assert conflict.status_code == 422, conflict.text
+
+    # A live batch referencing the slot blocks archival.
+    archived = api(client, f"/admin/slots/{slot['id']}", {
+        'expectedVersion': slot['version'], 'reason': '清理时段'}, method='DELETE')
+    assert archived.status_code == 409, archived.text
+    assert archived.json()['error']['code'] == 'SLOT_IN_USE'
+    assert batch['id'] in archived.json()['error']['details']['batchIds']
+
+
+def test_slot_delete_archives_unused_or_historical_slots_instead_of_hard_delete(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    unused = create_slot(api, client, name='未使用时段')
+    deleted = api(client, f"/admin/slots/{unused['id']}", {
+        'expectedVersion': unused['version'], 'reason': '不再使用'}, method='DELETE')
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()['data']['archived'] is True
+    stored = db.get(DeliverySlot, unused['id'])
+    db.refresh(stored)
+    assert stored is not None and stored.enabled is False
+    assert (stored.data or {}).get('archivedAt')
+    assert list(db.scalars(select(DeliverySlot).where(DeliverySlot.id == unused['id'])))
+    assert all(item['id'] != unused['id'] for item in api(
+        client, '/admin/slots', None, method='GET').json()['data']['items'])
+    archived_list = api(client, '/admin/slots?include_archived=true', None, method='GET')
+    assert archived_list.status_code == 200, archived_list.text
+    assert any(item['id'] == unused['id'] and item['archived'] is True
+               for item in archived_list.json()['data']['items'])
+    assert all(item['id'] != unused['id'] for item in api(
+        client, '/public/slots', None, method='GET').json()['data']['items'])
+
+    # Live order references block; a delivered historical order does not.
+    slot = create_slot(api, client, name='已交付历史时段')
+    order = make_ready_order(db)
+    order.requested_slot_id = slot['id']
+    db.commit()
+    blocked = api(client, f"/admin/slots/{slot['id']}", method='DELETE')
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()['error']['code'] == 'SLOT_IN_USE'
+    assert order.id in blocked.json()['error']['details']['orderIds']
+    order.status = 'DELIVERED'
+    db.commit()
+    archived = api(client, f"/admin/slots/{slot['id']}", {
+        'expectedVersion': slot['version'], 'reason': '订单已完成'}, method='DELETE')
+    assert archived.status_code == 200, archived.text
+    db.expire_all()
+    assert db.get(Order, order.id) is not None
+    assert db.get(DeliverySlot, slot['id']) is not None
+
+
+def test_slot_backed_batch_rejects_orders_from_another_slot(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    slot = create_slot(api, client, name='A 时段')
+    batch = api(client, '/admin/batches', {
+        'name': 'A 批次', 'slotId': slot['id'], 'courierId': courier.id}).json()['data']
+    first = make_ready_order(db)
+    first.requested_slot_id = slot['id']
+    db.commit()
+    add_orders(api, client, batch, [first.id])
+
+    other = create_slot(api, client, name='B 时段')
+    second = make_ready_order(db)
+    second.requested_slot_id = other['id']
+    db.commit()
+    preview = api(client, '/admin/batch-operations/preview', {
+        'action': 'ADD', 'orderIds': [second.id], 'sourceBatchIds': [batch['id']],
+        'targetBatchId': batch['id'], 'versions': {batch['id']: batch['version']},
+        'payload': {'reason': '测试跨时段'}})
+    assert preview.status_code == 200, preview.text
+    codes = {blocker['code'] for blocker in preview.json()['data']['blockers']}
+    assert 'ORDER_SLOT_MISMATCH' in codes, preview.json()['data']['blockers']
+    db.expire_all()
+    assert db.scalar(select(DeliveryAssignment).where(
+        DeliveryAssignment.order_id == second.id,
+        DeliveryAssignment.active.is_(True))) is None
+
+
+def test_start_rechecks_order_slot_against_batch_after_assignment(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    slot = create_slot(api, client, name='原时段')
+    batch = api(client, '/admin/batches', {
+        'name': '时段批次', 'slotId': slot['id'], 'courierId': courier.id}).json()['data']
+    order = make_ready_order(db)
+    order.requested_slot_id = slot['id']
+    db.commit()
+    add_orders(api, client, batch, [order.id])
+    published = publish_batch(api, client, batch['id'])
+
+    # Simulate a historical/race drift after assignment. Public flows do not
+    # change the slot once delivery is arranged, so start must revalidate the
+    # batch/order invariant rather than trusting the earlier _assign_order check.
+    other = create_slot(api, client, name='漂移时段')
+    order.requested_slot_id = other['id']
+    db.commit()
+    blocked = start_batch(api, client, batch['id'], published['version'])
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()['error']['code'] == 'BATCH_NOT_READY'
+    codes = {item['code'] for item in blocked.json()['error']['details']['blockers']}
+    assert 'ORDER_SLOT_MISMATCH' in codes, blocked.json()['error']['details']['blockers']
+    db.expire_all()
+    assert db.get(DeliveryBatch, batch['id']).status == 'PUBLISHED'
+
+
 def test_real_sessions_enforce_admin_and_assigned_courier_only(
         db, api, admin_client, client_factory, staff_factory):
     courier = staff_factory(role='COURIER', capabilities=[],
@@ -1186,3 +1421,31 @@ def test_invalid_slot_window_is_validation_error_not_server_failure(client, api,
     response=api(client,'/admin/slots',{'date':'2030-01-02','name':'非法时段','start':'23:30','end':'00:30','capacity':1})
     assert response.status_code==422,response.text
     assert response.json()['error']['code']=='VALIDATION_ERROR'
+
+
+def test_batch_delete_blocks_active_delivery_and_preserves_order(
+        db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    courier = make_courier(staff_factory)
+    order = make_ready_order(db)
+    starts_at = (utcnow() + timedelta(days=1)).replace(
+        hour=2, minute=0, second=0, microsecond=0)
+    batch = create_batch_fixed(api, client, courier, starts_at)
+    add_orders(api, client, batch, [order.id])
+    published = publish_batch(api, client, batch['id'])
+    started = start_batch(api, client, batch['id'], published['version'])
+    assert started.status_code == 200, started.text
+    current = api(client, f"/admin/batches/{batch['id']}", None, method='GET')
+    assert current.status_code == 200, current.text
+    version = current.json()['data']['version']
+
+    response = api(client, f"/admin/batches/{batch['id']}", {
+        'expectedVersion': version, 'reason': '尝试删除配送中批次',
+    }, method='DELETE')
+    assert response.status_code == 409, response.text
+    assert response.json()['error']['code'] == 'INVALID_TRANSITION'
+    db.expire_all()
+    stored = db.get(DeliveryBatch, batch['id'])
+    stored_order = db.get(Order, order.id)
+    assert stored.deleted_at is None and stored.status == 'DELIVERING'
+    assert stored_order.status == 'DELIVERING'

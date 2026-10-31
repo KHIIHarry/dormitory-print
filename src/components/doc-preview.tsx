@@ -10,6 +10,8 @@ type PreviewProps = {
   compact?: boolean;
   pdfUrl?: string;
   expanded?: boolean;
+  initialPage?: number;
+  label?: string;
   onReadyChange?: (ready: boolean) => void;
 };
 export function DocPreview(props: PreviewProps) {
@@ -28,10 +30,12 @@ function PreviewContent({
   compact = false,
   pdfUrl,
   expanded = false,
+  initialPage = 1,
+  label,
   onReadyChange,
 }: PreviewProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage);
   const [displayedPage, setDisplayedPage] = useState(0);
   const generation = useRef(getIdentityGeneration());
   const renderAbort = useRef<AbortController | null>(null);
@@ -53,7 +57,7 @@ function PreviewContent({
   const [rendering, setRendering] = useState(false);
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   useEffect(() => {
-    setPage(1);
+    setPage(initialPage);
     setError("");
     setBytes(null);
     if (!pdfUrl || invalidated) return;
@@ -109,6 +113,7 @@ function PreviewContent({
             canvas.current,
             page,
             abort.signal,
+            expanded ? 1800 : 720,
           );
       })
       .then((count) => {
@@ -127,7 +132,7 @@ function PreviewContent({
     return () => {
       abort.abort();
     };
-  }, [file.id, file.localFile, page, pdfUrl, bytes, invalidated]);
+  }, [file.id, file.localFile, page, pdfUrl, bytes, invalidated, expanded]);
   const ready =
     !invalidated &&
     !error &&
@@ -145,7 +150,7 @@ function PreviewContent({
       <div className="preview-toolbar">
         <span>
           <FileText size={14} />
-          {pdfUrl ? "最终 PDF" : "文件预览"}
+          {label || (pdfUrl ? "最终 PDF" : "文件预览")}
         </span>
         {!expanded && (
           <button
@@ -231,8 +236,8 @@ function PreviewContent({
         </button>
       </div>
       {zoom && (
-        <Modal title={file.name} wide onClose={() => setZoom(false)}>
-          <DocPreview file={file} pdfUrl={pdfUrl} expanded />
+        <Modal title={file.name} fullscreen onClose={() => setZoom(false)}>
+          <DocPreview file={file} pdfUrl={pdfUrl} initialPage={page} label={label} expanded />
         </Modal>
       )}
     </div>
