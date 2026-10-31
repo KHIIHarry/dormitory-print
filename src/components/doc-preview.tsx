@@ -5,6 +5,7 @@ import type { PrintFile } from "../lib/types";
 import { Modal } from "./ui";
 import { TaskStatus } from "./feedback";
 import { getIdentityGeneration } from "../growth/client";
+import { imageMime } from "../lib/image-bytes";
 type PreviewProps = {
   file: PrintFile;
   compact?: boolean;
@@ -40,16 +41,25 @@ function PreviewContent({
   const generation = useRef(getIdentityGeneration());
   const renderAbort = useRef<AbortController | null>(null);
   const [invalidated, setInvalidated] = useState(false);
+  const imageUrlRef = useRef<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   useEffect(() => {
     const invalidate = () => {
       renderAbort.current?.abort();
       if (canvas.current) canvas.current.width = canvas.current.width;
+      if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+      imageUrlRef.current = null;
+      setImageUrl(null);
       setInvalidated(true);
       setZoom(false);
       setBytes(null);
     };
     window.addEventListener("dormprint:identity", invalidate);
-    return () => window.removeEventListener("dormprint:identity", invalidate);
+    return () => {
+      window.removeEventListener("dormprint:identity", invalidate);
+      if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+      imageUrlRef.current = null;
+    };
   }, []);
   const [pages, setPages] = useState(file.pages || 1);
   const [zoom, setZoom] = useState(false);
@@ -60,6 +70,9 @@ function PreviewContent({
     setPage(initialPage);
     setError("");
     setBytes(null);
+    if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+    imageUrlRef.current = null;
+    setImageUrl(null);
     if (!pdfUrl || invalidated) return;
     const abort = new AbortController();
     const url = new URL(pdfUrl, location.href);
@@ -80,8 +93,23 @@ function PreviewContent({
         if (
           !abort.signal.aborted &&
           generation.current === getIdentityGeneration()
-        )
-          setBytes(new Uint8Array(buffer));
+        ) {
+          const data = new Uint8Array(buffer);
+          const mime = imageMime(data);
+          if (mime) {
+            if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+            const objectUrl = URL.createObjectURL(
+              new Blob([data], { type: mime }),
+            );
+            imageUrlRef.current = objectUrl;
+            setImageUrl(objectUrl);
+            setPages(1);
+            setDisplayedPage(1);
+            setRendering(false);
+          } else {
+            setBytes(data);
+          }
+        }
       })
       .catch((e) => {
         if (
@@ -138,7 +166,7 @@ function PreviewContent({
     !error &&
     !rendering &&
     displayedPage === page &&
-    (pdfUrl ? !!bytes : !!file.localFile);
+    (pdfUrl ? !!bytes || !!imageUrl : !!file.localFile);
   useEffect(() => {
     onReadyChange?.(ready);
   }, [ready, onReadyChange]);
@@ -150,7 +178,8 @@ function PreviewContent({
       <div className="preview-toolbar">
         <span>
           <FileText size={14} />
-          {label || (pdfUrl ? "最终 PDF" : "文件预览")}
+          {label ||
+            (pdfUrl ? (imageUrl ? "图片预览" : "最终 PDF") : "文件预览")}
         </span>
         {!expanded && (
           <button
@@ -196,6 +225,8 @@ function PreviewContent({
               示例预览 · 第 {page} 页 / {file.pages} 页
             </small>
           </div>
+        ) : imageUrl ? (
+          <img src={imageUrl} alt={file.name} />
         ) : pdfUrl || file.localFile?.type === "application/pdf" ? (
           <canvas ref={canvas} />
         ) : (
@@ -204,11 +235,12 @@ function PreviewContent({
           </p>
         )}
       </div>
-      {!invalidated && (rendering || (pdfUrl && !bytes && !error)) && (
-        <div className="pdf-render-status">
-          <TaskStatus label={`正在渲染第 ${page} 页…`} />
-        </div>
-      )}
+      {!invalidated &&
+        (rendering || (pdfUrl && !bytes && !imageUrl && !error)) && (
+          <div className="pdf-render-status">
+            <TaskStatus label={`正在渲染第 ${page} 页…`} />
+          </div>
+        )}
       {error && (
         <p className="field-error pdf-render-status">预览失败：{error}</p>
       )}
@@ -237,7 +269,13 @@ function PreviewContent({
       </div>
       {zoom && (
         <Modal title={file.name} fullscreen onClose={() => setZoom(false)}>
-          <DocPreview file={file} pdfUrl={pdfUrl} initialPage={page} label={label} expanded />
+          <DocPreview
+            file={file}
+            pdfUrl={pdfUrl}
+            initialPage={page}
+            label={label}
+            expanded
+          />
         </Modal>
       )}
     </div>
