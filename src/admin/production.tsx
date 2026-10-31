@@ -1334,10 +1334,6 @@ function ServerPrintTask() {
               <dd className="numeric">{task.id}</dd>
             </div>
             <div>
-              <dt>订单版本</dt>
-              <dd>{orderVersion}</dd>
-            </div>
-            <div>
               <dt>产物</dt>
               <dd className="numeric">{task.artifactId}</dd>
             </div>

@@ -1533,7 +1533,6 @@ function SlotProposals({ slots }: { slots: Slot[] }) {
                 <tr key={order.id}>
                   <td>
                     <b>{order.pickupCode || order.id}</b>
-                    <small>版本 {order.version}</small>
                   </td>
                   <td>
                     {order.slotProposal
