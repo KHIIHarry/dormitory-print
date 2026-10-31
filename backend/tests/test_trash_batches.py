@@ -203,3 +203,69 @@ def test_purged_batch_removes_executions_and_detaches_settled_wages(
     assert retained is not None
     assert retained.assignment_id is None
     assert retained.snapshot['purgedAssignmentId'] == assignment_id
+
+
+def test_retroactive_policy_still_needs_settlement_before_order_trash(
+    api, admin_client, db, staff_factory
+):
+    """补录只把 0 元标记换成正式工资条目；发放结清前订单仍不可删。"""
+    from app import payroll
+    from tests.test_payroll import add_policy, admin_actor, make_delivered
+
+    courier = make_courier(staff_factory)
+    order, assignment, proof, _ = make_delivered(db, staff_factory, courier)
+    order.settlement_kind = 'CASH'
+    entry = payroll.on_delivery(db, order, assignment, proof)
+    db.commit()
+
+    def trash():
+        return api(admin_client, '/admin/trash', {
+            'targetType': 'ORDER', 'targetId': order.id,
+            'expectedVersion': db.get(Order, order.id).version,
+            'reason': '流程回归',
+        })
+
+    blocked = trash()
+    assert blocked.status_code == 409, blocked.text
+    assert f'WAGE_UNSETTLED:{entry.id}' in blocked.json()['error']['details']['blockers']
+
+    policy = add_policy(db, mode='FIXED', fixed=500)
+    payroll.apply_retroactive_policy(db, admin_actor(admin_client.staff), order, '补录', policy.id)
+    db.commit()
+    still_blocked = trash()
+    assert still_blocked.status_code == 409, still_blocked.text
+    assert any('WAGE_UNSETTLED' in code for code in
+               still_blocked.json()['error']['details']['blockers'])
+
+    converted = db.get(WageEntry, entry.id)
+    payroll.record_settlement(db, admin_actor(admin_client.staff), courier.id,
+                              converted.period, [converted.id], '发放后清理')
+    db.commit()
+    deleted = trash()
+    assert deleted.status_code == 200, deleted.text
+
+
+def test_packed_delivered_order_can_be_trashed(db, api, client, act_as, staff_factory):
+    """装袋完成用的是 PACKED，不是 COMPLETED；已交付订单不应被装袋守卫挡住。"""
+    act_as(staff_factory(role='ADMIN'))
+    order = make_ready_order(db, status='DELIVERED')
+
+    response = api(client, '/admin/trash', {
+        'targetType': 'ORDER', 'targetId': order.id,
+        'expectedVersion': order.version, 'reason': '整理数据',
+    })
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    assert db.get(Order, order.id).deleted_at is not None
+
+
+def test_unpacked_order_still_blocked_by_packing(db, api, client, act_as, staff_factory):
+    act_as(staff_factory(role='ADMIN'))
+    order = make_ready_order(db, status='DELIVERED', packed=False)
+
+    response = api(client, '/admin/trash', {
+        'targetType': 'ORDER', 'targetId': order.id,
+        'expectedVersion': order.version, 'reason': '整理数据',
+    })
+    assert response.status_code == 409, response.text
+    assert 'PACKING_NOT_COMPLETED' in response.json()['error']['details']['blockers']

@@ -310,7 +310,7 @@ def _order_active_blockers(db, order: Order) -> list[str]:
                 blockers.append('BINDING_NOT_COMPLETED')
             if db.scalar(select(PackingTask.id).where(
                     PackingTask.order_id == order.id,
-                    PackingTask.status != 'COMPLETED').limit(1)):
+                    PackingTask.status != 'PACKED').limit(1)):
                 blockers.append('PACKING_NOT_COMPLETED')
     elif order.status not in ('CANCELLED', 'CANCELED'):
         blockers.append('ACTIVE_ORDER')
