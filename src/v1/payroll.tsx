@@ -267,8 +267,7 @@ function PolicyEditor({
       <p className="payroll-muted">{description}</p>
       {policy && (
         <p className="payroll-muted">
-          {policy.scopeKey} · {policyModeLabel(policy.mode)} · v{policy.version}{" "}
-          · 更新于 {timestamp(policy.updatedAt)}
+          {policy.scopeKey} · {policyModeLabel(policy.mode)} · 更新于 {timestamp(policy.updatedAt)}
         </p>
       )}
       <form className="payroll-policy-form" onSubmit={save}>

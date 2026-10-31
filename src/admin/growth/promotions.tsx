@@ -208,7 +208,7 @@ export function PromotionSettingsPage() {
                 <thead>
                   <tr>
                     <th>活动</th>
-                    <th>状态 / 版本</th>
+                    <th>状态</th>
                     <th>固定面额 / 门槛</th>
                     <th>适用 / 预算 / 发行</th>
                     <th>时段</th>
@@ -223,7 +223,7 @@ export function PromotionSettingsPage() {
                         <small>{kinds[c.kind]}</small>
                       </td>
                       <td>
-                        {c.enabled ? "发放中" : "已停用"} · v{c.version}
+                        {c.enabled ? "发放中" : "已停用"}
                       </td>
                       <td>
                         {yuan(c.amountCents)} / 满 {yuan(c.minSpendCents)}

@@ -560,7 +560,6 @@ export function CampusMapAdmin() {
               <div className="panel-heading">
                 <h2>楼栋热点编辑</h2>
                 <span className="soft-tag warm">
-                  底图 v{mapVersion} ·{" "}
                   {selectedCampus.selectionEnabled ? "选点开放" : "选点关闭"}
                 </span>
               </div>
@@ -604,12 +603,7 @@ export function CampusMapAdmin() {
             </Panel>
 
             <div className="campus-admin-side">
-              <Panel
-                title="校区设置"
-                action={
-                  <span className="soft-tag">v{selectedCampus.version}</span>
-                }
-              >
+              <Panel title="校区设置">
                 <Field label="校区名称" error={settingsIssue || undefined}>
                   <input
                     value={name}

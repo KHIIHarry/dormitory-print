@@ -294,7 +294,7 @@ export function AdminBenefitsPage() {
         ),
       );
       setMessage(
-        `已保存，当前版本 ${saved.version}。新报价立即使用该配置，已提交订单保持原报价快照。`,
+        `已保存。新报价立即使用该配置，已提交订单保持原报价快照。`,
       );
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409) {
@@ -358,7 +358,7 @@ export function AdminBenefitsPage() {
       )}
 
       {allowed && version !== null && (
-        <Panel title={`等级减免设置 · 当前版本 ${version}`}>
+        <Panel title="等级减免设置">
           <form
             className="v1-benefits-form"
             onSubmit={(event) => {
@@ -446,7 +446,7 @@ export function AdminBenefitsPage() {
                   void policyResource.reload();
                 }}
               >
-                重新加载当前版本
+                重新加载最新配置
               </Button>
             </div>
           </form>
@@ -472,7 +472,7 @@ export function AdminBenefitsPage() {
             报价由服务端按当前员工身份计算；客户端提交的等级、角色或权限不会被采信。
           </li>
           <li>
-            配置按版本保存。未提交报价在员工身份或等级变化后需要重新报价；已提交订单保留原报价快照。
+            配置保存后即生效。未提交报价在员工身份或等级变化后需要重新报价；已提交订单保留原报价快照。
           </li>
         </ul>
       </Panel>

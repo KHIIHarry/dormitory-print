@@ -197,7 +197,7 @@ function LegacyMapEditor() {
           <span role="alert">{mapLoadError}</span>
         </Notice>
       )}
-      {mapLoading && <Notice>正在读取管理端地图热点与版本…</Notice>}
+      {mapLoading && <Notice>正在读取管理端地图热点…</Notice>}
       <input
         hidden
         ref={input}
@@ -214,7 +214,7 @@ function LegacyMapEditor() {
         <Panel className="map-editor-main">
           <div className="panel-heading">
             <h2>楼栋热点编辑</h2>
-            <span className="soft-tag">底图 v{version} · 未发布编辑</span>
+            <span className="soft-tag">底图 · 未发布编辑</span>
           </div>
           <CampusMap
             buildings={buildings}
@@ -577,10 +577,10 @@ function SettingsForm() {
         await refresh();
       }
       setReview(false);
-      toast("配置已保存，新操作将使用当前版本");
+      toast("配置已保存");
     } catch (error) {
       setSaveError(
-        (error as Error).message || "配置保存失败，请核对版本后重试",
+        (error as Error).message || "配置保存失败，请刷新后重试",
       );
     } finally {
       setBusy(false);
@@ -611,7 +611,7 @@ function SettingsForm() {
     <>
       <PageHeading
         title="系统配置"
-        description="按分区保存强类型配置，每次提交携带服务端版本并独立审计。"
+        description="按分区保存强类型配置，每次提交独立审计。"
         action={
           tab !== "decisions" && (
             <Button
@@ -1235,11 +1235,10 @@ function SettingsForm() {
               ? "价格变更仅影响新报价，既有订单金额和确认的 PDF 不会改变。"
               : tab === "workflow"
                 ? "暂停立即影响新的对应动作；不取消已存在的打印、配送或账目事实。"
-                : "保存仅提交当前分区，并携带服务端版本；其他分区不会被覆盖。"}
+                : "保存仅提交当前分区，其他分区不会被覆盖。"}
           </Notice>
           <p>
-            配置分区：{tabs.find(([value]) => value === tab)?.[1]} · 版本{" "}
-            {DEMO ? "演示" : (sectionVersion ?? "未加载")}
+            配置分区：{tabs.find(([value]) => value === tab)?.[1]}
           </p>
           {saveError && (
             <Notice type="error">

@@ -107,7 +107,7 @@ export function VolumeDiscountsPage() {
       <SubmitState state={submit} />
       {resource.data && (!resource.error || resource.hasData) && (
         <>
-          <Panel title={`规则配置 · 当前版本 ${resource.data.version}`}>
+          <Panel title="规则配置">
             <form
               className="growth-stack"
               onSubmit={(e) => {
@@ -308,9 +308,9 @@ export function VolumeDiscountsPage() {
               </small>
             </form>
           </Panel>
-          <Panel title="版本与操作记录">
+          <Panel title="操作记录">
             <p>
-              已保存版本：{resource.data.version} · 生效时间：
+              生效时间：
               {resource.data.effectiveAt
                 ? localDate(resource.data.effectiveAt)
                 : "立即生效"}
@@ -320,7 +320,6 @@ export function VolumeDiscountsPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>版本</th>
                       <th>管理员</th>
                       <th>时间</th>
                       <th>变更原因</th>
@@ -329,7 +328,6 @@ export function VolumeDiscountsPage() {
                   <tbody>
                     {resource.data.auditLogs.map((log) => (
                       <tr key={log.id}>
-                        <td>v{log.version}</td>
                         <td>{log.actor}</td>
                         <td>{localDate(log.time)}</td>
                         <td>{log.reason}</td>
@@ -340,7 +338,7 @@ export function VolumeDiscountsPage() {
               </div>
             ) : (
               <p>
-                服务端当前未返回历史操作记录。保存时会提交原因与版本供后台审计。
+                服务端当前未返回历史操作记录。保存时会提交变更原因供后台审计。
               </p>
             )}
           </Panel>
