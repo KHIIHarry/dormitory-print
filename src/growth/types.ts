@@ -62,6 +62,7 @@ export type SessionDevice = {
 };
 export type CustomerRecord = CustomerAccount & {
   createdAt: string;
+  verificationDeadline?: string | null;
   orderCount: number;
   couponCount: number;
   inviteCode: string;

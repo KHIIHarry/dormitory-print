@@ -780,7 +780,7 @@ def _create_pending_session(db, response: Response, request: Request, account: A
 
 
 def _issue_registration_mail(db, account: Account, challenge: OneTimeToken, raw: str) -> RegistrationResult:
-    _enqueue_email(
+    job = _enqueue_email(
         db,
         'CUSTOMER_VERIFY_EMAIL',
         account.email,
@@ -791,6 +791,8 @@ def _issue_registration_mail(db, account: Account, challenge: OneTimeToken, raw:
         },
         f'customer-verify:{challenge.id}',
     )
+    if job is not None:
+        job.data = {**(job.data or {}), 'accountId': account.id}
     return RegistrationResult(
         registration_challenge_id=challenge.id,
         id=challenge.id,
@@ -2287,11 +2289,23 @@ def create_initial_admin(db, username: str, password: str, name: str = '管理�
     advisory_lock(db, 'customer-register:' + email)
     advisory_lock(db, 'staff-username:' + username)
     advisory_lock(db, 'staff-super-admin-singleton')
-    if db.scalar(select(Staff.id).where(Staff.is_super_admin.is_(True)).limit(1)):
-        raise DomainError(
-            'SUPER_ADMIN_ALREADY_INITIALIZED',
-            '系统已经有超级管理员；超级管理员只能通过现任超级管理员转交，不能重复初始化',
-            409,
+    existing_super_admins = _locked_super_admins(db)
+    if existing_super_admins:
+        if any(_is_active_super_admin(db, staff) for staff in existing_super_admins):
+            raise DomainError(
+                'SUPER_ADMIN_ALREADY_INITIALIZED',
+                '系统已经有超级管理员；超级管理员只能通过现任超级管理员转交，不能重复初始化',
+                409,
+            )
+        # A restore deliberately disables every staff account, including the
+        # former super admin.  That grant is no longer active, so it must not
+        # block the explicit disaster-recovery bootstrap.  Demote the dormant
+        # grant first because the partial unique index permits only one true
+        # is_super_admin row at a time.
+        _demote_super_admins(
+            db,
+            actor='system:initial-admin-bootstrap',
+            reason='恢复后没有在职超级管理员，重新初始化',
         )
     if _staff_by_username(db, username) is not None:
         raise DomainError('USERNAME_TAKEN', '该工作账号已存在', 409)

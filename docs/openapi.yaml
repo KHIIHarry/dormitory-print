@@ -4463,6 +4463,18 @@
             "title": "Status",
             "type": "string"
           },
+          "verificationDeadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verificationdeadline"
+          },
           "verified": {
             "title": "Verified",
             "type": "boolean"

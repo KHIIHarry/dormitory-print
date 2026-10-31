@@ -13,6 +13,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 
+from .account_lifecycle import verification_deadline
 from .config import get_config
 from .core import (
     Actor, DomainError, Envelope, actor_dep, advisory_lock, audit, lock, ok,
@@ -1272,6 +1273,7 @@ def _customer_view(db, account: Account) -> CustomerRecord:
         displayName=account.display_name or '未命名客户', verified=bool(account.verified_at),
         status=status, version=account.version,
         notificationPreferences=notification,
+        verificationDeadline=verification_deadline(account),
         createdAt=account.created_at, orderCount=len(orders), couponCount=int(coupons),
         inviteCode=account.invite_code, referralCount=int(referrals),
         allowedActions=actions,

@@ -9,11 +9,14 @@ both steps succeeded; failures leave a retryable ``PURGE_PENDING`` state.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 
+from .account_lifecycle import UNVERIFIED_ACCOUNT_TTL
 from .config import get_config
 from .core import (
     Actor,
@@ -26,6 +29,7 @@ from .core import (
     ok,
     require_admin,
     require_customer,
+    token_hash,
     touch,
 )
 from .data_ops_schemas import (
@@ -49,12 +53,14 @@ from .exports import (
     storage_path,
 )
 from .storage_coordination import (
+    discard_staged_since,
     purge_guard,
     purge_storage_key_locked,
     purge_storage_tree_locked,
     record_purged_files,
     recover_orphaned_staging,
     recover_purge_cleanup,
+    staged_file_count,
     storage_gc_guard,
 )
 from .models import (
@@ -76,6 +82,7 @@ from .models import (
     DeletionRequest,
     EmailJob,
     ExportJob,
+    IdempotencyRecord,
     Job,
     OneTimeToken,
     Order,
@@ -105,6 +112,7 @@ from .models import (
 )
 
 router = APIRouter()
+logger = logging.getLogger('dormprint.maintenance')
 
 TERMINAL_ORDER_STATUSES = {'DELIVERED', 'COMPLETED', 'CLOSED', 'CANCELLED', 'CANCELED', 'REFUNDED'}
 TERMINAL_AFTER_SALE_STATUSES = {'COMPLETED', 'CLOSED', 'REJECTED', 'CANCELLED', 'CANCELED', 'REFUNDED'}
@@ -1304,9 +1312,13 @@ def _assets_for_order(db, order: Order) -> tuple[set[str], set[str], set[str], s
 
 def _asset_referenced_outside(db, asset_id: str, *, ignore_order_id: str | None = None,
                               ignore_artifact_ids: set[str] | None = None,
-                              ignore_proof_ids: set[str] | None = None) -> bool:
+                              ignore_proof_ids: set[str] | None = None,
+                              ignore_asset_ids: set[str] | None = None,
+                              ignore_upload_ids: set[str] | None = None) -> bool:
     ignore_artifact_ids = ignore_artifact_ids or set()
     ignore_proof_ids = ignore_proof_ids or set()
+    ignore_asset_ids = ignore_asset_ids or set()
+    ignore_upload_ids = ignore_upload_ids or set()
     file_query = select(OrderFile.id).where(OrderFile.asset_id == asset_id)
     if ignore_order_id:
         file_query = file_query.where(OrderFile.order_id != ignore_order_id)
@@ -1322,9 +1334,15 @@ def _asset_referenced_outside(db, asset_id: str, *, ignore_order_id: str | None 
         proof_query = proof_query.where(DeliveryProof.id.notin_(ignore_proof_ids))
     if db.scalar(proof_query.limit(1)):
         return True
-    if db.scalar(select(UploadSession.id).where(UploadSession.asset_id == asset_id).limit(1)):
+    upload_query = select(UploadSession.id).where(UploadSession.asset_id == asset_id)
+    if ignore_upload_ids:
+        upload_query = upload_query.where(UploadSession.id.notin_(ignore_upload_ids))
+    if db.scalar(upload_query.limit(1)):
         return True
-    if db.scalar(select(Asset.id).where(Asset.normalized_asset_id == asset_id).limit(1)):
+    normalized_query = select(Asset.id).where(Asset.normalized_asset_id == asset_id)
+    if ignore_asset_ids:
+        normalized_query = normalized_query.where(Asset.id.notin_(ignore_asset_ids))
+    if db.scalar(normalized_query.limit(1)):
         return True
     return False
 
@@ -1468,7 +1486,86 @@ def _purge_plan(db, entry: TrashEntry, target_type: str, target) -> dict:
         plan['batch'] = {'assignment_ids': assignment_ids}
         return plan
     if target_type == 'ACCOUNT':
-        plan['account_id'] = target.id
+        # The tombstone stays, but account-owned temporary bytes must not.  A
+        # draft preparation/quote is deleted only when no retained order or
+        # print task points at it; order-linked files are never touched.
+        principal_ids = _account_principal_ids(db, target)
+        uploads = list(db.scalars(select(UploadSession.id).where(
+            UploadSession.principal_id.in_(principal_ids)))) if principal_ids else []
+        upload_ids = set(uploads)
+        preparations = []
+        artifact_ids: set[str] = set()
+        for preparation in _unverified_account_preparations(db, target):
+            if preparation.principal_id not in principal_ids:
+                continue
+            if _preparation_referenced(db, preparation.id):
+                continue
+            if preparation.quote_id and _quote_shared(db, preparation.quote_id):
+                continue
+            artifacts = list(db.scalars(select(Artifact).where(
+                Artifact.preparation_id == preparation.id)))
+            if any(db.scalar(select(PrintTask.id).where(
+                    PrintTask.artifact_id == artifact.id).limit(1))
+                   or db.scalar(select(PrintAttempt.id).where(
+                       PrintAttempt.artifact_id == artifact.id).limit(1))
+                   for artifact in artifacts):
+                continue
+            preparations.append(preparation)
+            artifact_ids.update(artifact.id for artifact in artifacts)
+        preparation_ids = {preparation.id for preparation in preparations}
+        quote_ids = {preparation.quote_id for preparation in preparations
+                     if preparation.quote_id}
+        quote_ids.update(db.scalars(select(Quote.id).where(
+            Quote.checkout_account_id == target.id)))
+        deletable_quotes = {quote_id for quote_id in quote_ids
+                            if not _quote_shared(db, quote_id)}
+        candidate_ids = {asset.id for asset in db.scalars(select(Asset).where(
+            Asset.principal_id.in_(principal_ids),
+            Asset.purpose.notin_(PUBLIC_PURPOSES),
+            Asset.deleted_at.is_(None)))} if principal_ids else set()
+        if artifact_ids:
+            candidate_ids.update(db.scalars(select(Artifact.asset_id).where(
+                Artifact.id.in_(artifact_ids))))
+        for preparation in preparations:
+            for row in ((preparation.input or {}).get('files') or []):
+                asset_id = row.get('assetId') if isinstance(row, dict) else None
+                if asset_id:
+                    candidate_ids.add(asset_id)
+        candidates = list(db.scalars(select(Asset).where(
+            Asset.id.in_(candidate_ids)))) if candidate_ids else []
+        retained_prep_assets: set[str] = set()
+        for preparation in _unverified_account_preparations(db, target):
+            if preparation.id in preparation_ids:
+                continue
+            for row in ((preparation.input or {}).get('files') or []):
+                asset_id = row.get('assetId') if isinstance(row, dict) else None
+                if asset_id:
+                    retained_prep_assets.add(asset_id)
+        deletable: set[str] = set()
+        for asset in candidates:
+            if (asset.purpose in PUBLIC_PURPOSES
+                    or (asset.principal_id and asset.principal_id not in principal_ids)
+                    or asset.id in retained_prep_assets):
+                continue
+            if _asset_referenced_outside(
+                    db, asset.id, ignore_artifact_ids=artifact_ids,
+                    ignore_upload_ids=upload_ids):
+                continue
+            deletable.add(asset.id)
+        files: list[str] = []
+        kept: set[str] = set()
+        for asset in candidates:
+            if asset.id not in deletable or not asset.storage_key:
+                continue
+            if db.scalar(select(Asset.id).where(
+                    Asset.storage_key == asset.storage_key,
+                    Asset.id.notin_(deletable)).limit(1)):
+                continue
+            files.append(asset.storage_key)
+            kept.add(asset.id)
+        plan.update(account_id=target.id, files=files, asset_ids=kept,
+                    upload_ids=upload_ids, preparation_ids=preparation_ids,
+                    artifact_ids=artifact_ids, quote_ids=deletable_quotes)
         return plan
     if target_type in ('PAYMENT', 'RECEIPT', 'RECEIPT_ADJUSTMENT', 'REFUND'):
         amount = target.amount_cents
@@ -1654,6 +1751,22 @@ def _delete_simple_target(db, entry: TrashEntry, target_type: str, target, plan:
         _disable_linked_staff(db, target, now)
         with storage_gc_guard(db):
             _revoke_account_credentials(db, target, now)
+            upload_ids = set(plan.get('upload_ids') or ())
+            for upload_id in upload_ids:
+                purge_storage_tree_locked(f'sessions/{upload_id}')
+            if upload_ids:
+                db.execute(delete(UploadSession).where(
+                    UploadSession.id.in_(upload_ids)))
+            artifact_ids = set(plan.get('artifact_ids') or ())
+            if artifact_ids:
+                db.execute(delete(Artifact).where(Artifact.id.in_(artifact_ids)))
+            quote_ids = set(plan.get('quote_ids') or ())
+            if quote_ids:
+                db.execute(delete(Quote).where(Quote.id.in_(quote_ids)))
+            preparation_ids = set(plan.get('preparation_ids') or ())
+            if preparation_ids:
+                db.execute(delete(Preparation).where(
+                    Preparation.id.in_(preparation_ids)))
         _anonymise_linked_staff(db, staff)
         _anonymise_account(db, target, now)
     elif target_type == 'PAYMENT':
@@ -2191,11 +2304,338 @@ def _cleanup_orphan_assets(db, now: datetime) -> int:
     return removed
 
 
+UNVERIFIED_ACCOUNT_PURGE_LIMIT = 100
+UNVERIFIED_ACCOUNT_STATUSES = ('PENDING_EMAIL', 'PENDING_VERIFICATION')
+
+
+def _unverified_account_preparations(db, account: Account) -> list[Preparation]:
+    principal_ids = _account_principal_ids(db, account)
+    conditions = [Preparation.checkout_account_id == account.id]
+    if principal_ids:
+        conditions.append(Preparation.principal_id.in_(principal_ids))
+    return list(db.scalars(select(Preparation).where(or_(*conditions))))
+
+
+def _unverified_account_blockers(db, account: Account) -> list[str]:
+    """Return reasons to leave an expired unverified account untouched.
+
+    A pending account is normally empty, but an administrator may have imported
+    business facts or linked a staff identity by mistake.  We never destroy
+    those: the account stays visible and the next sweep retries only after the
+    conflict is resolved.
+    """
+    if (account.verified_at is not None or account.deleted_at is not None
+            or account.status not in UNVERIFIED_ACCOUNT_STATUSES):
+        return ['ACCOUNT_NO_LONGER_PENDING']
+    blockers = list(_account_deletion_blockers(db, account))
+    if _linked_staff(db, account) is not None:
+        blockers.append('STAFF_LINKED')
+    if _account_orders(db, account):
+        blockers.append('ORDER_REFERENCE')
+    if db.scalar(select(Coupon.id).where(Coupon.account_id == account.id).limit(1)):
+        blockers.append('COUPON_REFERENCE')
+    if db.scalar(select(PromotionEvent.id).where(
+            PromotionEvent.account_id == account.id).limit(1)):
+        blockers.append('PROMOTION_REFERENCE')
+    principal_ids = _account_principal_ids(db, account)
+    if principal_ids and db.scalar(select(SupplementaryDispute.id).where(
+            SupplementaryDispute.principal_id.in_(principal_ids)).limit(1)):
+        blockers.append('SUPPLEMENTARY_DISPUTE_REFERENCE')
+    if db.scalar(select(Referral.id).where(
+            or_(Referral.inviter_id == account.id, Referral.invitee_id == account.id),
+            Referral.qualified_order_id.is_not(None)).limit(1)):
+        blockers.append('REFERRAL_QUALIFIED')
+    preparations = _unverified_account_preparations(db, account)
+    preparation_ids = [row.id for row in preparations]
+    if preparation_ids:
+        if any(_preparation_referenced(db, preparation_id) for preparation_id in preparation_ids):
+            blockers.append('PREPARATION_REFERENCE')
+        artifact_ids = list(db.scalars(select(Artifact.id).where(
+            Artifact.preparation_id.in_(preparation_ids))))
+        if artifact_ids:
+            if db.scalar(select(PrintTask.id).where(
+                    PrintTask.artifact_id.in_(artifact_ids)).limit(1)):
+                blockers.append('PRINT_TASK_REFERENCE')
+            if db.scalar(select(PrintAttempt.id).where(
+                    PrintAttempt.artifact_id.in_(artifact_ids)).limit(1)):
+                blockers.append('PRINT_ATTEMPT_REFERENCE')
+    return list(dict.fromkeys(blockers))
+
+
+def _delete_access_grants(db, grant_ids: set[str]) -> None:
+    """Delete a self-referencing grant graph children-first."""
+    if not grant_ids:
+        return
+    rows = list(db.scalars(select(AccessGrant).where(AccessGrant.id.in_(grant_ids))))
+    remaining = {row.id for row in rows}
+    while remaining:
+        leaves = [row.id for row in rows
+                  if row.id in remaining and row.source_grant_id not in remaining]
+        if not leaves:
+            # A corrupt cycle must not hang maintenance; the FK error (if any)
+            # rolls the account savepoint back and leaves it retryable.
+            leaves = sorted(remaining)
+        db.execute(delete(AccessGrant).where(AccessGrant.id.in_(leaves)))
+        db.flush()
+        remaining.difference_update(leaves)
+
+
+def _purge_unverified_account(db, account: Account, now: datetime) -> int:
+    """Hard-delete one expired pending account and every private file it owns."""
+    principal_ids = _account_principal_ids(db, account)
+    preparations = _unverified_account_preparations(db, account)
+    preparation_ids = {row.id for row in preparations}
+    artifacts = list(db.scalars(select(Artifact).where(
+        Artifact.preparation_id.in_(preparation_ids)))) if preparation_ids else []
+    artifact_ids = {row.id for row in artifacts}
+
+    # Upload sessions reference assets and own a private temporary tree.
+    uploads = list(db.scalars(select(UploadSession).where(
+        UploadSession.principal_id.in_(principal_ids))))
+    files = 0
+    for upload in uploads:
+        purge_storage_tree_locked(f'sessions/{upload.id}')
+        files += 1
+    if uploads:
+        for upload in uploads:
+            db.delete(upload)
+        db.flush()
+
+    asset_ids = {row.asset_id for row in artifacts}
+    for preparation in preparations:
+        for row in ((preparation.input or {}).get('files') or []):
+            asset_id = row.get('assetId') if isinstance(row, dict) else None
+            if asset_id:
+                asset_ids.add(asset_id)
+    asset_conditions = [Asset.id.in_(asset_ids)] if asset_ids else []
+    if principal_ids:
+        asset_conditions.append(Asset.principal_id.in_(principal_ids))
+    assets = list(db.scalars(select(Asset).where(or_(*asset_conditions)))) if asset_conditions else []
+    # Public configuration assets (campus map, WeChat QR) are shared records,
+    # never private residue of a customer credential.  Detach them rather than
+    # delete shared bytes, then erase only private assets.
+    public_assets = [asset for asset in assets if asset.purpose in PUBLIC_PURPOSES]
+    assets = [asset for asset in assets if asset.purpose not in PUBLIC_PURPOSES]
+    foreign_assets = [asset for asset in assets
+                      if asset.principal_id and asset.principal_id not in principal_ids]
+    if foreign_assets:
+        raise DomainError(
+            'UNVERIFIED_ACCOUNT_BUSY',
+            '该账号仍被其他客户的业务文件引用，暂不清理',
+            409,
+        )
+    for asset in public_assets:
+        if asset.principal_id in principal_ids:
+            asset.principal_id = None
+    deletable_asset_ids = {asset.id for asset in assets}
+
+    # A shared asset proves the pending credential touched retained business
+    # data.  Abort the savepoint instead of unlinking bytes an order still needs.
+    for asset in assets:
+        if _asset_referenced_outside(db, asset.id, ignore_artifact_ids=artifact_ids,
+                                     ignore_asset_ids=deletable_asset_ids):
+            raise DomainError(
+                'UNVERIFIED_ACCOUNT_BUSY',
+                '该账号仍被业务文件引用，暂不清理',
+                409,
+            )
+
+    for asset in assets:
+        if not asset.storage_key:
+            continue
+        shared_key = select(Asset.id).where(
+            Asset.storage_key == asset.storage_key,
+            Asset.id.notin_(deletable_asset_ids))
+        if db.scalar(shared_key.limit(1)):
+            # A retained asset points at the same bytes; deleting the row is
+            # enough, unlinking would corrupt the other owner's file.
+            continue
+        purge_storage_key_locked(asset.storage_key)
+        files += 1
+
+    exports = list(db.scalars(select(ExportJob).where(
+        ExportJob.account_id == account.id).with_for_update()))
+    for export in exports:
+        if export.storage_key:
+            purge_storage_key_locked(export.storage_key)
+            files += 1
+
+    tokens = list(db.scalars(select(OneTimeToken).where(
+        OneTimeToken.account_id == account.id)))
+    sessions = list(db.scalars(select(AuthSession).where(or_(
+        AuthSession.account_id == account.id,
+        AuthSession.principal_id.in_(principal_ids))))) if principal_ids else list(
+            db.scalars(select(AuthSession).where(AuthSession.account_id == account.id)))
+
+    # The verification outbox is keyed by the challenge token, not the account.
+    # Collect both while the token rows still exist, before token purging.
+    email_keys = {f'customer-verify:{token.id}' for token in tokens}
+    email_conditions = []
+    if email_keys:
+        email_conditions.append(EmailJob.business_key.in_(email_keys))
+    email_conditions.append(
+        func.jsonb_extract_path_text(EmailJob.data, 'accountId') == account.id)
+    emails = list(db.scalars(select(EmailJob).where(or_(*email_conditions))))
+
+    grants = list(db.scalars(select(AccessGrant).where(
+        AccessGrant.account_id == account.id)))
+    grant_ids = {row.id for row in grants}
+    changed = True
+    while changed:
+        changed = False
+        if not grant_ids:
+            break
+        children = list(db.scalars(select(AccessGrant).where(
+            AccessGrant.source_grant_id.in_(grant_ids))))
+        for child in children:
+            if child.id not in grant_ids:
+                grant_ids.add(child.id)
+                changed = True
+
+    requests = list(db.scalars(select(DeletionRequest).where(
+        DeletionRequest.account_id == account.id)))
+    request_ids = {row.id for row in requests}
+    job_targets = ({email.id for email in emails}
+                   | {export.id for export in exports}
+                   | request_ids
+                   | deletable_asset_ids
+                   | preparation_ids)
+    if job_targets:
+        db.execute(delete(Job).where(Job.target_id.in_(job_targets)))
+
+    idempotency_conditions = [
+        IdempotencyRecord.actor_key.like(f'customer:{account.id}:%'),
+    ]
+    for principal_id in principal_ids:
+        idempotency_conditions.append(IdempotencyRecord.actor_key == f'guest:{principal_id}')
+    for route in ('/api/v1/customer/auth/login', '/api/v1/customer/auth/register'):
+        idempotency_conditions.append(IdempotencyRecord.actor_key ==
+                                      'credential:' + token_hash(route + ':' + account.email.lower()))
+    db.execute(delete(IdempotencyRecord).where(or_(*idempotency_conditions)))
+
+    # Dependent rows must disappear before the grant graph: a preparation may
+    # carry source_grant_id, and a quote may point at either the preparation or
+    # the account.  Deleting grants first would violate those FKs.
+    for artifact in artifacts:
+        db.delete(artifact)
+    db.flush()
+    quote_conditions = [Quote.checkout_account_id == account.id]
+    if preparation_ids:
+        quote_conditions.append(Quote.preparation_id.in_(preparation_ids))
+    quote_ids = set(db.scalars(select(Quote.id).where(or_(*quote_conditions))))
+    if quote_ids and (db.scalar(select(Order.id).where(
+            Order.quote_id.in_(quote_ids)).limit(1)) or db.scalar(
+            select(OrderRevision.id).where(
+                OrderRevision.quote_id.in_(quote_ids)).limit(1))):
+        raise DomainError(
+            'UNVERIFIED_ACCOUNT_BUSY',
+            '该账号的报价仍被订单引用，暂不清理',
+            409,
+        )
+    if quote_ids:
+        db.execute(delete(Quote).where(Quote.id.in_(quote_ids)))
+    if preparation_ids:
+        for preparation in preparations:
+            db.delete(preparation)
+    db.flush()
+    if grant_ids and db.scalar(select(Preparation.id).where(
+            Preparation.source_grant_id.in_(grant_ids)).limit(1)):
+        raise DomainError(
+            'UNVERIFIED_ACCOUNT_BUSY',
+            '该账号的访问授权仍被其他客户使用，暂不清理',
+            409,
+        )
+    _delete_access_grants(db, grant_ids)
+    db.execute(delete(Referral).where(or_(
+        Referral.inviter_id == account.id, Referral.invitee_id == account.id)))
+    for session in sessions:
+        db.delete(session)
+    for token in tokens:
+        db.delete(token)
+    for email in emails:
+        db.delete(email)
+    for export in exports:
+        db.delete(export)
+    for request in requests:
+        db.delete(request)
+    db.flush()
+    if assets:
+        for asset in assets:
+            db.delete(asset)
+        db.flush()
+
+    account_id = account.id
+    db.delete(account)
+    db.flush()
+    for principal_id in principal_ids:
+        principal = db.get(Principal, principal_id)
+        if principal is not None:
+            db.delete(principal)
+    db.flush()
+
+    audit(db, 'system', 'UNVERIFIED_ACCOUNT_AUTO_PURGED', 'ACCOUNT', account_id,
+          data={'filesDeleted': files, 'principalsDeleted': len(principal_ids),
+                'sessionsDeleted': len(sessions), 'tokensDeleted': len(tokens),
+                'emailJobsDeleted': len(emails), 'exportsDeleted': len(exports),
+                'preparationsDeleted': len(preparations), 'assetsDeleted': len(assets),
+                'purgedAt': now.isoformat()})
+    return files
+
+
+def _purge_expired_unverified_accounts(db, now: datetime) -> dict:
+    """Hard-delete accounts that never verified their email within 24 hours.
+
+    The rows are selected with SKIP LOCKED and re-checked under the row lock, so
+    a verification racing this sweep either wins (and is skipped) or observes a
+    vanished account.  Each account owns an independent savepoint: one corrupt
+    object graph cannot block cleanup of the rest or the whole maintenance run.
+    """
+    cutoff = now - UNVERIFIED_ACCOUNT_TTL
+    rows = list(db.scalars(select(Account).where(
+        Account.verified_at.is_(None),
+        Account.deleted_at.is_(None),
+        Account.status.in_(UNVERIFIED_ACCOUNT_STATUSES),
+        Account.created_at <= cutoff,
+    ).order_by(Account.created_at, Account.id)
+        .with_for_update(skip_locked=True)
+        .limit(UNVERIFIED_ACCOUNT_PURGE_LIMIT)))
+    purged = 0
+    skipped = 0
+    failed = 0
+    files = 0
+    for account in rows:
+        staged_before = staged_file_count(db)
+        try:
+            with db.begin_nested():
+                blockers = _unverified_account_blockers(db, account)
+                if blockers:
+                    skipped += 1
+                    continue
+                files += _purge_unverified_account(db, account, now)
+                purged += 1
+        except (DomainError, OSError, IntegrityError) as exc:
+            # The savepoint rolled the rows back, but file staging lives on the
+            # outer GC guard. Restore exactly this account's staged paths before
+            # the sweep can commit; otherwise a failed cleanup would delete
+            # files that its restored rows still reference. If restoration
+            # itself fails, abort the whole sweep so the root rollback handles
+            # every staged path.
+            discard_staged_since(db, staged_before)
+            failed += 1
+            logger.warning(
+                'unverified account cleanup failed account=%s error=%s',
+                account.id, type(exc).__name__,
+            )
+    return {'purged': purged, 'skipped': skipped, 'failed': failed, 'files': files}
+
+
 def maintenance_sweep(db) -> dict:
     """Run all due lifecycle work in the caller's transaction.
 
-    Never age-deletes ordinary orders, accounting, audit, accounts or email
-    records; only explicit temporary artefacts and 24h trash purges are due.
+    Never age-deletes ordinary orders, accounting, audit, verified accounts or
+    email records.  The one account exception is an email address that never
+    verified within its 24h registration window: that credential has no
+    business relationship to retain and is erased here with its private files.
 
     The whole sweep runs inside ``storage_gc_guard`` so every Q29 unlink is
     staged until the caller commits.  A backup therefore either sees the old
@@ -2210,6 +2650,7 @@ def maintenance_sweep(db) -> dict:
         expired_exports, deleted_export_files = _expire_exports(db, now)
         expired_uploads = _expire_uploads(db, now)
         removed_drafts = _cleanup_drafts(db, now)
+        unverified = _purge_expired_unverified_accounts(db, now)
         purged_tokens = _purge_tokens(db, now)
         purged_emails = _purge_email_payloads(db, now)
         queued_purges = _queue_due_trash(db, now)
@@ -2221,6 +2662,10 @@ def maintenance_sweep(db) -> dict:
             'expiredExports': expired_exports,
             'expiredUploads': expired_uploads,
             'removedDrafts': removed_drafts,
+            'unverifiedAccountsPurged': unverified['purged'],
+            'unverifiedAccountsSkipped': unverified['skipped'],
+            'unverifiedAccountsFailed': unverified['failed'],
+            'unverifiedFilesDeleted': unverified['files'],
             'purgedTokens': purged_tokens,
             'purgedEmailPayloads': purged_emails,
             'purgeJobsQueued': queued_purges,

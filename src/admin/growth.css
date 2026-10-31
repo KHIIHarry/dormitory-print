@@ -108,6 +108,12 @@
   margin-top: 5px;
   color: var(--muted, #666);
 }
+.verification-countdown {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted, #666);
+  font-weight: 500;
+}
 .growth-table-wrap tr:last-child td {
   border-bottom: 0;
 }

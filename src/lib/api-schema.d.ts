@@ -296,6 +296,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/campuses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Campuses */
+        get: operations["admin_campuses_api_v1_admin_campuses_get"];
+        put?: never;
+        /** Admin Campus Create */
+        post: operations["admin_campus_create_api_v1_admin_campuses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/campuses/{campus_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Admin Campus Delete */
+        delete: operations["admin_campus_delete_api_v1_admin_campuses__campus_id__delete"];
+        options?: never;
+        head?: never;
+        /** Admin Campus Update */
+        patch: operations["admin_campus_update_api_v1_admin_campuses__campus_id__patch"];
+        trace?: never;
+    };
+    "/admin/campuses/{campus_id}/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Campus Publish */
+        post: operations["admin_campus_publish_api_v1_admin_campuses__campus_id__map_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/config": {
         parameters: {
             query?: never;
@@ -798,6 +851,23 @@ export interface paths {
         };
         /** Admin Export Download */
         get: operations["admin_export_download_api_v1_admin_exports__job_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/mail/outbox/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mail Outbox Status */
+        get: operations["mail_outbox_status_api_v1_admin_mail_outbox__job_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3594,6 +3664,8 @@ export interface components {
         };
         /** AdminMapView */
         AdminMapView: {
+            /** Campuses */
+            campuses?: components["schemas"]["PublicCampusView"][];
             /** Hotspots */
             hotspots: components["schemas"]["LocationView"][];
             /** Items */
@@ -4287,6 +4359,85 @@ export interface components {
             /** Validitydays */
             validityDays?: number | null;
         };
+        /** CampusCreateInput */
+        CampusCreateInput: {
+            /** Name */
+            name: string;
+            /**
+             * Selectionenabled
+             * @default true
+             */
+            selectionEnabled: boolean;
+            /**
+             * Sortorder
+             * @default 0
+             */
+            sortOrder: number;
+            /**
+             * Themecolor
+             * @default #C67C4E
+             */
+            themeColor: string;
+        };
+        /** CampusListView */
+        CampusListView: {
+            /** Items */
+            items: components["schemas"]["CampusView"][];
+        };
+        /** CampusMapPublishInput */
+        CampusMapPublishInput: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Hotspots */
+            hotspots?: components["schemas"]["MapHotspotInput"][];
+            /** Mapassetid */
+            mapAssetId?: string | null;
+            /**
+             * Migrationconfirmed
+             * @default false
+             */
+            migrationConfirmed: boolean;
+            /** Version */
+            version: number;
+        };
+        /** CampusUpdateInput */
+        CampusUpdateInput: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Name */
+            name?: string | null;
+            /** Selectionenabled */
+            selectionEnabled?: boolean | null;
+            /** Sortorder */
+            sortOrder?: number | null;
+            /** Themecolor */
+            themeColor?: string | null;
+        };
+        /** CampusView */
+        CampusView: {
+            /** Hotspots */
+            hotspots?: components["schemas"]["LocationView"][];
+            /** Id */
+            id: string;
+            /** Mapassetid */
+            mapAssetId?: string | null;
+            /** Mapurl */
+            mapUrl?: string | null;
+            /** Mapversion */
+            mapVersion: number;
+            /** Name */
+            name: string;
+            /** Publishedat */
+            publishedAt?: string | null;
+            /** Selectionenabled */
+            selectionEnabled: boolean;
+            /** Sortorder */
+            sortOrder: number;
+            /** Themecolor */
+            themeColor: string;
+            /** Version */
+            version: number;
+        };
         /** CaseAction */
         CaseAction: {
             /** Expectedversion */
@@ -4774,6 +4925,8 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+            /** Replacesessionid */
+            replaceSessionId?: string | null;
         };
         /** CustomerNotificationPreferences */
         CustomerNotificationPreferences: {
@@ -4835,6 +4988,8 @@ export interface components {
              * @enum {string}
              */
             status: "PENDING_VERIFICATION" | "ACTIVE" | "SUSPENDED";
+            /** Verificationdeadline */
+            verificationDeadline?: string | null;
             /** Verified */
             verified: boolean;
             /** Version */
@@ -5411,6 +5566,18 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
+        /** Envelope[CampusListView] */
+        Envelope_CampusListView_: {
+            data: components["schemas"]["CampusListView"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[CampusView] */
+        Envelope_CampusView_: {
+            data: components["schemas"]["CampusView"];
+            /** Requestid */
+            requestId: string;
+        };
         /** Envelope[CaseList] */
         Envelope_CaseList_: {
             data: components["schemas"]["CaseList"];
@@ -5594,6 +5761,12 @@ export interface components {
         /** Envelope[MailConnectionResult] */
         Envelope_MailConnectionResult_: {
             data: components["schemas"]["MailConnectionResult"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[MailOutboxStatus] */
+        Envelope_MailOutboxStatus_: {
+            data: components["schemas"]["MailOutboxStatus"];
             /** Requestid */
             requestId: string;
         };
@@ -6322,6 +6495,8 @@ export interface components {
         };
         /** LocationView */
         LocationView: {
+            /** Campusid */
+            campusId?: string | null;
             /** Enabled */
             enabled: boolean;
             /** Id */
@@ -6456,6 +6631,27 @@ export interface components {
              * Format: date-time
              */
             testedAt: string;
+        };
+        /** MailOutboxStatus */
+        MailOutboxStatus: {
+            /** Acceptedat */
+            acceptedAt?: string | null;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Emailjobid */
+            emailJobId: string;
+            /** Errorclass */
+            errorClass?: string | null;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Status */
+            status: string;
         };
         /** MailQueuedResult */
         MailQueuedResult: {
@@ -7715,6 +7911,29 @@ export interface components {
             /** Volumediscountcents */
             volumeDiscountCents: number;
         };
+        /** PublicCampusView */
+        PublicCampusView: {
+            /** Id */
+            id: string;
+            /** Items */
+            items?: components["schemas"]["LocationView"][];
+            /** Mapassetid */
+            mapAssetId?: string | null;
+            /** Mapurl */
+            mapUrl?: string | null;
+            /** Mapversion */
+            mapVersion: number;
+            /** Name */
+            name: string;
+            /** Publishedat */
+            publishedAt?: string | null;
+            /** Selectionenabled */
+            selectionEnabled: boolean;
+            /** Sortorder */
+            sortOrder: number;
+            /** Themecolor */
+            themeColor: string;
+        };
         /** PublicConfigView */
         PublicConfigView: {
             a4Margins: components["schemas"]["Margins"];
@@ -7795,6 +8014,8 @@ export interface components {
         };
         /** PublicMapView */
         PublicMapView: {
+            /** Campuses */
+            campuses?: components["schemas"]["PublicCampusView"][];
             /** Items */
             items: components["schemas"]["LocationView"][];
             /** Mapassetid */
@@ -8568,8 +8789,11 @@ export interface components {
          * StaffCreateInput
          * @description Grant an existing verified customer account employee rights.
          *
-         *     ``name``/``username``/``phone`` are optional display metadata only. They are
-         *     never used to find or bind an account; that is always ``accountId``.
+         *     ``name``/``username``/``phone`` are optional internal metadata only.  The
+         *     public workspace display name always comes from the linked account nickname;
+         *     ``name`` is the employee/HR name used by staff administration and payroll.
+         *     None of these fields is ever used to find or bind an account; that is always
+         *     ``accountId``.
          */
         StaffCreateInput: {
             /** Accountid */
@@ -10629,6 +10853,269 @@ export interface operations {
             };
         };
     };
+    admin_campuses_api_v1_admin_campuses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CampusListView_"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_campus_create_api_v1_admin_campuses_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampusCreateInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CampusView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_campus_delete_api_v1_admin_campuses__campus_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                campus_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_dict_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_campus_update_api_v1_admin_campuses__campus_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                campus_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampusUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CampusView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_campus_publish_api_v1_admin_campuses__campus_id__map_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                campus_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampusMapPublishInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CampusView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     config_admin_api_v1_admin_config_get: {
         parameters: {
             query?: never;
@@ -12176,6 +12663,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    mail_outbox_status_api_v1_admin_mail_outbox__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_MailOutboxStatus_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */

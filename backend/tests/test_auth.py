@@ -864,3 +864,23 @@ def test_create_initial_admin_binds_verified_account_and_requires_email(db):
         create_initial_admin(
             db, f'root-{uuid4().hex[:8]}', PASSWORD, '兼容管理员', legacy_account.email)
     assert initialized.value.code == 'SUPER_ADMIN_ALREADY_INITIALIZED'
+
+
+def test_initial_admin_bootstrap_replaces_only_disabled_superadmin(db):
+    from app.auth import create_initial_admin
+
+    disabled = make_admin(db, username='restore-former-root')
+    disabled.enabled = False
+    disabled.status = 'DISABLED'
+    db.flush()
+    new_account = make_account(db)
+    db.commit()
+
+    staff = create_initial_admin(
+        db, 'restore-new-root', PASSWORD, '恢复管理员', email=new_account.email)
+    db.flush()
+    assert staff.is_super_admin is True
+    assert staff.enabled is True and staff.status == 'ACTIVE'
+    db.refresh(disabled)
+    assert disabled.is_super_admin is False
+    assert disabled.enabled is False and disabled.status == 'DISABLED'

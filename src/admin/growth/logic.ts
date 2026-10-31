@@ -114,6 +114,21 @@ export const yuan = (cents: number) => `¥${(cents / 100).toFixed(2)}`;
 export function localDate(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString("zh-CN") : "—";
 }
+export function verificationCountdown(
+  deadline: string | null | undefined,
+  now = Date.now(),
+) {
+  if (!deadline) return null;
+  const target = Date.parse(deadline);
+  if (!Number.isFinite(target)) return null;
+  const remaining = target - now;
+  if (remaining <= 0) return "已到期，等待系统清理";
+  const minutes = Math.floor(remaining / 60000);
+  if (minutes < 1) return "不足 1 分钟";
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours} 小时 ${rest} 分` : `${rest} 分`;
+}
 export function dateInput(value: string | null | undefined) {
   if (!value) return "";
   const date = new Date(value);

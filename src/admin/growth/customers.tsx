@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Button,
@@ -20,12 +20,38 @@ import {
   useAdminAccess,
   useSubmit,
 } from "./common";
-import { localDate, yuan } from "./logic";
+import { localDate, verificationCountdown, yuan } from "./logic";
 const statuses: Record<string, string> = {
   PENDING_VERIFICATION: "待验证",
   ACTIVE: "正常",
   SUSPENDED: "已停用",
 };
+function VerificationCountdown({
+  deadline,
+}: {
+  deadline: string | null | undefined;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!deadline) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+  const label = verificationCountdown(deadline, now);
+  if (!label) return null;
+  return (
+    <span
+      className="verification-countdown"
+      title={
+        deadline
+          ? `截止 ${new Date(deadline).toLocaleString("zh-CN")}`
+          : undefined
+      }
+    >
+      自动注销倒计时 {label}
+    </span>
+  );
+}
 const customerActions: Record<string, string> = {
   suspend: "冻结账号",
   restore: "解冻账号",
@@ -121,6 +147,11 @@ export function CustomersPage() {
                       <td>
                         {c.verified ? "已验证" : "未验证"} ·{" "}
                         {statuses[c.status]}
+                        {c.verificationDeadline && (
+                          <VerificationCountdown
+                            deadline={c.verificationDeadline}
+                          />
+                        )}
                       </td>
                       <td>
                         {c.orderCount} / {c.couponCount} / {c.referralCount}
@@ -187,6 +218,18 @@ export function CustomerDetailPage() {
               <div>
                 <dt>注册时间</dt>
                 <dd>{localDate(customer.createdAt)}</dd>
+              </div>
+              <div>
+                <dt>未验证自动注销</dt>
+                <dd>
+                  {customer.verificationDeadline ? (
+                    <VerificationCountdown
+                      deadline={customer.verificationDeadline}
+                    />
+                  ) : (
+                    "—"
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>订单 / 优惠券 / 邀请数</dt>

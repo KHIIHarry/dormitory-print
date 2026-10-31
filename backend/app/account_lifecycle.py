@@ -31,6 +31,7 @@ logger = logging.getLogger('dormprint.account_lifecycle')
 
 RECOVERY_DAYS = 7
 RECOVERY_DELTA = timedelta(days=RECOVERY_DAYS)
+UNVERIFIED_ACCOUNT_TTL = timedelta(hours=24)
 STATUS_BLOCKED = 'BLOCKED'
 STATUS_RECOVERY = 'RECOVERY'
 STATUS_RECOVERED = 'RECOVERED'
@@ -65,6 +66,20 @@ def _parse_datetime(value) -> datetime | None:
 def recovery_deadline(request: DeletionRequest) -> datetime | None:
     data = request.data or {}
     return _parse_datetime(data.get('recoveryUntil'))
+
+
+def verification_deadline(account: Account) -> datetime | None:
+    """Return the only deadline that can auto-deregister an unverified account.
+
+    A verified, suspended or already-deleted account never gets a deadline.
+    The timestamp is based on the original registration, not on a resend or an
+    email change, so repeatedly requesting a new code cannot extend it.
+    """
+    if (account.verified_at is not None or account.deleted_at is not None
+            or account.status not in ('PENDING_EMAIL', 'PENDING_VERIFICATION')):
+        return None
+    created = _aware(account.created_at)
+    return created + UNVERIFIED_ACCOUNT_TTL if created is not None else None
 
 
 def _principal_ids(db, account: Account) -> set[str]:

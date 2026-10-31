@@ -403,7 +403,10 @@ def _restic(*args: str, repository: str, restic_password: str,
 def test_local_restore_drill_real_backup_restore_and_bootstrap():
     if shutil.which("docker") is None:
         pytest.skip("docker is not available")
-    _run(["docker", "inspect", DRILL_CONTAINER])
+    if _run(["docker", "inspect", DRILL_CONTAINER], check=False).returncode != 0:
+        pytest.skip(f"dedicated drill PostgreSQL container {DRILL_CONTAINER!r} is not available")
+    if _run(["docker", "image", "inspect", BACKUP_IMAGE], check=False).returncode != 0:
+        pytest.skip(f"backup image {BACKUP_IMAGE!r} is not available")
     if not BACKUP_SCRIPTS.is_dir():
         pytest.skip("deploy/backup scripts are not available")
 
@@ -655,13 +658,14 @@ def test_local_restore_drill_real_backup_restore_and_bootstrap():
             assert seed_staff_after_bootstrap is not None
             assert seed_staff_after_bootstrap.enabled is False
             assert seed_staff_after_bootstrap.status == "DISABLED"
+            assert seed_staff_after_bootstrap.is_super_admin is False
             evidence["bootstrap"] = {
                 "username": bootstrap_staff.username,
                 "superAdmin": True,
                 "enabled": True,
                 "accountEmail": bootstrap_account.email,
                 "staffCount": len(session.scalars(select(Staff)).all()),
-                "seedSuperAdminStillDisabled": True,
+                "dormantSeedSuperAdminDemoted": True,
             }
 
         evidence["elapsedMs"] = round((time.monotonic() - started) * 1000)

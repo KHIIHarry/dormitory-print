@@ -368,6 +368,10 @@ def test_delivery_hook_does_not_pay_an_undelivered_order(db, staff_factory):
 # Refund adjustments
 # ---------------------------------------------------------------------------
 
+OCTOBER_EVENT_AT = datetime(2026, 10, 31, 13, 0, tzinfo=timezone.utc)
+OCTOBER_CUTOFF_AT = datetime(2026, 10, 31, 12, 30, tzinfo=timezone.utc)
+
+
 def refund_for(db, order, amount, staff_id, *, created_at=None):
     from app.models import AfterSale
 
@@ -450,7 +454,7 @@ def test_refund_after_settlement_never_edits_paid_rows(db, staff_factory):
     assert settlement.amount_cents == 333
 
     order.refunded_cents = 4000
-    refund = refund_for(db, order, 4000, admin.id)
+    refund = refund_for(db, order, 4000, admin.id, created_at=OCTOBER_EVENT_AT)
     adjustment = on_refund(db, order, refund)
     db.commit()
 
@@ -1049,14 +1053,17 @@ def test_delivery_percent_aggregates_only_collected_included_fees(db, staff_fact
                      .where(WageEntry.kind == 'SUPPLEMENTARY_ADJUSTMENT')) == 0
 
 
-def test_supplementary_hook_accepts_prefixed_source_and_freezes_original_policy(db, staff_factory):
+def test_supplementary_hook_accepts_prefixed_source_and_freezes_original_policy(
+        db, staff_factory, monkeypatch):
     courier = make_courier(staff_factory)
     admin = staff_factory()
     add_policy(db, mode='PERCENT', rate=333)
     order, assignment, proof, _ = make_delivered(db, staff_factory, courier, total=10000)
+    monkeypatch.setattr('app.payroll.utcnow', lambda: OCTOBER_CUTOFF_AT)
     base = on_delivery(db, order, assignment, proof)
     charge = _supplementary_charge(db, order, admin, amount=1000)
-    receipt = _supplementary_movement(db, charge, admin, 'RECEIPT', 1000)
+    receipt = _supplementary_movement(
+        db, charge, admin, 'RECEIPT', 1000, created_at=OCTOBER_EVENT_AT)
 
     wage = on_supplementary_change(db, order, f'{SUPPLEMENTARY_SOURCE_PREFIX}{receipt.id}')
     db.commit()
@@ -1068,7 +1075,8 @@ def test_supplementary_hook_accepts_prefixed_source_and_freezes_original_policy(
     assert on_supplementary_change(
         db, order, f'{SUPPLEMENTARY_SOURCE_PREFIX}{receipt.id}').id == wage.id
 
-    refund = _supplementary_movement(db, charge, admin, 'REFUND', 400)
+    refund = _supplementary_movement(
+        db, charge, admin, 'REFUND', 400, created_at=OCTOBER_EVENT_AT)
     reversal = on_supplementary_change(
         db, order, f'{SUPPLEMENTARY_SOURCE_PREFIX}{refund.id}')
     db.commit()
@@ -1436,7 +1444,7 @@ def test_settlement_with_negative_net_is_rejected_and_kept_for_future(db, staff_
     order, assignment, proof, _ = make_delivered(db, staff_factory, courier, total=3000)
     base = on_delivery(db, order, assignment, proof)
     order.refunded_cents = 3000
-    refund = refund_for(db, order, 3000, admin.id)
+    refund = refund_for(db, order, 3000, admin.id, created_at=OCTOBER_EVENT_AT)
     adjustment = on_refund(db, order, refund)
     db.commit()
     assert adjustment.amount_cents == -99
@@ -1465,7 +1473,7 @@ def test_negative_adjustment_offsets_a_later_month_when_selected(db, staff_facto
     assert october_settlement.amount_cents == 99
 
     october_order.refunded_cents = 1500
-    refund = refund_for(db, october_order, 1500, admin.id)
+    refund = refund_for(db, october_order, 1500, admin.id, created_at=OCTOBER_EVENT_AT)
     october_adjustment = on_refund(db, october_order, refund)
     db.commit()
     assert october_adjustment.amount_cents == -50
@@ -1582,21 +1590,24 @@ def _supplementary_movement(db, charge, staff, kind, amount, *, created_at=None)
 
 
 def test_supplementary_receipt_and_refund_follow_original_percent_policy(
-        db, staff_factory):
+        db, staff_factory, monkeypatch):
     courier = make_courier(staff_factory)
     admin = staff_factory()
     add_policy(db, mode='PERCENT', rate=333)
     order, assignment, proof, _ = make_delivered(db, staff_factory, courier, total=10000)
+    monkeypatch.setattr('app.payroll.utcnow', lambda: OCTOBER_CUTOFF_AT)
     base = on_delivery(db, order, assignment, proof)
     assert base.amount_cents == 333
     charge = _supplementary_charge(db, order, admin)
-    receipt = _supplementary_movement(db, charge, admin, 'RECEIPT', 1000)
+    receipt = _supplementary_movement(
+        db, charge, admin, 'RECEIPT', 1000, created_at=OCTOBER_EVENT_AT)
     wage = on_supplementary_change(db, order, f'{SUPPLEMENTARY_SOURCE_PREFIX}{receipt.id}')
     assert wage.kind == 'SUPPLEMENTARY_ADJUSTMENT'
     assert wage.amount_cents == 33
     assert on_supplementary_change(db, order, f'{SUPPLEMENTARY_SOURCE_PREFIX}{receipt.id}').id == wage.id
 
-    refund = _supplementary_movement(db, charge, admin, 'REFUND', 400)
+    refund = _supplementary_movement(
+        db, charge, admin, 'REFUND', 400, created_at=OCTOBER_EVENT_AT)
     reversal = on_supplementary_change(db, order, f'{SUPPLEMENTARY_SOURCE_PREFIX}{refund.id}')
     assert reversal.amount_cents == -14
     db.commit()

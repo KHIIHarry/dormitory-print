@@ -378,6 +378,7 @@ class CustomerAccountDTO(DTO):
     status: Literal['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED']
     version: int = PField(ge=0)
     notification_preferences: CustomerNotificationPreferences
+    verification_deadline: datetime | None = None
 
 
 class CustomerOrderSummary(DTO):

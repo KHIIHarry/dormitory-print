@@ -1387,6 +1387,39 @@ class _StorageGCGuard:
             self._ensure_marker()
         return item
 
+    def discard_since(self, index: int) -> None:
+        """Restore files staged after ``index`` without ending the transaction.
+
+        A per-object savepoint may roll back while the surrounding sweep still
+        commits.  Staged paths must therefore be restored and removed from this
+        guard's manifest before that commit, otherwise files belonging to a
+        rolled-back row graph would be garbage-collected.
+        """
+        if index < 0:
+            index = 0
+        if index >= len(self.staged):
+            return
+        root, entry_dir = self._ensure_dir()
+        extra = self.staged[index:]
+        # Missing keys have no staged copy to restore; only real quarantine
+        # entries matter here.
+        restorable = [item for item in extra if item.get('staged')]
+        failures = _restore_staged(root, entry_dir, restorable)
+        if failures:
+            raise OSError('无法回滚私有文件暂存：' + ','.join(failures))
+        del self.staged[index:]
+        if self.staged:
+            # _restore_staged removes the manifest when its whole input list
+            # restores; earlier staged files still need their manifest and a
+            # marker that the savepoint rollback may have removed with the
+            # failed account's audit row.
+            _write_gc_manifest(entry_dir, self.manifest_id, self.staged)
+            self._marker_added = _gc_marker_committed(self.db, self.manifest_id)
+            if not self._marker_added:
+                self._ensure_marker()
+        else:
+            self._marker_added = False
+
     def _ensure_marker(self) -> None:
         if self._marker_added:
             return
@@ -1449,6 +1482,17 @@ class _StorageGCGuard:
             return
         self._released = True
         self._lock_context.__exit__(None, None, None)
+
+
+def staged_file_count(db: Session) -> int:
+    guard = _gc_guard_for(db)
+    return len(guard.staged) if guard is not None else 0
+
+
+def discard_staged_since(db: Session, index: int) -> None:
+    guard = _gc_guard_for(db)
+    if guard is not None:
+        guard.discard_since(index)
 
 
 def _gc_after_commit(session: Session) -> None:
