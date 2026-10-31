@@ -1998,8 +1998,7 @@ def _preparation_referenced(db, preparation_id: str) -> bool:
 
 def _cleanup_drafts(db, now: datetime) -> int:
     rows = list(db.scalars(select(Preparation).where(
-        Preparation.expires_at <= now,
-        Preparation.status != 'CANCELLED').with_for_update(skip_locked=True)))
+        Preparation.expires_at <= now).with_for_update(skip_locked=True)))
     removed = 0
     for preparation in rows:
         if _preparation_referenced(db, preparation.id):
@@ -2030,6 +2029,7 @@ def _cleanup_drafts(db, now: datetime) -> int:
             continue
         for artifact in artifacts:
             db.delete(artifact)
+        db.flush()
         if preparation.quote_id and not _quote_shared(db, preparation.quote_id):
             db.execute(delete(Quote).where(Quote.id == preparation.quote_id))
         db.execute(delete(Preparation).where(Preparation.id == preparation.id))

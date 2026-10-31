@@ -17,6 +17,7 @@ from app.models import (
     Account,
     AfterSale,
     AnonymousLedger,
+    Artifact,
     Asset,
     AuditLog,
     AuthSession,
@@ -631,6 +632,50 @@ def test_sweep_closes_expired_orders_and_expires_transient_secrets(db):
     assert not upload_directory.exists()
     assert db.get(AuditLog, audit.id) is not None
     assert isinstance(result, dict) and result
+
+
+def test_sweep_removes_cancelled_expired_drafts(db):
+    from app.db import SessionLocal
+    from app.maintenance import maintenance_sweep
+
+    principal = Principal()
+    db.add(principal)
+    db.flush()
+    sha = secrets.token_hex(32)
+    key = f'assets/{sha[:2]}/{sha}'
+    path = write_file(key)
+    asset = Asset(principal_id=principal.id, purpose='PRINT_SOURCE', name='draft.pdf',
+                  mime='application/pdf', size=path.stat().st_size, sha256=sha,
+                  storage_key=key, status='READY', pages=1,
+                  expires_at=utcnow() + timedelta(days=7))
+    db.add(asset)
+    db.flush()
+    preparation = Preparation(
+        principal_id=principal.id, status='CANCELLED',
+        expires_at=utcnow() - timedelta(hours=1),
+        input={'files': [{'assetId': asset.id, 'clientFileId': 'f1'}]},
+        data={'cancelledAt': utcnow().isoformat()},
+    )
+    db.add(preparation)
+    db.flush()
+    artifact = Artifact(preparation_id=preparation.id, asset_id=asset.id,
+                        client_file_id='f1', sha256=sha, pages=1, sheets=1,
+                        settings={}, page_map=[])
+    db.add(artifact)
+    db.commit()
+
+    session = SessionLocal()
+    try:
+        maintenance_sweep(session)
+        session.commit()
+    finally:
+        session.close()
+    refresh(db)
+
+    assert db.get(Preparation, preparation.id) is None
+    assert db.get(Artifact, artifact.id) is None
+    assert db.get(Asset, asset.id) is None
+    assert not path.exists()
 
 
 def test_sweep_file_retention_uses_q29_and_protects_unfinished_or_disputed(db):
