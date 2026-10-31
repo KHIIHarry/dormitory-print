@@ -37,6 +37,7 @@ describe("v1.3共享契约与按路由资源", () => {
     );
     expect(s.DashboardView.required).toEqual(
       expect.arrayContaining([
+        "activeOrderCount",
         "couponDiscountCents",
         "volumeDiscountCents",
         "cashReceivedCents",

@@ -775,7 +775,11 @@ export function CampusMapAdmin() {
                 )}
               </Panel>
 
-              <Panel title={`点位列表 · ${buildings.length}`}>
+
+            </div>
+          </div>
+
+          <Panel className="campus-list-panel" title={`点位列表 · ${buildings.length}`}>
                 {buildings.length ? (
                   <div className="building-list">
                     {buildings.map((item) => (
@@ -800,8 +804,6 @@ export function CampusMapAdmin() {
                   <p className="form-hint">还没有点位，点击地图空白处添加。</p>
                 )}
               </Panel>
-            </div>
-          </div>
         </>
       )}
 

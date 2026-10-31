@@ -4868,6 +4868,8 @@ export interface components {
         };
         /** DashboardView */
         DashboardView: {
+            /** Activeordercount */
+            activeOrderCount: number;
             /** Cashreceivedcents */
             cashReceivedCents: number;
             /** Coupondiscountcents */

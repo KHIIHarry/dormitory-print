@@ -631,7 +631,7 @@ def test_finance_includes_soft_deleted_orders_but_orders_export_does_not(
     assert trashed.id not in ids
 
 
-def test_purged_order_anonymous_summary_reconciles_all_time_dashboard(
+def test_purged_order_anonymous_summary_stays_in_exports_but_not_dashboard(
         admin_client, api, db):
     live = make_order(db, total_cents=1000, cash_received_cents=1000, refunded_cents=0)
     active = make_charge(db, live, purpose='加急装订', amount_cents=300,
@@ -694,23 +694,30 @@ def test_purged_order_anonymous_summary_reconciles_all_time_dashboard(
         return sum(int(row[column] or 0) for row in data if row['rowType'] in kinds)
 
     original_kinds = ('ORIGINAL_ORDER', 'ANONYMOUS_SUMMARY')
-    assert total('payableCents', original_kinds) == dashboard['payableCents'] == 2600
-    assert total('cashReceivedCents', original_kinds) == dashboard['cashReceivedCents'] == 2600
-    assert total('refundCents', original_kinds) == dashboard['refundCents'] == 100
+    # The export remains the all-time ledger and keeps the purged order's
+    # anonymous summary. The dashboard deliberately follows only live orders.
+    assert total('payableCents', original_kinds) == 2600
+    assert total('cashReceivedCents', original_kinds) == 2600
+    assert total('refundCents', original_kinds) == 100
+    assert dashboard['payableCents'] == 1000
+    assert dashboard['cashReceivedCents'] == 1000
+    assert dashboard['refundCents'] == 0
 
     charge_kinds = ('SUPPLEMENTARY_CHARGE', 'ANONYMOUS_SUMMARY')
-    assert total('supplementaryCashReceivedCents', charge_kinds) == \
-        dashboard['supplementaryCashReceivedCents'] == 700
-    assert total('supplementaryRefundedCents', charge_kinds) == \
-        dashboard['supplementaryRefundCents'] == 550
-    assert total('supplementaryOutstandingCents', charge_kinds) == \
-        dashboard['supplementaryOutstandingCents'] == 100
+    assert total('supplementaryCashReceivedCents', charge_kinds) == 700
+    assert total('supplementaryRefundedCents', charge_kinds) == 550
+    assert total('supplementaryOutstandingCents', charge_kinds) == 100
+    assert dashboard['supplementaryCashReceivedCents'] == 200
+    assert dashboard['supplementaryRefundCents'] == 50
+    assert dashboard['supplementaryOutstandingCents'] == 100
     fee_total = sum(int(row['supplementaryAmountCents'] or 0) for row in data
                     if row['rowType'] == 'ANONYMOUS_SUMMARY'
                     or (row['rowType'] == 'SUPPLEMENTARY_CHARGE'
                         and row['supplementaryStatus'] == 'ACTIVE'))
-    assert fee_total == dashboard['supplementaryFeesCents'] == 300
-    assert dashboard['orderCount'] == 3
+    assert fee_total == 300
+    assert dashboard['supplementaryFeesCents'] == 300
+    assert dashboard['orderCount'] == 1
+    assert dashboard['activeOrderCount'] == 1
 
     # Movement rows are events, not another copy of the charge totals.
     for row in movements:
@@ -854,12 +861,18 @@ def test_purged_fully_refunded_unmatched_cash_maps_to_anonymous_summary(
     assert original_live['unmatchedReceiptCents'] == '300'
     assert original_live['unmatchedReceiptRefundCents'] == '100'
 
-    assert dashboard['unmatchedReceiptCents'] == 1300
-    assert dashboard['unmatchedReceiptRefundCents'] == 1100
+    # Deleted orders disappear from the dashboard, so only the live receipt
+    # remains there; the export still carries the purged anonymous summary.
+    assert dashboard['unmatchedReceiptCents'] == 300
+    assert dashboard['unmatchedReceiptRefundCents'] == 100
     assert dashboard['cashReceivedCents'] == 500
-    assert sum(int(row['unmatchedReceiptCents'] or 0) for row in data) == \
+    assert sum(int(row['unmatchedReceiptCents'] or 0) for row in data) == 1300
+    assert sum(int(row['unmatchedReceiptRefundCents'] or 0) for row in data) == 1100
+    assert sum(int(row['unmatchedReceiptCents'] or 0) for row in data
+               if row['rowType'] == 'ORIGINAL_ORDER') == \
         dashboard['unmatchedReceiptCents']
-    assert sum(int(row['unmatchedReceiptRefundCents'] or 0) for row in data) == \
+    assert sum(int(row['unmatchedReceiptRefundCents'] or 0) for row in data
+               if row['rowType'] == 'ORIGINAL_ORDER') == \
         dashboard['unmatchedReceiptRefundCents']
     # Original confirmed cash reconciles exactly once and is never replaced by
     # the unmatched columns.

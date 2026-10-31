@@ -11,6 +11,7 @@ export function demoDashboardSummary(
     active.reduce((total, o) => total + pick(o), 0);
   return {
     orderCount: orders.length,
+    activeOrderCount: orders.length,
     pendingPaymentCount: orders.filter(
       (o) => o.status === "PENDING_CONFIRMATION",
     ).length,
@@ -61,6 +62,7 @@ export function demoDashboardSummary(
 export function assertDashboardSummary(value: DashboardSummary) {
   for (const key of [
     "orderCount",
+    "activeOrderCount",
     "pendingPaymentCount",
     "deliveredCount",
     "pendingPrintTaskCount",

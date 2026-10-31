@@ -2500,40 +2500,51 @@ input[type="date"],
 .slot-choices {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  gap: 14px;
 }
 .slot-choices > button {
   position: relative;
+  min-height: 126px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px;
+  border-radius: 14px;
+  padding: 18px 18px 20px;
   text-align: left;
   color: #897867;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.slot-choices > button:hover {
+  border-color: #d9c6b4;
 }
 .slot-choices > button > span {
-  font-size: 9px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 .slot-choices > button > b {
-  font-weight: 500;
-  font-size: 12px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
   display: block;
-  margin: 12px 0 7px;
+  margin: 14px 0 8px;
 }
 .slot-choices > button > small {
-  font-size: 10px;
+  font-size: 12px;
   color: #af9886;
 }
 .slot-choices > button.selected {
   border-color: var(--primary);
   background: var(--cream);
+  box-shadow: 0 7px 18px #c67c4e1a;
 }
 .slot-choices > button > svg {
   position: absolute;
-  right: 9px;
-  bottom: 10px;
+  right: 12px;
+  bottom: 12px;
   color: var(--primary);
-  width: 14px;
+  width: 16px;
 }
 .order-list-toolbar {
   margin-top: 4px;
@@ -4405,9 +4416,18 @@ td > .numeric {
   gap: 22px;
   align-items: start;
 }
+@media (min-width: 981px) {
+  .map-editor-main {
+    position: sticky;
+    top: 18px;
+  }
+}
 .map-editor-main .campus-map {
   height: 420px;
   margin-top: 0;
+}
+.campus-list-panel {
+  margin-top: 22px;
 }
 .map-editor-caption {
   display: flex;
@@ -5192,21 +5212,6 @@ td > .numeric {
   .print-view-layout {
     grid-template-columns: minmax(0, 1fr) 270px;
   }
-  .campus-admin-bar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  .campus-admin-tab {
-    min-height: 40px;
-    padding: 8px 10px;
-  }
-  .campus-admin-tab-name {
-    font-size: 11px;
-  }
-  .campus-admin-hint {
-    display: none;
-  }
   .map-editor-grid {
     grid-template-columns: minmax(0, 1fr) 260px;
   }
@@ -5343,17 +5348,33 @@ td > .numeric {
     grid-template-columns: 1fr;
   }
   .slot-choices > button {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "date check"
+      "name check"
+      "time check";
     align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
+    gap: 4px 12px;
+    min-height: 0;
+    padding: 16px 18px;
+  }
+  .slot-choices > button > span {
+    grid-area: date;
   }
   .slot-choices > button > b {
-    margin: 0;
+    grid-area: name;
+    margin: 2px 0 0;
+    font-size: 16px;
+  }
+  .slot-choices > button > small {
+    grid-area: time;
   }
   .slot-choices > button > svg {
+    grid-area: check;
     position: static;
-    margin-left: auto;
+    margin: 0;
+    justify-self: end;
   }
   .checkout-summary .panel {
     padding: 20px;
@@ -7168,6 +7189,21 @@ td > .numeric {
   }
   .blocker-list {
     font-size: 11px;
+  }
+  .campus-admin-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .campus-admin-tab {
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+  .campus-admin-tab-name {
+    font-size: 11px;
+  }
+  .campus-admin-hint {
+    display: none;
   }
   .map-editor-grid {
     gap: 0;

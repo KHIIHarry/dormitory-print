@@ -11,7 +11,7 @@ from .core import (Actor, DTO, DomainError, Envelope, actor_dep, audit, authoriz
                    grant_scopes, lock, ok, owns_principal, require_admin, require_customer, touch)
 from .db import get_db
 from .campuses import campus_is_open
-from .models import (AccessGrant, Account, AnonymousLedger, Artifact, Asset, BindingTask, BusinessException, DeliveryAssignment,
+from .models import (AccessGrant, Account, Artifact, Asset, BindingTask, BusinessException, DeliveryAssignment,
     DeliveryProof, DeliverySlot, Location, Order, OrderFile, OrderRevision, PackingTask, Payment, Preparation,
     Principal, PrintAttempt, PrintTask, Quote, Receipt, ReceiptAdjustment, utcnow)
 from .growth_schemas import QuoteDTO
@@ -899,6 +899,7 @@ def proof(order_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
 
 class DashboardView(DTO):
     order_count:int
+    active_order_count:int
     pending_payment_count:int
     delivered_count:int
     pending_print_task_count:int
@@ -926,15 +927,16 @@ class DashboardView(DTO):
 @router.get('/admin/dashboard',response_model=Envelope[DashboardView])
 def dashboard(db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_order_admin(actor)
-    result={'orderCount':0,'pendingPaymentCount':0,'deliveredCount':0,'pendingPrintTaskCount':0,
+    result={'orderCount':0,'activeOrderCount':0,'pendingPaymentCount':0,'deliveredCount':0,'pendingPrintTaskCount':0,
         'pendingBindingCount':0,'pendingPackingCount':0,'readyForDeliveryCount':0,'deliveryExceptionCount':0,
         'subtotalCents':0,'couponDiscountCents':0,'volumeDiscountCents':0,'payableCents':0,'cashReceivedCents':0,
         'zeroPayableCount':0,'refundCents':0,'manualAdjustmentCents':0,'staffDiscountCents':0,
         'supplementaryFeesCents':0,'supplementaryCashReceivedCents':0,'supplementaryRefundCents':0,'supplementaryOutstandingCents':0,
         'unmatchedReceiptCents':0,'unmatchedReceiptRefundCents':0}
-    for order in db.scalars(select(Order)):
+    for order in db.scalars(select(Order).where(Order.deleted_at.is_(None))):
         result['orderCount']+=1
         if not order.deleted_at:
+            result['activeOrderCount']+=1
             for state,key in [('PENDING_CONFIRMATION','pendingPaymentCount'),('DELIVERED','deliveredCount'),('PENDING_PRINT','pendingPackingCount'),('READY_FOR_DELIVERY','readyForDeliveryCount'),('DELIVERY_EXCEPTION','deliveryExceptionCount')]:
                 if order.status==state:result[key]+=1
         if order.status!='CANCELLED' or order.settlement_kind:
@@ -967,7 +969,4 @@ def dashboard(db=Depends(get_db),actor:Actor=Depends(actor_dep)):
         result['unmatchedReceiptCents']+=receipt.amount_cents
         result['unmatchedReceiptRefundCents']+=db.scalar(select(func.coalesce(func.sum(ReceiptAdjustment.amount_cents),0))
             .where(ReceiptAdjustment.receipt_id==receipt.id))
-    for row in db.scalars(select(AnonymousLedger)):
-        for key,value in row.totals.items():
-            if key in result:result[key]+=value
     return ok(result)

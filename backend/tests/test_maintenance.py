@@ -734,7 +734,7 @@ def test_sweep_file_retention_uses_q29_and_protects_unfinished_or_disputed(db):
     assert disputed_path.exists()
 
 
-def test_dashboard_totals_survive_trash_restore_and_purge_without_double_count(admin_client, api, db):
+def test_dashboard_totals_follow_trash_restore_and_purge(admin_client, api, db):
     from app.db import SessionLocal
     from app.maintenance import process_purge_job
 
@@ -751,14 +751,16 @@ def test_dashboard_totals_survive_trash_restore_and_purge_without_double_count(a
     assert created.status_code == 200, created.text
     entry = created.json()['data']
     during = api(admin_client, '/admin/dashboard', method='GET').json()['data']
+    assert during['activeOrderCount'] == 0
     for key in ('orderCount', 'payableCents', 'cashReceivedCents', 'subtotalCents'):
-        assert during[key] == before_data[key], key
+        assert during[key] == 0, key
 
     restored = api(admin_client, f"/admin/trash/{entry['id']}/restore", {
         'expectedVersion': entry['version'], 'reason': '恢复后统计不重复',
     })
     assert restored.status_code == 200, restored.text
     after_restore = api(admin_client, '/admin/dashboard', method='GET').json()['data']
+    assert after_restore['activeOrderCount'] == 1
     for key in ('orderCount', 'payableCents', 'cashReceivedCents', 'subtotalCents'):
         assert after_restore[key] == before_data[key], key
 
@@ -776,8 +778,9 @@ def test_dashboard_totals_survive_trash_restore_and_purge_without_double_count(a
     finally:
         session.close()
     after_purge = api(admin_client, '/admin/dashboard', method='GET').json()['data']
+    assert after_purge['activeOrderCount'] == 0
     for key in ('orderCount', 'payableCents', 'cashReceivedCents', 'subtotalCents'):
-        assert after_purge[key] == before_data[key], key
+        assert after_purge[key] == 0, key
 
 
 def test_purge_rechecks_new_references_before_deleting(admin_client, api, db):
@@ -885,7 +888,8 @@ def test_purging_unpaid_cancelled_order_does_not_invent_money_in_dashboard(admin
     finally:
         session.close()
     after = api(admin_client, '/admin/dashboard', method='GET').json()['data']
-    assert after['orderCount'] == before['orderCount']
+    assert after['orderCount'] == before['orderCount'] - 1
+    assert after['activeOrderCount'] == 0
     assert after['payableCents'] == before['payableCents'] == 0
     assert after['cashReceivedCents'] == before['cashReceivedCents'] == 0
 

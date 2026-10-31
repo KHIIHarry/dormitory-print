@@ -156,9 +156,9 @@ export function Dashboard() {
         <div className="dashboard-summary">
           <Stat
             label="当前订单"
-            value={stats.orderCount}
+            value={stats.activeOrderCount}
             icon={<ShoppingBag size={21} />}
-            caption="订单总数 · 含待确认订单"
+            caption="未删除订单 · 含待确认订单"
             href={`${ADMIN}/orders`}
           />
           <Stat
@@ -227,7 +227,7 @@ export function Dashboard() {
               </div>
             </div>
             <p className="form-hint">
-              统计以服务端全量汇总与结算记录为准，不从当前订单列表推算现金收入。
+              统计以服务端汇总为准；当前订单与财务快照均只统计未删除订单，删除订单后相关数据会同步移除。
               {DEMO
                 ? "开发演示仅统计本次会话的样例账目，未模拟退款或人工调整。"
                 : ""}

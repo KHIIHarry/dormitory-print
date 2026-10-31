@@ -4563,6 +4563,10 @@
       "DashboardView": {
         "additionalProperties": false,
         "properties": {
+          "activeOrderCount": {
+            "title": "Activeordercount",
+            "type": "integer"
+          },
           "cashReceivedCents": {
             "title": "Cashreceivedcents",
             "type": "integer"
@@ -4665,6 +4669,7 @@
         },
         "required": [
           "orderCount",
+          "activeOrderCount",
           "pendingPaymentCount",
           "deliveredCount",
           "pendingPrintTaskCount",
