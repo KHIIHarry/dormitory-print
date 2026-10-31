@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { DEMO, useStore } from "../lib/store";
-import { request, isUncertainSubmission, money } from "../lib/api";
+import { request, isUncertainSubmission } from "../lib/api";
 import { getIdentityGeneration } from "../growth/client";
 import {
   DEFAULT_FORMATS,
@@ -26,12 +26,10 @@ import {
   isV1ImageUpload,
   cancelAsset,
   cancelUploadSession,
-  getAsset,
   loadNormalizedImage,
   supportsFormat,
   uploadResumable,
   type AssetUploadResult,
-  type PreparationView,
   type AssetView,
   type ExcelOptions,
 } from "../v1/upload-client";
@@ -63,11 +61,10 @@ import {
   a4Attempt,
 } from "../lib/upload-chain";
 import { UploadFileStatus, UploadFileRow } from "./upload-status";
-import { checkoutSignature } from "./checkout";
 import { useIdentity } from "../growth/identity";
 import type { Artifact } from "../lib/artifacts";
 export function UploadPage() {
-  const { draft, setDraft, data, toast, setCheckoutMemory } = useStore();
+  const { draft, setDraft, data, toast } = useStore();
   const identity = useIdentity();
   const [sessionReady, setSessionReady] = useState(DEMO);
   const uploadReady = identity.customerReady && sessionReady;
@@ -96,9 +93,6 @@ export function UploadPage() {
       setBusy(false);
       setChoiceBusy(false);
       choiceLock.current = false;
-      // Never keep another identity's private server-draft summary on screen.
-      setServerDrafts([]);
-      setDraftError("");
     };
     window.addEventListener("dormprint:identity", invalidate);
     return () => {
@@ -122,37 +116,6 @@ export function UploadPage() {
     files: File[];
     retryFile?: PrintFile;
   } | null>(null);
-  const [serverDrafts, setServerDrafts] = useState<PreparationView[]>([]);
-  const [draftError, setDraftError] = useState("");
-  const [restoringDraft, setRestoringDraft] = useState(false);
-  const loadServerDrafts = async () => {
-    const generation = getIdentityGeneration();
-    setDraftError("");
-    try {
-      const result = await request<{ items: PreparationView[] }>(
-        "/preparations",
-      );
-      if (!mounted.current || generation !== getIdentityGeneration()) return;
-      const now = Date.now();
-      setServerDrafts(
-        result.items
-          .filter(
-            (item) =>
-              !item.replacesOrderId &&
-              Date.parse(item.expiresAt) > now &&
-              ["READY", "PROCESSING", "QUEUED", "FAILED"].includes(
-                item.status,
-              ),
-          )
-          .slice(0, 3),
-      );
-    } catch (e) {
-      if (mounted.current && generation === getIdentityGeneration())
-        setDraftError(
-          `服务端草稿暂不可读取：${(e as Error).message}`,
-        );
-    }
-  };
   useEffect(() => {
     if (DEMO) { setSessionReady(true); return; }
     setSessionReady(false);
@@ -165,14 +128,12 @@ export function UploadPage() {
       .then(() => {
         if (!live || !mounted.current || generation !== getIdentityGeneration()) return;
         setSessionReady(true);
-        if (!draftRef.current.length) return loadServerDrafts();
       })
       .catch((error) => {
         if (live && mounted.current && generation === getIdentityGeneration())
-          setDraftError(`客户会话暂不可用：${(error as Error).message}。未上传的本地文件不会保存在浏览器，请联网后重新选择。`);
+          toast(`客户会话暂不可用：${(error as Error).message}。未上传的本地文件不会保存在浏览器，请联网后重新选择。`);
       });
     return () => { live = false; };
-    // Draft loading uses the latest ref; local files always take precedence.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity.customerReady, identity.generation]);
   const uploadLock = useRef(false),
@@ -408,164 +369,6 @@ export function UploadPage() {
     const batch = pendingBatch.current;
     pendingBatch.current = null;
     if (batch) void upload(batch.files, batch.retryFile);
-  };
-  const restoreServerDraft = async (draft: PreparationView) => {
-    if (restoringDraft || uploadLock.current) return;
-    const generation = getIdentityGeneration();
-    setRestoringDraft(true);
-    setDraftError("");
-    try {
-      const assets = await Promise.all(
-        draft.files.map((spec) =>
-          getAsset(spec.assetId).catch((error) => {
-            throw new Error(
-              `${spec.name || spec.clientFileId}：${(error as Error).message}`,
-            );
-          }),
-        ),
-      );
-      if (!mounted.current || generation !== getIdentityGeneration()) return;
-      const restored: PrintFile[] = [];
-      for (let index = 0; index < draft.files.length; index++) {
-        const spec = draft.files[index];
-        const asset = assets[index];
-        if (!asset || asset.status !== "READY")
-          throw new Error(
-            `${spec.name}：服务端文件尚未就绪或已过期，请重新选择文件`,
-          );
-        const imageKind = ["JPEG", "PNG", "WEBP", "HEIC"].includes(
-          asset.kind || "",
-        );
-        const kind: PrintFile["kind"] =
-          spec.kind === "PHOTO" ? "PHOTO" : "DOCUMENT";
-        const medium: PrintFile["imagePrintMedium"] =
-          kind === "PHOTO" ? "PHOTO" : imageKind ? "A4" : undefined;
-        const segments = (spec.segments || []).map((segment) => {
-          const row = segment as {
-            clientSegmentId?: string;
-            ranges?: { from: number; to: number }[];
-            colorMode?: PrintFile["segments"][number]["colorMode"];
-            sides?: PrintFile["segments"][number]["sides"];
-            flip?: PrintFile["segments"][number]["flip"];
-            copies?: number;
-          };
-          return {
-            id: row.clientSegmentId || crypto.randomUUID(),
-            range:
-              (row.ranges || [])
-                .map((range) =>
-                  range.from === range.to
-                    ? String(range.from)
-                    : `${range.from}-${range.to}`,
-                )
-                .join(",") || `1-${spec.pages || 1}`,
-            colorMode: row.colorMode || "BW",
-            sides: row.sides || "SINGLE",
-            flip: row.flip || "NONE",
-            copies: row.copies || 1,
-          };
-        });
-        const artifacts = (draft.artifacts as unknown as Artifact[]).filter(
-          (artifact) => artifact.fileId === spec.clientFileId,
-        );
-        let localFile: File | undefined;
-        let displayUrl: string | undefined;
-        if (imageKind && asset.url && !isHeicUpload({ name: asset.name })) {
-          const response = await fetch(asset.url, {
-            credentials: "same-origin",
-            cache: "no-store",
-          });
-          if (response.ok) {
-            const blob = await response.blob();
-            if (
-              ["image/png", "image/jpeg", "image/webp"].includes(blob.type)
-            ) {
-              localFile = new File([blob], asset.name, { type: blob.type });
-              displayUrl = URL.createObjectURL(blob);
-            }
-          }
-        }
-        restored.push({
-          id: spec.clientFileId,
-          assetId: asset.assetId,
-          name: spec.name,
-          size: asset.size,
-          pages: spec.pages || asset.pages || 1,
-          kind,
-          status: "READY",
-          uploadPhase: "READY",
-          uploadVersion: 1,
-          uploadRequestKey: crypto.randomUUID(),
-          imagePrintMedium: medium,
-          imageSource:
-            imageKind && localFile
-              ? {
-                  file: localFile,
-                  url: displayUrl,
-                  assetId: asset.assetId,
-                }
-              : undefined,
-          url: displayUrl,
-          localFile,
-          segments,
-          excludedPages: spec.excludedPages || [],
-          bindingType:
-            (spec.bindingType as PrintFile["bindingType"]) || "NONE",
-          photo: {
-            fit: (spec.fit as PrintFile["photo"]["fit"]) || "CONTAIN",
-            rotationDegrees: (spec.rotationDegrees ||
-              0) as PrintFile["photo"]["rotationDegrees"],
-            orientation:
-              (spec.orientation as PrintFile["photo"]["orientation"]) ||
-              "PORTRAIT",
-            copies: spec.copies || 1,
-            zoom: 1,
-            x: 50,
-            y: 50,
-            sourceWidth: asset.dimensions?.width,
-            sourceHeight: asset.dimensions?.height,
-          },
-          printStatus: "PENDING",
-          bindingStatus: "NOT_REQUIRED",
-          finalArtifacts: artifacts,
-          pdfUrl: artifacts[0]?.url,
-          artifactId: artifacts[0]?.id,
-          sha256: artifacts[0]?.sha256,
-          error: isHeicUpload({ name: asset.name })
-            ? "HEIC 草稿需要服务端提供可显示的 PNG 预览后才能重新编辑构图；可先核对最终 PDF 或重新选择文件。"
-            : undefined,
-        });
-      }
-      const signature = checkoutSignature(restored, undefined);
-      setCheckoutMemory((memory) => ({
-        ...memory,
-        [signature]: {
-          preparationId: draft.id,
-          preparationVersion: draft.version,
-          artifacts: (draft.artifacts || []) as unknown as Artifact[],
-          acks: [],
-          quote: (draft.quote || null) as never,
-          generation: identity.generation,
-          promotionIntent: { selectionMode: "AUTO" },
-          name: "",
-          phone: "",
-          building: "",
-          slot: "",
-          customerNote: "",
-        },
-      }));
-      setDraft(restored);
-      setServerDrafts([]);
-      toast("已恢复服务端草稿的已上传文件与打印设置，请重新核对最终 PDF");
-      nav("/u/review");
-    } catch (e) {
-      if (mounted.current && generation === getIdentityGeneration())
-        setDraftError(
-          `恢复草稿失败：${(e as Error).message}。未上传的本地文件必须重新选择。`,
-        );
-    } finally {
-      if (mounted.current) setRestoringDraft(false);
-    }
   };
   const upload = async (files: FileList | File[], retryFile?: PrintFile) => {
     if (!navigator.onLine) {
@@ -1148,58 +951,6 @@ export function UploadPage() {
       </Link>
       <PageHeading title="新建打印订单" description="从上传第一份资料开始。" />
       <Steps step={0} />
-      {!DEMO && (draftError || serverDrafts.length > 0) && (
-        <div className="v1-draft-banner" role="status" aria-live="polite">
-          {draftError ? (
-            <p>{draftError} 未上传的本地文件必须重新选择，不会从浏览器恢复。</p>
-          ) : (
-            <p>
-              发现服务端保存的打印草稿：{serverDrafts[0].files.length} 个文件
-              {serverDrafts[0].quote
-                ? ` · 上次报价 ${money(
-                    (
-                      serverDrafts[0].quote as unknown as {
-                        totalCents?: number;
-                      }
-                    ).totalCents || 0,
-                  )}`
-                : ""}
-              · 到期 {new Date(serverDrafts[0].expiresAt).toLocaleString("zh-CN")}
-              。可恢复已上传文件与打印设置，但最终 PDF 仍需重新核对确认；未上传的本地文件必须重新选择。
-            </p>
-          )}
-          <div className="v1-actions">
-            {serverDrafts.length > 0 && (
-              <Button
-                busy={restoringDraft}
-                busyLabel="正在恢复…"
-                disabled={restoringDraft}
-                onClick={() => void restoreServerDraft(serverDrafts[0])}
-              >
-                恢复这份草稿
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              disabled={restoringDraft}
-              onClick={() => {
-                setServerDrafts([]);
-                setDraftError("");
-              }}
-            >
-              忽略
-            </Button>
-            {draftError && (
-              <Button
-                variant="secondary"
-                onClick={() => void loadServerDrafts()}
-              >
-                重试读取
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
       <div className="flow-grid">
         <Panel className="upload-panel">
           <div

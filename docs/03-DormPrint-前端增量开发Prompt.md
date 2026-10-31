@@ -55,7 +55,7 @@
 - 前端拆分 customerSession/staffSession/orderAccess 状态，缓存 key 包含主体与授权范围；异步响应校验当前身份代次，切账号/退出后旧响应不得回填敏感订单/优惠。
 - 结算中登录使用共享 checkout controller/同标签登录弹层等保留 preparationId、manifest、previewAcks 和草稿，不在 URL/持久浏览器缓存塞文件/凭证。不愿合并游客时仍可凭当前游客会话继续这次游客无账号券的结算流程（仍可享满量）；用账号券必须显式关联这次结算的合法主体，不隐式合并全部游客订单。
 - 若已登录但不选择合并历史游客订单，可使用 `POST /preparations/{id}/adopt-checkout`（`{expectedVersion,confirm:true}`），同时证明账号与当前游客 preparation，创建仅本次 preparation/输入 manifest 的 checkout_use_grant。新订单归账号主 principal，原资产 ID/owner 不覆盖，仅记录对此单的合法使用引用；不导入其他游客订单。此单创建时 checkoutAccountId 固定；未创建前撤回该授权可改回游客并重新报价。不能凭导入旧订单授权使用 adopt-checkout 抢走旧订单 owner。
-- 新标签/不同设备不承诺恢复内存草稿；已生成 preparation 只有合法主体可恢复，无法恢复时明确提示重新准备，不能伪造原 previewAcks。登录/退出/切号只重新核验身份和优惠，PDF 未变化不重转。
+- 新标签/不同设备不承诺恢复内存草稿；上传页不再读取或展示服务端 preparation 草稿，用户离开后需重新准备；已生成的 preparation 仍只服务当前结算，不能伪造原 previewAcks。登录/退出/切号只重新核验身份和优惠，PDF 未变化不重转。
 
 ### 0A.3 账价快照与人工零元结算
 

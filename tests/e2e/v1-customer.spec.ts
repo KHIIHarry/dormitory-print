@@ -1183,36 +1183,6 @@ test("requested slot and auto-close deadline are shown before settlement; unpaid
   ).toHaveCount(0);
 });
 
-test("server draft restores uploaded files and preparation state, while unuploaded local files still need reselection", async ({
-  page,
-}) => {
-  await installUploadApi(page, { preparation: true, assetReady: true });
-  await page.goto(appUrl("/u/new"));
-  await expect(
-    page.getByText(/发现服务端保存的打印草稿/),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "恢复这份草稿" }).click();
-  await expect(page).toHaveURL(/\/u\/review$/);
-  await expect(
-    page.getByRole("heading", {
-      name: "最后检查一下，就可以下单了",
-    }),
-  ).toBeVisible();
-  await expect(page.getByText("确认最终打印文件")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /查看最终 PDF/ }),
-  ).toBeVisible();
-  // A price-version change requires a fresh amount confirmation.
-  await expect(
-    page.getByText(/价格版本已由 v3 更新为 v4/),
-  ).toBeVisible();
-  await expect(page.getByText(/本次报价价格版本 v4/)).toBeVisible();
-  await expect(page.getByText(/有效期至/)).toBeVisible();
-  // Contact fields are intentionally not restored from the server draft.
-  await expect(page.getByLabel("微信昵称 *")).toHaveValue("");
-});
-
-
 test("Codex routes /u/orders/:id/after-sales and /u/account/data render the exported V1 pages", async ({
   page,
 }) => {
