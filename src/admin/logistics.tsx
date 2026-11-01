@@ -1379,6 +1379,7 @@ export function Slots() {
           title={edit.id ? "编辑配送时段" : "新建配送时段"}
           onClose={() => setEdit(null)}
         >
+          <div className="slot-editor-form">
           <Field label="配送日期">
             <input
               type="date"
@@ -1429,6 +1430,7 @@ export function Slots() {
           >
             保存时段
           </Button>
+          </div>
         </Modal>
       )}
     </>
