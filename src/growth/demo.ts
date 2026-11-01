@@ -15,6 +15,8 @@ import type {
   CustomerSession,
   MailConfig,
   MailTemplate,
+  ManualCouponIssueResult,
+  ManualCouponRecipient,
   OrderAccess,
   PromotionRecord,
   Quote,
@@ -271,6 +273,7 @@ const db = {
   } as MailConfig,
   templates: structuredClone(defaults),
   records: [] as PromotionRecord[],
+  manualIssues: new Map<string, ManualCouponIssueResult>(),
   referrals: [] as PromotionReferral[],
   links: [] as AccessLink[],
   orders: new Map<string, Order>(),
@@ -1415,6 +1418,89 @@ export async function demoRequest(
       fail("活动版本冲突", "VERSION_CONFLICT", 409);
     Object.assign(c!, body, { version: c!.version + 1, stackable: false });
     return c;
+  }
+  if (path === "/admin/promotions/coupons/recipient") {
+    const email = (query.get("email") || "").trim().toLowerCase();
+    if (!email.endsWith("@example.invalid"))
+      fail("未找到该邮箱对应的客户账号", "ACCOUNT_NOT_FOUND", 404);
+    const eligible =
+      db.account.status === "ACTIVE" && Boolean(db.account.verified);
+    const recipient: ManualCouponRecipient = {
+      accountId: db.account.id,
+      emailMasked: db.account.emailMasked,
+      displayName: db.account.displayName,
+      status: db.account.status,
+      verified: Boolean(db.account.verified),
+      eligible,
+      ineligibleReason: eligible
+        ? null
+        : db.account.verified
+          ? "账号状态异常，不能接收优惠券"
+          : "账号邮箱尚未验证，不能接收优惠券",
+      availableCouponCount: db.coupons.filter(
+        (c) => c.accountId === db.account.id && c.status === "AVAILABLE",
+      ).length,
+      isStaff: false,
+      createdAt: db.accounts[0]?.createdAt || date(),
+    };
+    return recipient;
+  }
+  if (path === "/admin/promotions/coupons/manual") {
+    const email = String(body.email || "").trim().toLowerCase();
+    if (!email.endsWith("@example.invalid"))
+      fail("未找到该邮箱对应的客户账号", "ACCOUNT_NOT_FOUND", 404);
+    if (!body.reason?.trim()) fail("请填写发放原因");
+    if (Number(body.amountCents) < 1 || Number(body.amountCents) > 20000)
+      fail("单张优惠券面额不能超过 ¥200");
+    if (!String(body.validUntil || ""))
+      fail("请选择到期时间");
+    if (!db.account.verified || db.account.status !== "ACTIVE")
+      fail("账号不符合收券条件", "ACCOUNT_NOT_ELIGIBLE");
+    const requestKey = JSON.stringify(body);
+    const replay = db.manualIssues.get(requestKey);
+    if (replay) return { ...replay, replayed: true };
+    const id = uid();
+    const coupon: PromotionCoupon = {
+      id,
+      couponGrantId: id,
+      campaignId: "MANUAL",
+      name: String(body.name || "专享优惠券"),
+      amountCents: Number(body.amountCents),
+      minSpendCents: Number(body.minSpendCents || 0),
+      service: body.service || "ALL",
+      status: "AVAILABLE",
+      riskHold: "NONE",
+      validUntil: String(body.validUntil),
+      version: 1,
+      accountId: db.account.id,
+      sourceKey: `MANUAL_ISSUE:${id}`,
+      issuedAt: date(),
+    };
+    db.coupons.push(coupon);
+    db.records.unshift({
+      id: uid(),
+      accountId: db.account.id,
+      accountMasked: db.account.emailMasked,
+      campaignName: "人工发放",
+      couponGrantId: id,
+      type: "MANUAL_ISSUE",
+      status: "AVAILABLE",
+      riskHold: "NONE",
+      amountCents: coupon.amountCents,
+      reason: String(body.reason),
+      time: date(),
+      version: 1,
+    });
+    const result: ManualCouponIssueResult = {
+      coupon,
+      accountId: db.account.id,
+      accountMasked: db.account.emailMasked,
+      displayName: db.account.displayName,
+      replayed: false,
+      notified: false,
+    };
+    db.manualIssues.set(requestKey, result);
+    return result;
   }
   if (path === "/admin/promotions/records")
     return { items: filteredRecords(query), summary: promotionSummary(db) };

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal, Union
 
-from pydantic import Field as PField, model_validator
+from pydantic import AwareDatetime, Field as PField, model_validator
 
 from .core import DTO
 
@@ -196,6 +196,39 @@ class CouponDTO(DTO):
 
 class CouponList(DTO):
     items: list[CouponDTO]
+
+
+class ManualCouponRecipient(DTO):
+    account_id: str
+    email_masked: str
+    display_name: str | None = None
+    status: str
+    verified: bool
+    eligible: bool
+    ineligible_reason: str | None = None
+    available_coupon_count: int = PField(ge=0)
+    is_staff: bool = False
+    created_at: datetime
+
+
+class ManualCouponIssueInput(DTO):
+    email: str = PField(min_length=1, max_length=254)
+    amount_cents: int = PField(ge=1, le=20_000)
+    min_spend_cents: int = PField(ge=0, le=10_000_000)
+    service: CatalogService
+    valid_until: AwareDatetime
+    name: str | None = PField(default=None, max_length=80)
+    reason: str = PField(min_length=2, max_length=500)
+    notify: bool = True
+
+
+class ManualCouponIssueResult(DTO):
+    coupon: CouponDTO
+    account_id: str
+    account_masked: str
+    display_name: str | None = None
+    replayed: bool = False
+    notified: bool = False
 
 
 class VolumeTierDTO(DTO):

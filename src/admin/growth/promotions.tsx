@@ -29,12 +29,23 @@ import {
   yuan,
 } from "./logic";
 import { exportReady } from "../../courier/task-state";
+import { ManualCouponModal } from "./manual-coupon";
 const kinds: Record<Campaign["kind"], string> = {
   NEW_CUSTOMER: "新客注册券",
   INVITEE: "受邀新人券",
   REFERRER: "邀请人奖励",
 };
 const services = { A4: "A4 打印", PHOTO: "照片", ALL: "全部可优惠商品" };
+const recordTypes: Record<string, string> = {
+  ISSUED: "系统发放",
+  RESERVED: "订单锁定",
+  USED: "已核销",
+  REFERRAL_REWARD: "邀请奖励",
+  FREEZE: "冻结",
+  UNFREEZE: "解除冻结",
+  REVOKED: "已撤销",
+  MANUAL_ISSUE: "人工发放",
+};
 type CampaignDraft = {
   id?: string;
   version?: number;
@@ -142,7 +153,8 @@ export function PromotionSettingsPage() {
     ),
     submit = useSubmit();
   const [draft, setDraft] = useState<CampaignDraft | null>(null),
-    [confirm, setConfirm] = useState(false);
+    [confirm, setConfirm] = useState(false),
+    [manualOpen, setManualOpen] = useState(false);
   const patch = (change: Partial<CampaignDraft>) =>
     setDraft((d) => (d ? { ...d, ...change } : d));
   const disabled = !access.allowed || submit.pending || !submit.online;
@@ -152,9 +164,18 @@ export function PromotionSettingsPage() {
         title="营销活动"
         description="新客注册、受邀新人和邀请人奖励均按固定金额配置。"
         action={
-          <Button disabled={disabled} onClick={() => setDraft(newCampaign())}>
-            新增活动
-          </Button>
+          <div className="growth-page-actions">
+            <Button
+              variant="secondary"
+              disabled={disabled}
+              onClick={() => setManualOpen(true)}
+            >
+              人工发券
+            </Button>
+            <Button disabled={disabled} onClick={() => setDraft(newCampaign())}>
+              新增活动
+            </Button>
+          </div>
         }
       />
       <AccessState access={access} />
@@ -480,6 +501,12 @@ export function PromotionSettingsPage() {
           。已锁定及核销的优惠按原业务快照处理。
         </ConfirmAction>
       )}
+      {manualOpen && (
+        <ManualCouponModal
+          onClose={() => setManualOpen(false)}
+          onIssued={() => resource.reload()}
+        />
+      )}
     </div>
   );
 }
@@ -556,6 +583,7 @@ export function PromotionRecordsPage() {
       kind: "freeze" | "unfreeze" | "revoke";
     } | null>(null),
     [exportOpen, setExportOpen] = useState(false),
+    [manualOpen, setManualOpen] = useState(false),
     [jobId, setJobId] = useState("");
   const resource = useGrowthResource<{
     items: PromotionRecord[];
@@ -587,12 +615,21 @@ export function PromotionRecordsPage() {
         title="优惠与邀请记录"
         description="检索发放、预约、核销、邀请奖励及风控流水；历史记录只追加审计。"
         action={
-          <Button
-            disabled={!exportAccess.allowed || submit.pending || !submit.online}
-            onClick={() => setExportOpen(true)}
-          >
-            申请受控导出
-          </Button>
+          <div className="growth-page-actions">
+            <Button
+              variant="secondary"
+              disabled={!access.allowed || submit.pending || !submit.online}
+              onClick={() => setManualOpen(true)}
+            >
+              人工发券
+            </Button>
+            <Button
+              disabled={!exportAccess.allowed || submit.pending || !submit.online}
+              onClick={() => setExportOpen(true)}
+            >
+              申请受控导出
+            </Button>
+          </div>
         }
       />
       <AccessState access={access} />
@@ -610,6 +647,7 @@ export function PromotionRecordsPage() {
               <option value="">全部</option>
               {[
                 "ISSUED",
+                "MANUAL_ISSUE",
                 "RESERVED",
                 "USED",
                 "REFERRAL_REWARD",
@@ -618,7 +656,7 @@ export function PromotionRecordsPage() {
                 "REVOKED",
               ].map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {recordTypes[s] ?? s}
                 </option>
               ))}
             </select>
@@ -703,7 +741,7 @@ export function PromotionRecordsPage() {
                         <small>{r.campaignName}</small>
                       </td>
                       <td>
-                        {r.type}
+                        {recordTypes[r.type] ?? r.type}
                         <small>
                           {r.status} ·{" "}
                           {r.riskHold === "FROZEN" ? "已冻结" : "正常"}
@@ -825,6 +863,12 @@ export function PromotionRecordsPage() {
         >
           仅导出当前筛选下的白名单业务字段，客户身份保持掩码。服务端会校验权限、行数上限并记录审计；文件生成后需通过受控入口下载。
         </ConfirmAction>
+      )}
+      {manualOpen && (
+        <ManualCouponModal
+          onClose={() => setManualOpen(false)}
+          onIssued={() => resource.reload()}
+        />
       )}
     </div>
   );

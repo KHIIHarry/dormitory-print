@@ -60,6 +60,7 @@ TEMPLATE_KEYS = (
     'ACCOUNT_DELETED',
     'ORDER_CREATED',
     'ORDER_STATUS_UPDATED',
+    'MANUAL_COUPON_GRANTED',
 )
 
 VARIABLE_DESCRIPTIONS = {
@@ -89,6 +90,12 @@ VARIABLE_DESCRIPTIONS = {
     'orderCount': '本批订单数量',
     'deletionDeadline': '注销完成期限',
     'rewardText': '奖励说明（不包含其他客户信息）',
+    'couponName': '优惠券名称',
+    'couponAmount': '优惠券面额（含币种）',
+    'couponMinSpend': '使用门槛（含币种，或“无门槛”）',
+    'couponService': '适用服务范围',
+    'couponValidUntil': '优惠券有效期截止时间',
+    'couponLink': '客户优惠券页面入口',
 }
 
 DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
@@ -248,6 +255,23 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
         'critical': False,
         'enabled': True,
     },
+    'MANUAL_COUPON_GRANTED': {
+        'name': '优惠券到账',
+        'subject': '{{brandName}}｜优惠券已到账',
+        'textBody': (
+            '您好！{{brandName}} 为您发放了一张优惠券：{{couponName}}。\n'
+            '面额：{{couponAmount}}\n使用门槛：{{couponMinSpend}}\n'
+            '适用服务：{{couponService}}\n有效期至：{{couponValidUntil}}\n'
+            '请登录「我的优惠券」查看并使用：{{couponLink}}'
+        ),
+        'htmlBody': template_html('MANUAL_COUPON_GRANTED'),
+        'variables': [
+            'brandName', 'couponName', 'couponAmount', 'couponMinSpend',
+            'couponService', 'couponValidUntil', 'couponLink',
+        ],
+        'critical': False,
+        'enabled': True,
+    },
 }
 
 SAMPLE_VARIABLES = {
@@ -277,6 +301,12 @@ SAMPLE_VARIABLES = {
     'orderCount': '6',
     'deletionDeadline': '2026-11-14',
     'rewardText': '示例奖励：一张优惠券（以真实活动规则为准）',
+    'couponName': '专享优惠券',
+    'couponAmount': '¥20.00',
+    'couponMinSpend': '满 ¥50.00 可用',
+    'couponService': 'A4 打印',
+    'couponValidUntil': '2026-12-31 23:59',
+    'couponLink': 'https://example.invalid/u/rewards',
 }
 
 _ALLOWED_TAGS = {

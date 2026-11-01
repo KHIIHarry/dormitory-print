@@ -7046,6 +7046,42 @@
         "title": "Envelope[MailTemplateDTO]",
         "type": "object"
       },
+      "Envelope_ManualCouponIssueResult_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualCouponIssueResult"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[ManualCouponIssueResult]",
+        "type": "object"
+      },
+      "Envelope_ManualCouponRecipient_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualCouponRecipient"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[ManualCouponRecipient]",
+        "type": "object"
+      },
       "Envelope_OrderAccessExchange_": {
         "additionalProperties": false,
         "properties": {
@@ -9547,6 +9583,193 @@
           "message"
         ],
         "title": "MailTestResult",
+        "type": "object"
+      },
+      "ManualCouponIssueInput": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "maximum": 20000,
+            "minimum": 1,
+            "title": "Amountcents",
+            "type": "integer"
+          },
+          "email": {
+            "maxLength": 254,
+            "minLength": 1,
+            "title": "Email",
+            "type": "string"
+          },
+          "minSpendCents": {
+            "maximum": 10000000,
+            "minimum": 0,
+            "title": "Minspendcents",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "notify": {
+            "default": true,
+            "title": "Notify",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 2,
+            "title": "Reason",
+            "type": "string"
+          },
+          "service": {
+            "enum": [
+              "A4",
+              "PHOTO",
+              "ALL"
+            ],
+            "title": "Service",
+            "type": "string"
+          },
+          "validUntil": {
+            "format": "date-time",
+            "title": "Validuntil",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "amountCents",
+          "minSpendCents",
+          "service",
+          "validUntil",
+          "reason"
+        ],
+        "title": "ManualCouponIssueInput",
+        "type": "object"
+      },
+      "ManualCouponIssueResult": {
+        "additionalProperties": false,
+        "properties": {
+          "accountId": {
+            "title": "Accountid",
+            "type": "string"
+          },
+          "accountMasked": {
+            "title": "Accountmasked",
+            "type": "string"
+          },
+          "coupon": {
+            "$ref": "#/components/schemas/CouponDTO"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "notified": {
+            "default": false,
+            "title": "Notified",
+            "type": "boolean"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "coupon",
+          "accountId",
+          "accountMasked"
+        ],
+        "title": "ManualCouponIssueResult",
+        "type": "object"
+      },
+      "ManualCouponRecipient": {
+        "additionalProperties": false,
+        "properties": {
+          "accountId": {
+            "title": "Accountid",
+            "type": "string"
+          },
+          "availableCouponCount": {
+            "minimum": 0,
+            "title": "Availablecouponcount",
+            "type": "integer"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Displayname"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "emailMasked": {
+            "title": "Emailmasked",
+            "type": "string"
+          },
+          "ineligibleReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ineligiblereason"
+          },
+          "isStaff": {
+            "default": false,
+            "title": "Isstaff",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accountId",
+          "emailMasked",
+          "status",
+          "verified",
+          "eligible",
+          "availableCouponCount",
+          "createdAt"
+        ],
+        "title": "ManualCouponRecipient",
         "type": "object"
       },
       "ManualEntryInput": {
@@ -27368,6 +27591,145 @@
           }
         },
         "summary": "Patch Campaign"
+      }
+    },
+    "/admin/promotions/coupons/manual": {
+      "post": {
+        "operationId": "manual_coupon_issue_api_v1_admin_promotions_coupons_manual_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualCouponIssueInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ManualCouponIssueResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Manual Coupon Issue"
+      }
+    },
+    "/admin/promotions/coupons/recipient": {
+      "get": {
+        "operationId": "manual_coupon_recipient_api_v1_admin_promotions_coupons_recipient_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "email",
+            "required": true,
+            "schema": {
+              "maxLength": 254,
+              "minLength": 1,
+              "title": "Email",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ManualCouponRecipient_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Manual Coupon Recipient"
       }
     },
     "/admin/promotions/coupons/{id}/freeze": {

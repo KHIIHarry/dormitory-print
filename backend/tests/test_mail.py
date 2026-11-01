@@ -161,6 +161,7 @@ def test_chinese_defaults_cover_transactional_and_staff_mail():
         'ADMIN_ORDER_CREATED', 'COURIER_DISPATCH', 'DELIVERY_UPDATED',
         'PAYMENT_SUCCESS', 'ORDER_DELIVERED', 'ACCOUNT_DELETED',
         'ORDER_CREATED', 'ORDER_STATUS_UPDATED', 'REFERRAL_REWARD_GRANTED',
+        'MANUAL_COUPON_GRANTED',
     ]
     for key, template in DEFAULT_TEMPLATES.items():
         assert template['subject'], key
@@ -631,7 +632,7 @@ def test_template_routes_list_all_and_preview_uses_safe_sample(admin_client, api
     listing = api(admin_client, '/admin/mail/templates', method='GET')
     assert listing.status_code == 200, listing.text
     items = listing.json()['data']['items']
-    assert len(items) == 11
+    assert len(items) == 12
     verify = next(item for item in items if item['key'] == 'CUSTOMER_VERIFY_EMAIL')
     assert verify['critical'] is True
     preview = api(admin_client,

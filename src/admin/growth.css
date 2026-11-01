@@ -211,9 +211,130 @@
   background: #cfb5a4;
   border-radius: 6px;
 }
+.growth-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+.manual-coupon {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.manual-coupon .growth-stack {
+  gap: 16px;
+}
+.manual-coupon__hint {
+  margin: 0;
+  color: var(--muted, #7d7b78);
+  font-size: 13px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+}
+.manual-coupon__recipient {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border, #e3e3e3);
+  border-left: 3px solid var(--primary, #c67c4e);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--cream, #fbf7f2) 55%, #fff);
+}
+.manual-coupon__recipient[data-eligible="false"] {
+  border-left-color: #b45d5d;
+}
+.manual-coupon__recipient.is-compact {
+  gap: 10px;
+  padding: 13px 14px;
+}
+.manual-coupon__person {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.manual-coupon__person strong {
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.manual-coupon__person span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted, #7d7b78);
+  font-size: 12px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.manual-coupon__facts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.manual-coupon__facts dt {
+  font-size: 12px;
+}
+.manual-coupon__facts dd {
+  margin-top: 3px;
+  font-size: 13px;
+}
+.manual-coupon__recipient .notice,
+.manual-coupon__done .notice {
+  margin: 0;
+}
+.manual-coupon__inline-action {
+  margin-top: 10px;
+}
+.manual-coupon__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.manual-coupon__actions .btn {
+  min-height: 44px;
+}
+.manual-coupon__done {
+  display: grid;
+  gap: 16px;
+}
+.manual-coupon__summary {
+  margin: 0;
+  padding: 15px 16px;
+  border-radius: 12px;
+  background: var(--cream, #fbf7f2);
+}
 @media (max-width: 700px) {
   .admin-growth {
     gap: 16px;
+  }
+  .growth-page-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .growth-page-actions .btn {
+    flex: 1 1 140px;
+    min-height: 44px;
+  }
+  .manual-coupon__facts {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .manual-coupon__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .manual-coupon__actions .btn {
+    width: 100%;
+  }
+  .manual-coupon__recipient {
+    padding: 14px;
   }
   .growth-form-grid,
   .growth-filter,

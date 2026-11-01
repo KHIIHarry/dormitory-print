@@ -7,10 +7,11 @@ stored as an immutable V1.3 snapshot with integer-cent allocations.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 from urllib.parse import quote as url_quote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy import func, select
 
 from .account_lifecycle import verification_deadline
@@ -22,7 +23,8 @@ from .core import (
 from .db import get_db
 from .growth_schemas import (
     CampaignDTO, CampaignInput, CampaignList, CampaignUpdateInput, CouponDTO,
-    CouponList, CustomerList, CustomerRecord,
+    CouponList, CustomerList, CustomerRecord, ManualCouponIssueInput,
+    ManualCouponIssueResult, ManualCouponRecipient,
     PromotionIntent, PromotionRecords, QuoteDTO, ReasonInput,
     VolumePolicyDTO, VolumePolicyInput,
 )
@@ -31,7 +33,7 @@ from .benefits import current_staff_candidate
 from .models import (
     Account, BusinessException, Campaign, ConfigSection, Coupon,
     DeliveryAssignment, DeliveryBatch, DeliveryChange, DeliveryNotice,
-    DeliverySlot, Location, Order, Preparation, PromotionEvent, Quote,
+    DeliverySlot, EmailJob, Location, Order, Preparation, PromotionEvent, Quote,
     Referral, Refund, Staff, utcnow,
 )
 
@@ -40,6 +42,11 @@ router = APIRouter()
 CASH_KINDS = ('CASH_MANUAL',)
 SELECTION_MODES = ('AUTO', 'NO_COUPON', 'SPECIFIC_COUPON')
 CATALOG_SERVICES = ('A4', 'PHOTO', 'ALL')
+MANUAL_COUPON_MAX_CENTS = 20_000
+MANUAL_DAILY_LIMIT_CENTS = 100_000
+MANUAL_OUTSTANDING_LIMIT = 3
+MANUAL_VALIDITY_DAYS = 365
+MANUAL_MIN_LEAD = timedelta(minutes=5)
 
 
 def _as_utc(value) -> datetime | None:
@@ -823,6 +830,180 @@ def _issue_coupon(db, account: Account, campaign: Campaign, source_key: str,
     return coupon, 'GRANTED'
 
 
+def _manual_source_key(idempotency_key: str) -> str:
+    token = (idempotency_key or '').strip()
+    if not token:
+        raise DomainError('IDEMPOTENCY_KEY_REQUIRED', '缺少幂等键', 400)
+    digest = hashlib.sha256(token.encode('utf-8')).hexdigest()[:32]
+    return 'MANUAL_ISSUE:' + digest
+
+
+def _manual_account(db, email: str) -> Account:
+    normalized = (email or '').strip()
+    if not normalized:
+        raise DomainError('ACCOUNT_NOT_FOUND', '请输入客户邮箱', 404)
+    rows = db.scalars(select(Account).where(
+        func.lower(Account.email) == normalized.lower())).all()
+    if not rows:
+        raise DomainError('ACCOUNT_NOT_FOUND', '未找到该邮箱对应的客户账号', 404)
+    if len(rows) > 1:
+        raise DomainError('MULTIPLE_ACCOUNTS', '该邮箱匹配到多个账号，请联系技术支持处理', 409)
+    return rows[0]
+
+
+def _manual_eligibility(account: Account, actor: Actor) -> tuple[bool, str | None]:
+    if actor.account_id and actor.account_id == account.id:
+        return False, '不能给自己发放优惠券'
+    if account.deleted_at is not None or account.status == 'DELETION_PENDING':
+        return False, '账号已申请注销，不能接收优惠券'
+    if account.status == 'PENDING_EMAIL':
+        return False, '账号邮箱尚未验证，不能接收优惠券'
+    if account.status == 'SUSPENDED':
+        return False, '账号已停用，不能接收优惠券'
+    if account.status != 'ACTIVE':
+        return False, '账号状态异常，不能接收优惠券'
+    if not account.verified_at:
+        return False, '账号邮箱尚未验证，不能接收优惠券'
+    return True, None
+
+
+def _manual_daily_start(now: datetime) -> datetime:
+    local = now.astimezone(_LOCAL_TZ)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def _manual_daily_total(db, actor: Actor, start: datetime) -> int:
+    staff_id = str(actor.id)
+    rows = db.scalars(select(PromotionEvent).where(
+        PromotionEvent.kind == 'MANUAL_ISSUE',
+        PromotionEvent.created_at >= start)).all()
+    return sum(int(event.amount_cents or 0) for event in rows
+               if str((event.data or {}).get('staffId') or '') == staff_id)
+
+
+def _manual_outstanding(db, account: Account, now: datetime) -> int:
+    rows = db.scalars(select(Coupon).where(
+        Coupon.account_id == account.id,
+        Coupon.campaign_id.is_(None),
+        Coupon.status.in_(('AVAILABLE', 'RESERVED')),
+        Coupon.valid_until > now,
+    )).all()
+    return sum(1 for coupon in rows if (coupon.data or {}).get('manualIssue'))
+
+
+def _manual_service_label(service: str) -> str:
+    return {'A4': 'A4 打印', 'PHOTO': '照片打印',
+            'ALL': '全部可优惠商品'}.get(service, '全部可优惠商品')
+
+
+def _manual_issue(db, actor: Actor, *, email: str, amount_cents: int,
+                  min_spend_cents: int, service: str, valid_until: datetime,
+                  name: str | None, reason: str, notify: bool,
+                  idempotency_key: str):
+    source_key = _manual_source_key(idempotency_key)
+    advisory_lock(db, 'coupon-source:' + source_key)
+    existing = db.scalar(select(Coupon).where(Coupon.source_key == source_key))
+    if existing is not None:
+        account = db.get(Account, existing.account_id)
+        notified = db.scalar(select(EmailJob.id).where(
+            EmailJob.business_key == f'manual-coupon:{existing.id}')) is not None
+        return existing, account, True, notified
+    account = _manual_account(db, email)
+    eligible, why = _manual_eligibility(account, actor)
+    if not eligible:
+        if actor.account_id and actor.account_id == account.id:
+            raise DomainError('SELF_ISSUE_DENIED', why, 403)
+        raise DomainError('ACCOUNT_NOT_ELIGIBLE', why)
+    if amount_cents < 1 or amount_cents > MANUAL_COUPON_MAX_CENTS:
+        raise DomainError('INVALID_AMOUNT', '单张优惠券面额不能超过 ¥200')
+    if min_spend_cents < 0:
+        raise DomainError('INVALID_AMOUNT', '使用门槛不能为负数')
+    now = utcnow()
+    valid = valid_until.astimezone(timezone.utc)
+    if valid <= now + MANUAL_MIN_LEAD:
+        raise DomainError('INVALID_VALID_UNTIL', '到期时间必须晚于当前时间 5 分钟')
+    if valid > now + timedelta(days=MANUAL_VALIDITY_DAYS):
+        raise DomainError('INVALID_VALID_UNTIL', '到期时间不能超过 365 天')
+    day = now.astimezone(_LOCAL_TZ).strftime('%Y-%m-%d')
+    advisory_lock(db, f'manual-coupon-daily:{actor.id}:{day}')
+    account = lock(db, Account, account.id)
+    eligible, why = _manual_eligibility(account, actor)
+    if not eligible:
+        if actor.account_id and actor.account_id == account.id:
+            raise DomainError('SELF_ISSUE_DENIED', why, 403)
+        raise DomainError('ACCOUNT_NOT_ELIGIBLE', why)
+    daily = _manual_daily_total(db, actor, _manual_daily_start(now))
+    if daily + amount_cents > MANUAL_DAILY_LIMIT_CENTS:
+        raise DomainError('MANUAL_DAILY_LIMIT', '今日人工发券总额度已不足',
+                          details={'limitCents': MANUAL_DAILY_LIMIT_CENTS,
+                                   'usedCents': daily})
+    outstanding = _manual_outstanding(db, account, now)
+    if outstanding >= MANUAL_OUTSTANDING_LIMIT:
+        raise DomainError('MANUAL_OUTSTANDING_LIMIT', '该客户未核销的人工券已达上限',
+                          details={'limit': MANUAL_OUTSTANDING_LIMIT})
+    coupon_name = (name or '').strip() or '专享优惠券'
+    if len(coupon_name) > 80:
+        raise DomainError('INVALID_COUPON_NAME', '优惠券名称不能超过 80 个字符')
+    internal_reason = (reason or '').strip()
+    if len(internal_reason) < 2:
+        raise DomainError('INVALID_REASON', '发放原因至少需要 2 个字符')
+    terms = {
+        'amountCents': amount_cents,
+        'minSpendCents': min_spend_cents,
+        'service': service,
+        'campaignId': 'MANUAL',
+        'name': coupon_name,
+        'campaignVersion': None,
+        'kind': 'MANUAL',
+    }
+    coupon = Coupon(
+        account_id=account.id, campaign_id=None, amount_cents=amount_cents,
+        status='AVAILABLE', risk_hold='NONE', source_key=source_key,
+        valid_until=valid,
+        data={
+            'terms': terms,
+            'name': coupon_name,
+            'manualIssue': True,
+            'independentLiability': True,
+            'liabilityReserved': False,
+            'issuedAt': now.isoformat(),
+            'issuedBy': 'MANUAL',
+            'issuedByStaffId': actor.id,
+            'issueReason': internal_reason,
+            'source': 'MANUAL',
+        },
+    )
+    db.add(coupon)
+    db.flush()
+    _event(db, f'manual-issued:{source_key}', 'MANUAL_ISSUE',
+           account_id=account.id, coupon_id=coupon.id,
+           amount_cents=amount_cents,
+           data={'staffId': actor.id, 'reason': internal_reason,
+                 'emailMasked': _mask_email(account.email),
+                 'validUntil': valid.isoformat(), 'sourceKey': source_key})
+    audit(db, actor, 'COUPON_MANUALLY_ISSUED', 'COUPON', coupon.id,
+          reason=internal_reason,
+          data={'accountId': account.id, 'amountCents': amount_cents,
+                'validUntil': valid.isoformat()})
+    notified = False
+    if notify:
+        job = _queue(
+            db, 'MANUAL_COUPON_GRANTED', account.email,
+            {
+                'brandName': _mail_brand(db),
+                'couponName': coupon_name,
+                'couponAmount': _money(amount_cents),
+                'couponMinSpend': _money(min_spend_cents) if min_spend_cents else '无门槛',
+                'couponService': _manual_service_label(service),
+                'couponValidUntil': _local_label(valid, '%Y-%m-%d %H:%M'),
+                'couponLink': f"{get_settings().public_origin.rstrip('/')}/u/rewards",
+            },
+            f'manual-coupon:{coupon.id}',
+        )
+        notified = job is not None
+    return coupon, account, False, notified
+
+
 def on_registration_verified(db, account: Account) -> list[Coupon]:
     if account is None or account.status != 'ACTIVE' or not account.verified_at:
         return []
@@ -1180,7 +1361,8 @@ def on_refund(db, order: Order, refund: Refund) -> Coupon | None:
             original = db.get(Coupon, discounts[0].get('couponGrantId'))
             if (actual > 0 and order.checkout_account_id and original
                     and original.status == 'USED'
-                    and original.used_order_id == order.id):
+                    and original.used_order_id == order.id
+                    and not (original.data or {}).get('manualIssue')):
                 source_key = f'REFUND_COMPENSATION:{order.id}'
                 advisory_lock(db, 'coupon-source:' + source_key)
                 compensation = db.scalar(select(Coupon).where(
@@ -1549,14 +1731,25 @@ def _records(db, *, campaign_id=None, account_id=None, status=None, risk_hold=No
         campaign = db.get(Campaign, event.campaign_id) if event.campaign_id else None
         account = db.get(Account, event.account_id) if event.account_id else None
         state = coupon.status if coupon else event.kind
+        if (coupon and state == 'AVAILABLE' and coupon.valid_until
+                and coupon.valid_until <= utcnow()):
+            state = 'EXPIRED'
         if status and state != status:
             continue
         if risk_hold and (coupon.risk_hold if coupon else 'NONE') != risk_hold:
             continue
         masked = _mask_email(account.email) if account else '—'
-        name = campaign.name if campaign else ('退款补偿' if event.kind == 'REFUND_COMPENSATION' else '—')
+        if campaign:
+            name = campaign.name
+        elif (coupon and (coupon.data or {}).get('manualIssue')) or event.kind == 'MANUAL_ISSUE':
+            name = '人工发放'
+        elif event.kind == 'REFUND_COMPENSATION':
+            name = '退款补偿'
+        else:
+            name = '—'
         if q and q.lower() not in ' '.join(
-                [masked, name, event.business_key, event.id]).lower():
+                [masked, account.email if account else '', name,
+                 event.business_key, event.id, coupon.id if coupon else '']).lower():
             continue
         items.append({
             'id': event.id, 'accountId': event.account_id,
@@ -1590,6 +1783,69 @@ def promotion_records(
                      status=status, risk_hold=riskHold, q=q, type_=type,
                      start=from_date, end=end)
     return ok({'items': items, 'summary': _promotion_summary(db)})
+
+
+@router.get('/admin/promotions/coupons/recipient',
+            response_model=Envelope[ManualCouponRecipient])
+def manual_coupon_recipient(
+    email: str = Query(min_length=1, max_length=254),
+    db=Depends(get_db), actor: Actor = Depends(actor_dep),
+):
+    require_admin(actor, 'promotion.manage')
+    account = _manual_account(db, email)
+    eligible, why = _manual_eligibility(account, actor)
+    now = utcnow()
+    available = db.scalar(select(func.count()).select_from(Coupon).where(
+        Coupon.account_id == account.id,
+        Coupon.status == 'AVAILABLE',
+        Coupon.valid_until > now,
+    )) or 0
+    is_staff = db.scalar(select(Staff.id).where(
+        Staff.account_id == account.id)) is not None
+    return ok(ManualCouponRecipient(
+        account_id=account.id,
+        email_masked=_mask_email(account.email),
+        display_name=account.display_name,
+        status=account.status,
+        verified=bool(account.verified_at),
+        eligible=eligible,
+        ineligible_reason=why,
+        available_coupon_count=int(available),
+        is_staff=is_staff,
+        created_at=account.created_at,
+    ))
+
+
+@router.post('/admin/promotions/coupons/manual',
+             response_model=Envelope[ManualCouponIssueResult])
+def manual_coupon_issue(
+    payload: ManualCouponIssueInput,
+    idempotency_key: str = Header(..., alias='Idempotency-Key'),
+    db=Depends(get_db), actor: Actor = Depends(actor_dep),
+):
+    require_admin(actor, 'promotion.manage')
+    coupon, account, replayed, notified = _manual_issue(
+        db, actor,
+        email=payload.email,
+        amount_cents=payload.amount_cents,
+        min_spend_cents=payload.min_spend_cents,
+        service=payload.service,
+        valid_until=payload.valid_until,
+        name=payload.name,
+        reason=payload.reason,
+        notify=payload.notify,
+        idempotency_key=idempotency_key,
+    )
+    if account is None:
+        raise DomainError('ACCOUNT_NOT_FOUND', '未找到该邮箱对应的客户账号', 404)
+    return ok(ManualCouponIssueResult(
+        coupon=_coupon_view(coupon),
+        account_id=account.id,
+        account_masked=_mask_email(account.email),
+        display_name=account.display_name,
+        replayed=replayed,
+        notified=notified,
+    ))
 
 
 @router.post('/admin/promotions/coupons/{id}/freeze', response_model=Envelope[dict])

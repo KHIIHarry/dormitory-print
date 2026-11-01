@@ -36,6 +36,12 @@ DELIVERED_AT = '{{deliveredAt}}'
 ORDER_COUNT = '{{orderCount}}'
 DELETION_DEADLINE = '{{deletionDeadline}}'
 REWARD = '{{rewardText}}'
+COUPON_NAME = '{{couponName}}'
+COUPON_AMOUNT = '{{couponAmount}}'
+COUPON_MIN_SPEND = '{{couponMinSpend}}'
+COUPON_SERVICE = '{{couponService}}'
+COUPON_VALID_UNTIL = '{{couponValidUntil}}'
+COUPON_LINK = '{{couponLink}}'
 
 INK = '#2f2b26'
 BODY = '#57514a'
@@ -429,6 +435,24 @@ def _referral_reward() -> str:
                   '如不希望继续接收此类通知，可在「账号设置 · 通知偏好」中关闭。')
 
 
+def _manual_coupon_granted() -> str:
+    content = (
+        _paragraph(f'{BRAND} 为您发放了一张优惠券：{COUPON_NAME}。')
+        + _multi_facts([
+            ('面额', COUPON_AMOUNT),
+            ('使用门槛', COUPON_MIN_SPEND),
+            ('适用服务', COUPON_SERVICE),
+            ('有效期至', COUPON_VALID_UNTIL),
+        ])
+        + _button('查看我的优惠券', COUPON_LINK)
+        + _fallback(COUPON_LINK)
+        + _note('使用说明',
+                '优惠券仅限本人账号使用，适用服务、使用门槛与叠加规则以结算页为准。')
+    )
+    return _shell('优惠券到账', _eyebrow('专属优惠'), '优惠券已到账', content,
+                  '此邮件为优惠券到账通知，仅发送给优惠券持有人。')
+
+
 _TEMPLATE_BUILDERS = {
     'CUSTOMER_VERIFY_EMAIL': _verify_email,
     'CUSTOMER_RESET_PASSWORD': _reset_password,
@@ -441,6 +465,7 @@ _TEMPLATE_BUILDERS = {
     'ORDER_CREATED': _order_created,
     'ORDER_STATUS_UPDATED': _order_status,
     'REFERRAL_REWARD_GRANTED': _referral_reward,
+    'MANUAL_COUPON_GRANTED': _manual_coupon_granted,
 }
 
 

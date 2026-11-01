@@ -1593,6 +1593,40 @@ export interface paths {
         patch: operations["patch_campaign_api_v1_admin_promotions_campaigns__id__patch"];
         trace?: never;
     };
+    "/admin/promotions/coupons/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Manual Coupon Issue */
+        post: operations["manual_coupon_issue_api_v1_admin_promotions_coupons_manual_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/promotions/coupons/recipient": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Manual Coupon Recipient */
+        get: operations["manual_coupon_recipient_api_v1_admin_promotions_coupons_recipient_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/promotions/coupons/{id}/freeze": {
         parameters: {
             query?: never;
@@ -6006,6 +6040,18 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
+        /** Envelope[ManualCouponIssueResult] */
+        Envelope_ManualCouponIssueResult_: {
+            data: components["schemas"]["ManualCouponIssueResult"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[ManualCouponRecipient] */
+        Envelope_ManualCouponRecipient_: {
+            data: components["schemas"]["ManualCouponRecipient"];
+            /** Requestid */
+            requestId: string;
+        };
         /** Envelope[OrderAccessExchange] */
         Envelope_OrderAccessExchange_: {
             data: components["schemas"]["OrderAccessExchange"];
@@ -6978,6 +7024,83 @@ export interface components {
              * Format: date-time
              */
             time: string;
+        };
+        /** ManualCouponIssueInput */
+        ManualCouponIssueInput: {
+            /** Amountcents */
+            amountCents: number;
+            /** Email */
+            email: string;
+            /** Minspendcents */
+            minSpendCents: number;
+            /** Name */
+            name?: string | null;
+            /**
+             * Notify
+             * @default true
+             */
+            notify: boolean;
+            /** Reason */
+            reason: string;
+            /**
+             * Service
+             * @enum {string}
+             */
+            service: "A4" | "PHOTO" | "ALL";
+            /**
+             * Validuntil
+             * Format: date-time
+             */
+            validUntil: string;
+        };
+        /** ManualCouponIssueResult */
+        ManualCouponIssueResult: {
+            /** Accountid */
+            accountId: string;
+            /** Accountmasked */
+            accountMasked: string;
+            coupon: components["schemas"]["CouponDTO"];
+            /** Displayname */
+            displayName?: string | null;
+            /**
+             * Notified
+             * @default false
+             */
+            notified: boolean;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+        };
+        /** ManualCouponRecipient */
+        ManualCouponRecipient: {
+            /** Accountid */
+            accountId: string;
+            /** Availablecouponcount */
+            availableCouponCount: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Displayname */
+            displayName?: string | null;
+            /** Eligible */
+            eligible: boolean;
+            /** Emailmasked */
+            emailMasked: string;
+            /** Ineligiblereason */
+            ineligibleReason?: string | null;
+            /**
+             * Isstaff
+             * @default false
+             */
+            isStaff: boolean;
+            /** Status */
+            status: string;
+            /** Verified */
+            verified: boolean;
         };
         /** ManualEntryInput */
         ManualEntryInput: {
@@ -15588,6 +15711,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    manual_coupon_issue_api_v1_admin_promotions_coupons_manual_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualCouponIssueInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ManualCouponIssueResult_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    manual_coupon_recipient_api_v1_admin_promotions_coupons_recipient_get: {
+        parameters: {
+            query: {
+                email: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ManualCouponRecipient_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */

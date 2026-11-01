@@ -1,6 +1,12 @@
 import type { components } from "../lib/api-schema";
 export type PromotionIntent = components["schemas"]["PromotionIntent"];
 export type Coupon = components["schemas"]["Coupon"];
+export type ManualCouponRecipient =
+  components["schemas"]["ManualCouponRecipient"];
+export type ManualCouponIssueInput =
+  components["schemas"]["ManualCouponIssueInput"];
+export type ManualCouponIssueResult =
+  components["schemas"]["ManualCouponIssueResult"];
 export type VolumePolicy = components["schemas"]["VolumePolicy"];
 export type PriceLine = components["schemas"]["PriceLine"];
 export type VolumeCandidate = {
