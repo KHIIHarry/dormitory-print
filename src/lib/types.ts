@@ -76,6 +76,18 @@ export type Proof = {
   deliveredAt: string;
 };
 export type Order = {
+  unmatchedReceipts?: import("../v1/admin-api").ReceiptView[];
+  deliveryNotices?: {
+    id: string;
+    version: number;
+    changeId: string | null;
+    status: string;
+    attempts: number;
+    lastError?: string | null;
+    emailJobId?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }[];
   currentQuoteId?: string;
   quote?: Quote;
   checkoutAccountId?: string | null;
@@ -110,8 +122,23 @@ export type Order = {
   batchId?: string;
   proof?: Proof;
   deliveryAssignmentId?: string | null;
-  assignment?: { id: string; orderId: string; batchId: string; status: string; version: number; addressReview?: boolean } | null;
-  locationExceptionApproval?: { id: string; status: "APPROVED"; assignmentId: string; assignmentVersion: number; reason: string; failureCode?: string; approvedAt?: string } | null;
+  assignment?: {
+    id: string;
+    orderId: string;
+    batchId: string;
+    status: string;
+    version: number;
+    addressReview?: boolean;
+  } | null;
+  locationExceptionApproval?: {
+    id: string;
+    status: "APPROVED";
+    assignmentId: string;
+    assignmentVersion: number;
+    reason: string;
+    failureCode?: string;
+    approvedAt?: string;
+  } | null;
   history: { title: string; time: string; description: string }[];
   accessKind?: "OWNER" | "GUEST_OWNER" | "ORDER_GRANT" | "IMPORTED_GRANT";
   allowedActions: string[];

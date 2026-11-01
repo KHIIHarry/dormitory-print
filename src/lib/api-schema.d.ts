@@ -733,6 +733,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/delivery-notices/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Delivery Notice Route */
+        post: operations["retry_delivery_notice_route_api_v1_admin_delivery_notices__id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/delivery-repair/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Delivery Repair Preview */
+        get: operations["admin_delivery_repair_preview_api_v1_admin_delivery_repair_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/delivery-staff": {
         parameters: {
             query?: never;
@@ -3262,6 +3296,23 @@ export interface paths {
         put?: never;
         /** Agree Slot */
         post: operations["agree_slot_api_v1_orders__order_id__slot_agreement_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orders/{order_id}/slot-rejection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Slot */
+        post: operations["reject_slot_api_v1_orders__order_id__slot_rejection_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7186,6 +7237,10 @@ export interface components {
             customerNote: string;
             /** Deliveryassignmentid */
             deliveryAssignmentId?: string | null;
+            /** Deliverynotices */
+            deliveryNotices?: {
+                [key: string]: unknown;
+            }[];
             /** Files */
             files: components["schemas"]["FileView"][];
             /** History */
@@ -7245,6 +7300,8 @@ export interface components {
             supplementary?: components["schemas"]["SupplementarySummaryDTO"] | null;
             /** Totalcents */
             totalCents: number;
+            /** Unmatchedreceipts */
+            unmatchedReceipts?: components["schemas"]["ReceiptView"][];
             /** Version */
             version: number;
         };
@@ -8891,9 +8948,9 @@ export interface components {
         /** SlotSealCommit */
         SlotSealCommit: {
             /** Expectedversion */
-            expectedVersion?: number | null;
+            expectedVersion: number;
             /** Planid */
-            planId?: string | null;
+            planId: string;
             /** Reason */
             reason: string;
         };
@@ -12627,6 +12684,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    retry_delivery_notice_route_api_v1_admin_delivery_notices__id__retry_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_dict_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_delivery_repair_preview_api_v1_admin_delivery_repair_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_dict_"];
                 };
             };
             /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
@@ -20918,6 +21064,66 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SlotAgreement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reject_slot_api_v1_orders__order_id__slot_rejection_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionReason"];
             };
         };
         responses: {

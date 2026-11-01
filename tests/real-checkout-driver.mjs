@@ -73,6 +73,8 @@ try {
   await page.getByLabel('微信昵称 *', { exact: true }).fill('真实浏览器验收同学');
   await page.getByLabel('手机号码 *', { exact: true }).fill('13800138000');
   await page.getByLabel('订单备注（选填）', { exact: true }).fill('真实浏览器上传与结算验收');
+  const campus = process.env.DORMPRINT_BROWSER_CAMPUS || '默认校区';
+  await page.getByRole('button', { name: new RegExp(campus) }).first().click();
   await page.getByRole('button', { name: building, exact: true }).last().click();
   await page.getByRole('button', { name: new RegExp(slotName) }).first().click();
   await page.getByRole('checkbox', { name: /我确认本次应付/ }).check();

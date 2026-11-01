@@ -401,9 +401,17 @@ class SlotSealPreview(DTO):
 
 
 class SlotSealCommit(DTO):
-    expected_version: int | None = Field(default=None, ge=1)
-    plan_id: str | None = Field(default=None, max_length=64)
+    expected_version: int = Field(ge=1)
+    plan_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=300)
+
+    @field_validator('reason')
+    @classmethod
+    def _reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('请填写封批原因')
+        return value
 
 
 class MapHotspotInput(DTO):

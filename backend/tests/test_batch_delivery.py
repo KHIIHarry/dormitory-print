@@ -100,7 +100,7 @@ def _batch(db, api, admin_client, courier, orders, *, building_name='一号楼')
             order.location_id = location.id
         db.commit()
     # Use explicit instants so the window never straddles Shanghai midnight.
-    starts_at = utcnow() - timedelta(hours=1)
+    starts_at = utcnow().replace(hour=3, minute=0, second=0, microsecond=0)
     created = api(admin_client, '/admin/batches', {
         'name': f'批量凭证批次 {uuid4().hex[:6]}',
         'startsAt': starts_at.isoformat(),

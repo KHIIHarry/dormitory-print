@@ -104,71 +104,78 @@
 - 新 head：`b1f2c3d4e5a6`（`down_revision = 7d3c9a1e5b20`）。
 - 新增可空列，旧时段不会因迁移被强制补时间；旧批次仅回填 `slot_id`（来自 `data.slotId`），不建组、不改派、不发邮件。
 - 常规批次唯一索引只约束 `is_regular = true AND deleted_at IS NULL`，不会阻止显式拆分/补送。
-- 在一次性数据库 `dormprint_migration_check` 上验证：`alembic upgrade head` 成功；`alembic check` 输出 `No new upgrade operations detected`；`alembic downgrade -1` 与再次 `upgrade head` 成功；随后删除该库。
+- 在一次性数据库 `dormprint_accept_verify` 上验证：`alembic upgrade head` 成功；`alembic check` 输出 `No new upgrade operations detected`；`alembic downgrade -1` 与再次 `upgrade head` 成功；随后删除该库。
 - 生产部署未执行；真实库未改动。
 
 ## 5. 验证记录（实际命令与结果）
 
 | 命令 | 结果 |
 | --- | --- |
-| `git status --short` | 23 个已跟踪文件修改，5 个新增（计划文档、`delivery_plan.py`、迁移、闭环测试、本报告） |
-| `npm run contract:generate` | 退出码 0；`204 paths, 231 operations, 407 schemas`；17 个前端别名；`api-schema.d.ts` 重新生成 |
-| `npm test` | 58 个测试文件 / **330 passed**，4.43s |
-| `npm run build` | 成功，`✓ built in 2.26s` |
+| `git status --short` | 32 个已跟踪文件修改（含本报告），7 个新增（`delivery_repair.py` + 4 个后端测试 + 1 个前端测试 + 1 个 e2e） |
+| `npm run contract:generate` | 退出码 0；`207 paths, 234 operations, 407 schemas`；17 个前端别名；`api-schema.d.ts` 已更新 |
+| `npm test` | 59 个测试文件 / **341 passed** |
+| `npm run build` | 成功，`✓ built in 2.95s` |
 | `git diff --check` | 无输出（无空白错误） |
-| `cd backend && .venv/bin/pytest -q` | **662 passed, 2 skipped, 1 warning**，319.31s（跳过项为需显式开启的真实浏览器测试） |
+| `cd backend && .venv/bin/pytest -q` | **722 passed, 2 skipped, 1 warning**，354.44s（2 个 skip 均为需显式开启的真实浏览器测试） |
 | `cd backend && .venv/bin/alembic heads` | `b1f2c3d4e5a6 (head)` |
-| 迁移一次性库校验 | upgrade / check / downgrade / re-upgrade 全部成功 |
+| 迁移一次性库校验 | `upgrade head` / `alembic check` / `downgrade -1` / `upgrade head` 全部成功，库已删除 |
+| 真实浏览器链路（opt-in） | `DORMPRINT_RUN_BROWSER_TESTS=1 .venv/bin/pytest -q tests/test_real_checkout_browser.py -s` → **1 passed, 14.66s** |
 
-浏览器（已完成根因修复）：
+### 5.1 真实后端 + 浏览器配送链路
 
-| 项目 | 结果 |
-| --- | --- |
-| 根因 1 | `@playwright/test 1.64.1` 需要 chromium / chromium-headless-shell `1248`，本机缓存只有 `1228`；首次运行实际用了旧缓存，复跑才暴露 |
-| 根因 2 | 默认 `playwright.config.ts` 把需要 5175/5177 专用服务的 `motion.spec.ts` 一起跑，导致 motion 用例连错端口；motion 配置又继承了 `testIgnore`，单独跑反而 0 用例 |
-| 修复 | 用 `npm run test:e2e:install` 下载 1248 到工作区 `.playwright-browsers`（已加入 `.gitignore`）；`test:e2e` 固定 `PLAYWRIGHT_BROWSERS_PATH`；默认配置排除 motion，motion 配置显式 `testIgnore: []`；新增 `test:e2e:motion` 脚本 |
-| 定向验证 | `npm run test:e2e -- tests/e2e/frontend.spec.ts -g "homepage contains\|document order reaches"` = **4 passed**（desktop + mobile） |
-| motion 验证 | 桌面端 conditional modal 用例 **1 passed**；移动端同一用例断言失败（closing 状态计数 0），不是浏览器启动问题 |
-| `frontend.spec.ts` 全量 | **6 passed / 5 failed**；5 个失败均依赖已移除的管理员/配送员演示登录（`/manage/login` 已重定向到统一客户登录），不是浏览器启动失败 |
-| 全量 e2e | 仍未全绿：除上述登录入口外，还有 review-config 测试桩触发全局错误边界、移动端 motion closing 状态断言失败；这些是测试与产品现状不一致，不是浏览器版本抖动 |
-| 响应式截图 | 375 / 390 / 768 / 1280 订单列表与 390 订单详情，见下方链接 |
+`backend/tests/test_real_checkout_browser.py` 原本只验证真实 Chrome → Vite → uvicorn → PostgreSQL 的下单/上传；本轮扩展为：
 
-截图：
+1. 浏览器真实上传 PDF、提交订单到 `PENDING_CONFIRMATION`。
+2. 真实确认收款：自动创建「时段 + 校区」常规批次、唯一有效 assignment，并占用时段容量。
+3. 真实开印、装订、装袋到 `READY_FOR_DELIVERY`。
+4. 发起跨时段改期提案，客户在订单页接受，assignment 迁移到新批次。
+5. 封批目标时段、发布批次、开始配送、上传交付凭证并完成交付。
+6. 断言订单 `DELIVERED`；存在 `RESCHEDULE_PROPOSED` / `RESCHEDULE_CONFIRMED` 变更；存在 `PENDING` 的 `DeliveryNotice`。
 
-- [订单列表 375](../qa/delivery-orders-375.png)
-- [订单列表 390](../qa/delivery-orders-390.png)
-- [订单列表 768](../qa/delivery-orders-768.png)
-- [订单列表 1280](../qa/delivery-orders-1280.png)
-- [订单详情 390](../qa/delivery-order-detail-390.png)
+实测证据（一次运行）：
 
-Playwright 使用方式：
+- 订单 `0018963f-b419-4f77-8afc-e96a0adaf3ac`
+- 自动归批 `e13cfdfc-a324-449f-8db1-39b3edf7d23f`
+- 改期后批次 `85421989-aa31-49e5-917a-fcf9cc8dd4cf`
+- 通知 `cc618bb3-a1b0-4082-8f44-516958682564`，状态 `PENDING`
 
-```bash
-npm run test:e2e:install   # 首次或依赖升级后，安装匹配的 chromium 1248 到 .playwright-browsers（已安装时幂等跳过）
-npm run test:e2e           # 默认 UI 套件（自动排除 motion）
-npm run test:e2e:motion    # motion 专用套件（自行启动 5175/5177 服务）
-```
+边界说明：下单、上传和结算前 UI 由真实网络浏览器访问真实 Vite/uvicorn；结算、封批、发布、出发、交付由同进程 `TestClient` 调用同一个 FastAPI 应用和同一个 PostgreSQL。它不是 mock，但也不是第二段网络 HTTP，报告不把它描述为「全网络浏览器管理端链路」。
+
+### 5.2 浏览器/UI 自动化
+
+- 新增 `tests/e2e/delivery-ui-refresh.spec.ts`：桌面 + 移动 **4 passed**，覆盖连续改期版本复用、旧数据预览按需加载、通知重试原因必填、移动端无横向溢出。
+- 新增 `tests/delivery-ui-regressions.test.ts` 11 项，已计入前端 341 passed。
+- 默认 `VITE_DEMO_MODE=true` 下，部分管理端 mocked e2e 会走演示数据而不发网络请求，导致 `mail-draft`、`review-config`、`v1-customer`、`numeric-drafts` 等失败。
+- 以 `VITE_DEMO_MODE=false` 串行复跑 46 项：**32 passed / 14 failed**。失败均为测试预期与当前 UI/测试桩不一致：`mail-draft` 期待已不存在的「SMTP 配置 · 版本 N」徽标；`numeric-drafts` 仍用旧标签「开始时间/结束时间」，新 UI 为「预计配送开始/预计配送结束」；`v1-customer` 的 header-profile 已从链接改为账户菜单按钮；`review-config` 的模块桩仍按旧结算表单查找「微信昵称 *」。
+- `frontend.spec.ts` 仍依赖已移除的管理员/配送员演示登录入口，属于已知的产品与测试不一致。
+- 因此全量 e2e 仍未全绿，不能作为「浏览器全量通过」的验收证据；本轮新增的配送 UI e2e 与组件测试均通过。
 
 ## 6. 已实现但未直接验证
 
-以下代码路径已实现，但本轮没有独立自动化或真实环境证据，不能列为已验收：
+以下路径仍有实现，但缺少足以宣称验收的真实环境证据：
 
-- 结算保存点失败后 `AUTO_BATCH_FAILED` 保留 `UNMATCHED` 收款的管理端提示与人工处理界面。
-- 并发抢最后一个容量时「仅一人成功、失败方现金保留」的线程级测试（当前并发测试容量为 4，验证同组同批次）。
-- 封批与结算同时发生的串行化测试。
-- 旧数据「只读修复预览/显式 apply」管理流程（迁移只做安全回填）。
-- SMTP 真实投递；只验证了模板、入队、去重回写代码与单元测试。
-- 真实后端 + 浏览器的完整「下单 → 收款 → 自动归批 → 封批 → 发布 → 开始 → 送达 → 改期邮件」链路；后端链路由 pytest 覆盖，浏览器只验证了演示数据 UI。
+- **真实 SMTP 投递**：只验证本地测试 SMTP、模板、入队、去重与失败恢复；没有真实邮件服务商的送达证据。
+- **旧数据 repair 的显式 apply**：`test_delivery_repair.py` 只覆盖预览的歧义报告与不写入；管理端「预览 → 确认 apply」未在真实旧库副本上执行。
+- **`AUTO_BATCH_FAILED` 管理端现金处理界面**：后端恢复/重试路径有测试，管理端对 `UNMATCHED` 收款的人工处理流程没有浏览器级验收。
+- **管理端全网络链路**：真实链路中的管理操作使用同进程 TestClient，未再开一段浏览器→HTTP 管理端往返。
+- **全量 e2e**：如 5.2 所述，仍受演示模式与旧测试预期影响。
 
 ## 7. 已知限制与后续建议
 
-1. 管理端/配送员端本轮只做了代码与构建验证，未取得管理端截图：当前演示入口只保留客户端「体验演示账号」，没有可用的管理员演示登录（旧 e2e 中的「进入管理员演示」按钮已不存在）。
-2. Playwright 浏览器版本已统一到 1248，定向客户链路与桌面 motion 用例可复跑；但全量 e2e 仍因「管理员演示」入口移除、review-config 测试桩错误边界、移动端 motion 断言失败而未全绿，不能宣称浏览器全量通过。
-3. 前端没有为本轮新增面板补充组件测试，仍为既有 330 个测试。
-4. 旧时段（缺开放/截单）会显示 `CONFIG_MISSING`，但尚未提供批量修复入口；管理员需逐条编辑时段补齐规则。
-5. 封批只支持整时段 × 全部校区；按校区单独封批不在本轮范围。
-6. `backend/AGENTS.md` / `CONTRACT.md` 历史上把共享模型、迁移等文件划给 Codex；本轮用户计划明确要求交付完整闭环，因此修改了这些共享文件。最终合并前需由项目负责人复核归属与迁移顺序。
+1. 当前没有可用的管理员演示登录；旧 e2e 中的「进入管理员演示」「进入配送员演示」按钮已不存在，相关 `frontend.spec.ts` 用例仍是红的。
+2. 默认开发模式 `VITE_DEMO_MODE=true` 会让管理端 mocked e2e 绕过 `page.route`；需要明确 e2e 的运行模式（或在配置中固定 `VITE_DEMO_MODE=false`），并同步更新 `mail-draft`、`numeric-drafts` 的过期断言。
+3. 前端测试为 341 项，本轮只为新增面板补了 11 项回归测试，未做逐面板组件测试。
+4. 旧时段（缺开放/截单）显示 `CONFIG_MISSING`，管理员可逐条编辑补齐；尚无批量修复入口。
+5. 封批仍是整时段 × 全部校区；按校区单独封批不在本轮范围。
+6. `backend/AGENTS.md` / `CONTRACT.md` 历史上把共享模型、迁移等文件划给 Codex；本轮按用户计划修改了共享文件，合并前需负责人复核归属与迁移顺序。
+7. 真实浏览器链路依赖本机 Chrome、node_modules 和 PostgreSQL，默认跳过；报告中的证据来自本机一次性 schema，不可直接当作生产验证。
 
 ## 8. 结论
 
-后端业务主链路、迁移、契约、三端主要 UI 与自动化测试已落地，后端全量 662 通过、前端 330 通过、构建与契约生成成功。浏览器完整链路、真实 SMTP、最后容量/封批并发与旧数据修复流程仍未达到可宣称「全部验收」的程度，按第 6、7 节如实记录。
+本轮把配送闭环从「主链路实现」推进到「后端全量回归 0 失败 + 真实浏览器下单到交付/改期通知」：
+
+- 后端全量 **722 passed, 2 skipped, 0 failed**；新增的并发、最后容量、封批串行、通知恢复、真实链路测试均通过。
+- 前端 **341 passed**，契约生成、构建、迁移 upgrade/check/downgrade 均通过。
+- 真实后端 + 浏览器链路完成「下单 → 收款 → 自动归批 → 改期确认 → 封批 → 发布 → 出发 → 交付 → 通知」并留下可核对证据。
+
+仍不能宣称「全部验收」：真实 SMTP、旧数据 repair apply、`AUTO_BATCH_FAILED` 管理端现金处理、管理端全网络浏览器链路和全量 e2e 未闭环。上述缺口已在第 6、7 节如实列出。

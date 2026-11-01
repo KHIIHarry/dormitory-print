@@ -295,6 +295,8 @@ class OrderView(DTO):
     allowed_actions:list[str]
     blockers:list[Blocker]
     arrangement:dict|None=None
+    unmatched_receipts:list[ReceiptView]=Field(default_factory=list)
+    delivery_notices:list[dict]=Field(default_factory=list)
     supplementary:SupplementarySummaryDTO|None=None
 
 
@@ -416,11 +418,33 @@ def order_view(db,order,actor):
     extra_summary=supplementary_summary(db,order)
     from .delivery_plan import arrangement_for_order
     arrangement=arrangement_for_order(db,order)
+    unmatched=[]
+    if actor.staff_role=='ADMIN' and ({'*','payment.manage'} & actor.capabilities):
+        for receipt in db.scalars(select(Receipt).where(
+                Receipt.order_id==order.id, Receipt.status=='UNMATCHED')
+                .order_by(Receipt.created_at,Receipt.id)):
+            refunded=db.scalar(select(func.coalesce(func.sum(ReceiptAdjustment.amount_cents),0))
+                               .where(ReceiptAdjustment.receipt_id==receipt.id))
+            unmatched.append({'id':receipt.id,'orderId':order.id,'amountCents':receipt.amount_cents,
+                'refundedCents':refunded,'refundableCents':receipt.amount_cents-refunded,
+                'status':receipt.status,'version':receipt.version,'createdAt':receipt.created_at.isoformat()})
+    notices=[]
+    if actor.staff_role=='ADMIN' and ({'*','delivery.manage','mail.manage'} & actor.capabilities):
+        from .growth import delivery_notice_summary
+        notices=delivery_notice_summary(db,order.id)
+    proposal=data.get('slotProposal')
+    if proposal:
+        proposal=dict(proposal)
+        proposed_slot=db.get(DeliverySlot,proposal.get('slotId')) if proposal.get('slotId') else None
+        if proposed_slot:
+            from .delivery_plan import slot_snapshot
+            proposal['proposed']=slot_snapshot(proposed_slot)
     return {'id':order.id,'pickupCode':order.pickup_code,'version':order.version,'contentRevision':order.content_revision,
         'status':order.status,'nickname':order.nickname,'phone':order.phone,'locationId':order.location_id,
         'slotId':order.confirmed_slot_id or order.requested_slot_id,'requestedSlotId':order.requested_slot_id,
         'confirmedSlotId':order.confirmed_slot_id,'slotStatus':'CONFIRMED' if order.confirmed_slot_id else 'REQUESTED',
-        'slotProposal':data.get('slotProposal'),'arrangement':arrangement,
+        'slotProposal':proposal,'arrangement':arrangement,
+        'unmatchedReceipts':unmatched,'deliveryNotices':notices,
         'createdAt':order.created_at.isoformat(),'closeAt':order.close_at.isoformat(),
         'totalCents':order.total_cents,'refundedCents':order.refunded_cents,'currentQuoteId':order.quote_id,'quote':quote_view(quote),
         'checkoutAccountId':order.checkout_account_id,'checkoutAuthKind':data.get('checkoutAuthKind','REGISTERED' if order.checkout_account_id else 'ANONYMOUS'),
@@ -797,7 +821,8 @@ def propose_slot(order_id:str,body:SlotProposal,db=Depends(get_db),actor:Actor=D
     require_admin(actor,'payment.manage');order=lock(db,Order,order_id,body.expected_version)
     if order.status!='PENDING_CONFIRMATION':raise DomainError('INVALID_TRANSITION','仅待结算订单可确认申请时段',409)
     slot=lock(db,DeliverySlot,body.slot_id)
-    if not slot.enabled or slot.occupied>=slot.capacity or slot.ends_at<=utcnow():raise DomainError('SLOT_UNAVAILABLE','新时段不可用',409)
+    from .delivery_plan import ensure_slot_accepting
+    ensure_slot_accepting(db,slot)
     order.data={**order.data,'slotProposal':{'slotId':slot.id,'reason':body.reason,'confirmed':False}}
     touch(order);audit(db,actor,'SLOT_PROPOSED','ORDER',order.id,body.reason)
     return ok(order_view(db,order,actor))
@@ -809,7 +834,22 @@ def agree_slot(order_id:str,body:SlotAgreement,db=Depends(get_db),actor:Actor=De
     proposal=(order.data or {}).get('slotProposal')
     if order.status!='PENDING_CONFIRMATION' or not proposal or proposal['slotId']!=body.slot_id:
         raise DomainError('INVALID_TRANSITION','待确认时段已变化',409)
-    order.data={**order.data,'slotProposal':{**proposal,'confirmed':True,'confirmedAt':utcnow().isoformat()}}
+    from .delivery_plan import ensure_slot_accepting
+    ensure_slot_accepting(db,lock(db,DeliverySlot,body.slot_id))
+    order.data={**order.data,'slotProposal':{**proposal,'confirmed':True,'rejected':False,'confirmedAt':utcnow().isoformat()}}
+    touch(order)
+    return ok(order_view(db,order,actor))
+
+
+@router.post('/orders/{order_id}/slot-rejection',response_model=Envelope[OrderView])
+def reject_slot(order_id:str,body:VersionReason,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
+    order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
+    proposal=(order.data or {}).get('slotProposal')
+    if order.status!='PENDING_CONFIRMATION' or not proposal or proposal.get('rejected'):
+        raise DomainError('INVALID_TRANSITION','当前没有可拒绝的待确认时段',409)
+    order.data={**order.data,'slotProposal':{**proposal,'confirmed':False,'rejected':True,
+        'rejectionReason':body.reason,'rejectedAt':utcnow().isoformat()}}
+    add_history(order,'配送时段建议已拒绝','请联系管理员重新协调可用时段')
     touch(order)
     return ok(order_view(db,order,actor))
 
@@ -832,6 +872,11 @@ def settle_order(db,actor,order,body):
         refunded=db.scalar(select(func.coalesce(func.sum(ReceiptAdjustment.amount_cents),0)).where(ReceiptAdjustment.receipt_id==receipt.id))
         if receipt.amount_cents-refunded!=body.received_cents:raise DomainError('RECEIPT_AMOUNT_MISMATCH','待核对收款净额与本次分配金额不一致',409)
     elif body.received_cents>0:
+        existing_receipts=list(db.scalars(select(Receipt.id).where(
+            Receipt.order_id==order.id,Receipt.status=='UNMATCHED')))
+        if existing_receipts:
+            raise DomainError('RECEIPT_REVIEW_REQUIRED','已有待核对实收，请选择原收款记录完成核对，勿重复记款',409,
+                              {'receiptIds':existing_receipts})
         receipt=_receipt(db,order,actor,body.received_cents,body.note)
     if order.status!='PENDING_CONFIRMATION' or order.close_at<=utcnow() or order.settlement_kind:
         if receipt and not order.settlement_kind:
@@ -842,7 +887,35 @@ def settle_order(db,actor,order,body):
         if receipt:
             db.add(BusinessException(order_id=order.id,type='PAYMENT_MISMATCH',reason='实收与订单应付不一致，待人工核对',blocks_production=True))
         raise DomainError('PAYMENT_AMOUNT_MISMATCH','实收金额必须与当前订单应付一致，已登记待核对实收',409,{'receiptId':receipt.id if receipt else None},commit=bool(receipt))
+    # The receipt is already flushed outside this savepoint. Every fulfilment
+    # change rolls back together while an actually received payment survives.
+    try:
+        with db.begin_nested():
+            return _complete_settlement(db,actor,order,body,receipt)
+    except DomainError as error:
+        if receipt:
+            error.commit=True
+            error.details={**(error.details or {}),'receiptId':receipt.id}
+            receipt.data={**(receipt.data or {}),'reviewRequired':True,'reasonCode':error.code}
+            touch(receipt)
+            if error.code=='AUTO_BATCH_FAILED':
+                existing=db.scalar(select(BusinessException.id).where(
+                    BusinessException.order_id==order.id,BusinessException.type=='AUTO_BATCH_FAILED',
+                    BusinessException.status.in_(('OPEN','IN_PROGRESS'))).limit(1))
+                if not existing:
+                    db.add(BusinessException(order_id=order.id,type='AUTO_BATCH_FAILED',
+                        reason='已登记实收但自动归集失败，待核对后重试',blocks_delivery=True))
+        raise
+    except Exception as error:
+        raise DomainError('SETTLEMENT_FAILED','结算未完成，请核对原收款记录后重试',409,
+            {'receiptId':receipt.id if receipt else None},commit=bool(receipt)) from error
+
+
+def _complete_settlement(db,actor,order,body,receipt):
     proposal=(order.data or {}).get('slotProposal')
+    if proposal and not proposal.get('confirmed'):
+        raise DomainError('SLOT_AGREEMENT_REQUIRED','新时段尚未获客户同意，请先协调并确认',409,
+                          {'receiptId':receipt.id if receipt else None},commit=bool(receipt))
     slot_id=proposal['slotId'] if proposal and proposal.get('confirmed') else order.requested_slot_id
     slot=lock(db,DeliverySlot,slot_id)
     now=utcnow()
@@ -858,8 +931,8 @@ def settle_order(db,actor,order,body):
             code,message=SLOT_ERRORS[state['status']]
             raise DomainError(code,message,409,
                 {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
-    elif not slot.enabled or slot.ends_at<=now or slot.occupied>=slot.capacity:
-        raise DomainError('SLOT_CAPACITY_REVIEW_REQUIRED','申请时段已满或关闭，请先协调新时段并由客户确认',409,
+    else:
+        raise DomainError('SLOT_CONFIG_MISSING','原时段缺少接单规则，请先补齐配置或协调新时段',409,
             {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
     if order.refund_locked:raise DomainError('REFUND_REVIEW_PENDING','退款审核中，不能结算',409)
     auto_batch=None
@@ -892,18 +965,33 @@ def settle_order(db,actor,order,body):
              'confirmedAt':utcnow().isoformat(),'confirmedBy':actor.staff_id,
              'batchId':auto_batch.id if auto_batch else None,
              'batchName':auto_batch.name if auto_batch else None}
-    order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':plan_slot_snapshot(slot,public=False)}
+    order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':plan_slot_snapshot(slot,public=False),
+                'settlementSlotSnapshot':plan_slot_snapshot(slot,public=False)}
     order.arrangement_version=max(1,int(order.arrangement_version or 0))
     order.arrangement_updated_at=utcnow()
     db.add(Payment(order_id=order.id,receipt_id=receipt.id if receipt else None,amount_cents=body.received_cents,kind=body.settlement_kind,staff_id=actor.staff_id,data={'quoteId':quote.id,'discountCents':quote.discount_cents}))
     # Matching the cash does not bypass an unrelated blocker.
     for mismatch in db.scalars(select(BusinessException).where(BusinessException.order_id==order.id,BusinessException.type=='PAYMENT_MISMATCH',BusinessException.status=='OPEN')):
         mismatch.status='RESOLVED';touch(mismatch)
+    for failure in db.scalars(select(BusinessException).where(
+            BusinessException.order_id==order.id,BusinessException.type=='AUTO_BATCH_FAILED',
+            BusinessException.status.in_(('OPEN','IN_PROGRESS')))):
+        failure.status='RESOLVED';touch(failure)
     batch_note=f'已归入配送批次「{auto_batch.name}」' if auto_batch else '开始安排生产，配送时段已确认'
     add_history(order,'零元结算已人工确认' if body.settlement_kind=='ZERO_PAYABLE' else '线下收款已人工确认',batch_note)
     touch(order)
     from .production import refresh_production
     db.flush();refresh_production(db,order)
+    if auto_batch and (auto_batch.starts_at != slot.starts_at or auto_batch.ends_at != slot.ends_at):
+        from .delivery_plan import record_change
+        from .growth import notify_delivery_change
+        original=plan_slot_snapshot(slot)
+        revised={**original,'startsAt':auto_batch.starts_at.isoformat(),
+                 'endsAt':auto_batch.ends_at.isoformat()}
+        change=record_change(db,order,kind='ETA_UPDATED',original=original,proposed=revised,
+            reason=(auto_batch.reason or '配送时间调整')[:300],actor_id=actor.id,
+            batch_id=auto_batch.id,slot_id=slot.id)
+        notify_delivery_change(db,order,change)
     audit(db,actor,'PAYMENT_CONFIRMED','ORDER',order.id)
     from .growth import notify_payment_success
     notify_payment_success(db,order)

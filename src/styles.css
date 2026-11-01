@@ -8331,7 +8331,8 @@ button.session-action svg { stroke-width: 1.7; }
 
 /* Native date/time inputs have intrinsic widths in iOS WebKit. */
 .field input[type="date"],
-.field input[type="time"] {
+.field input[type="time"],
+.field input[type="datetime-local"] {
   display: block;
   min-width: 0;
   max-width: 100%;
@@ -8342,6 +8343,13 @@ button.session-action svg { stroke-width: 1.7; }
 .slot-editor-form .form-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 14px;
+}
+/* Full dates and times need the entire dialog width, including on desktop. */
+.slot-editor-form .slot-booking-window {
+  grid-template-columns: minmax(0, 1fr);
+}
+.slot-editor-form > .checkbox-label {
+  margin-bottom: 12px;
 }
 @media (max-width: 767px) {
   .slot-editor-form > .btn { width: 100%; }

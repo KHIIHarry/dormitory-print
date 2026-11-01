@@ -49,6 +49,7 @@ import {
   demoPriceLines,
   quoteIsCurrent,
   sameArtifactAcks,
+  slotCurrentlySelectable,
 } from "./checkout";
 import "./checkout.css";
 const contactSchema = z.object({
@@ -103,6 +104,7 @@ function ReviewContent() {
     checkoutMemory,
     setCheckoutMemory,
     setSavedAccessLinks,
+    refresh,
   } = useStore();
   const configReady = DEMO || !!resources.config?.hasData;
   const configReadyRef = useRef(configReady);
@@ -185,6 +187,37 @@ function ReviewContent() {
     [clock, setClock] = useState(Date.now());
 
   useEffect(() => {
+    if (!slot || (!DEMO && !resources.slots?.hasData)) return;
+    const selected = data.slots.find((item) => item.id === slot);
+    const revoke = () => {
+      if (selected && slotCurrentlySelectable(selected)) return;
+      setSlot("");
+      setFields((current) => ({
+        ...current,
+        slot: "原预约时段已截单、封批或关闭，请重新选择；其他填写已保留。",
+      }));
+    };
+    revoke();
+    const remaining = selected?.cutoffAt
+      ? Date.parse(selected.cutoffAt) - Date.now()
+      : NaN;
+    const timer =
+      Number.isFinite(remaining) && remaining > 0
+        ? setTimeout(revoke, Math.min(remaining + 1, 2147483647))
+        : undefined;
+    const visible = () => {
+      if (document.visibilityState === "visible") revoke();
+    };
+    document.addEventListener("visibilitychange", visible);
+    window.addEventListener("focus", visible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("focus", visible);
+    };
+  }, [slot, data.slots, resources.slots?.hasData]);
+
+  useEffect(() => {
     if (!data.campuses.length) return;
     const known = data.campuses.find((item) => item.id === campus);
     if (campus && (!known || !known.selectionEnabled)) {
@@ -207,7 +240,8 @@ function ReviewContent() {
     setSearch("");
     setFields((current) => ({ ...current, campus: "" }));
     const currentBuilding = data.buildings.find((item) => item.id === building);
-    if (currentBuilding && currentBuilding.campusId !== next.id) setBuilding("");
+    if (currentBuilding && currentBuilding.campusId !== next.id)
+      setBuilding("");
   };
 
   const selectBuilding = (next: string) => {
@@ -503,7 +537,6 @@ function ReviewContent() {
       acceptQuote(next);
       setContentGeneration(generation);
       setContentReadiness(configEpoch);
-
     } catch (e) {
       if (
         current() &&
@@ -714,7 +747,7 @@ function ReviewContent() {
       setFields({ campus: message });
       requestAnimationFrame(() => {
         const target = document.querySelector<HTMLElement>(
-          "[data-checkout-field=\"campus\"]",
+          '[data-checkout-field="campus"]',
         );
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         target?.focus({ preventScroll: true });
@@ -729,11 +762,18 @@ function ReviewContent() {
       customerNote,
     });
     if (!result.success) {
-      const nextFields = Object.fromEntries(result.error.issues.map((i) => [i.path[0], i.message]));
+      const nextFields = Object.fromEntries(
+        result.error.issues.map((i) => [i.path[0], i.message]),
+      );
       setFields(nextFields);
       const first = result.error.issues[0]?.path[0];
       requestAnimationFrame(() => {
-        const target = typeof first === "string" ? document.querySelector<HTMLElement>(`[data-checkout-field="${first}"]`) : null;
+        const target =
+          typeof first === "string"
+            ? document.querySelector<HTMLElement>(
+                `[data-checkout-field="${first}"]`,
+              )
+            : null;
         target?.scrollIntoView({ behavior: "smooth", block: "center" });
         target?.focus({ preventScroll: true });
       });
@@ -758,7 +798,7 @@ function ReviewContent() {
       toast("当前已暂停接单，请稍后重试");
       return;
     }
-    if (!data.slots.some((s) => s.id === slot && s.enabled && s.selectable !== false)) {
+    if (!data.slots.some((s) => s.id === slot && slotCurrentlySelectable(s))) {
       toast("原预约时段已截单、封批或关闭，请重新选择可预约时段");
       return;
     }
@@ -931,6 +971,17 @@ function ReviewContent() {
         setSubmissionIssue(
           "提交结果待核实，请先在订单列表核对是否已生成订单，避免重复下单。",
         );
+      } else if ((e as { code?: string }).code?.startsWith("SLOT_")) {
+        setSlot("");
+        setFields((current) => ({ ...current, slot: (e as Error).message }));
+        void refresh();
+        requestAnimationFrame(() => {
+          const target = document.querySelector<HTMLElement>(
+            '[data-checkout-field="slot"]',
+          );
+          target?.scrollIntoView({ behavior: "smooth", block: "center" });
+          target?.focus({ preventScroll: true });
+        });
       } else {
         toast((e as Error).message);
         setConfirmedQuote("");
@@ -1050,10 +1101,7 @@ function ReviewContent() {
                           }
                           onClick={() => {
                             adoptForAccount.current = null;
-                            void refreshQuote(
-                              { selectionMode: "AUTO" },
-                              true,
-                            );
+                            void refreshQuote({ selectionMode: "AUTO" }, true);
                           }}
                         >
                           重新关联账号并报价
@@ -1305,59 +1353,69 @@ function ReviewContent() {
                   key={activeCampus?.id || "legacy"}
                   className={hasCampusChoices ? "campus-map-content" : ""}
                 >
-                <div
-                  data-checkout-field="building"
-                  tabIndex={-1}
-                  className="map-search"
-                >
-                  <Search size={17} />
-                  <input
-                    placeholder="搜索宿舍楼或教学楼"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                  <div
+                    data-checkout-field="building"
+                    tabIndex={-1}
+                    className="map-search"
+                  >
+                    <Search size={17} />
+                    <input
+                      placeholder="搜索宿舍楼或教学楼"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </div>
+                  <CampusMap
+                    buildings={campusBuildings}
+                    value={building}
+                    onChange={selectBuilding}
+                    mapUrl={mapUrl}
                   />
-                </div>
-                <CampusMap
-                  buildings={campusBuildings}
-                  value={building}
-                  onChange={selectBuilding}
-                  mapUrl={mapUrl}
-                />
-                <div className="building-choices">
-                  {visibleBuildings.map((b) => (
-                    <button
-                      key={b.id}
-                      className={b.id === building ? "selected" : ""}
-                      onClick={() => selectBuilding(b.id)}
-                    >
-                      <MapPin size={15} />
-                      {b.name}
-                      {building === b.id && <Check size={14} />}
-                    </button>
-                  ))}
-                </div>
-                {activeCampus && !campusBuildings.some((item) => item.enabled) && (
-                  <Notice>该校区暂未配置可选点位，请切换其他校区或联系管理员。</Notice>
-                )}
-                {fields.building && (
-                  <p className="field-error">{fields.building}</p>
-                )}
-                <p className="form-hint">
-                  送达楼栋公共区域，不需要填写楼层与门牌号。
-                </p>
+                  <div className="building-choices">
+                    {visibleBuildings.map((b) => (
+                      <button
+                        key={b.id}
+                        className={b.id === building ? "selected" : ""}
+                        onClick={() => selectBuilding(b.id)}
+                      >
+                        <MapPin size={15} />
+                        {b.name}
+                        {building === b.id && <Check size={14} />}
+                      </button>
+                    ))}
+                  </div>
+                  {activeCampus &&
+                    !campusBuildings.some((item) => item.enabled) && (
+                      <Notice>
+                        该校区暂未配置可选点位，请切换其他校区或联系管理员。
+                      </Notice>
+                    )}
+                  {fields.building && (
+                    <p className="field-error">{fields.building}</p>
+                  )}
+                  <p className="form-hint">
+                    送达楼栋公共区域，不需要填写楼层与门牌号。
+                  </p>
                 </div>
               )}
             </MotionFold>
           </Panel>
           <Panel title="选择预约配送时段">
-            <div data-checkout-field="slot" tabIndex={-1} className="slot-choices">
+            <div
+              data-checkout-field="slot"
+              tabIndex={-1}
+              className="slot-choices"
+            >
               {data.slots
-                .filter((s) => s.enabled && s.selectable !== false)
+                .filter((s) => slotCurrentlySelectable(s, clock))
                 .map((s) => (
                   <button
                     className={slot === s.id ? "selected" : ""}
                     key={s.id}
-                    onClick={() => setSlot(s.id)}
+                    onClick={() => {
+                      setSlot(s.id);
+                      setFields((current) => ({ ...current, slot: "" }));
+                    }}
                   >
                     <span>
                       {s.date.slice(5).replace("-", "月")}日 · {s.weekday}
@@ -1383,7 +1441,7 @@ function ReviewContent() {
                   </button>
                 ))}
             </div>
-            {!data.slots.some((s) => s.enabled && s.selectable !== false) && (
+            {!data.slots.some((s) => slotCurrentlySelectable(s, clock)) && (
               <Notice>
                 当前暂无可预约配送时段，可保留当前工作进度与已上传文件，
                 待管理员开放或调整时段后再下单。
@@ -1395,11 +1453,14 @@ function ReviewContent() {
             </p>
             {(() => {
               const minutes = (
-                data.config as unknown as { unpaidTimeoutMinutes?: number | null }
+                data.config as unknown as {
+                  unpaidTimeoutMinutes?: number | null;
+                }
               ).unpaidTimeoutMinutes;
               return typeof minutes === "number" && minutes > 0 ? (
                 <p className="v1-deadline">
-                  提交后若 {minutes} 分钟内未人工确认收款，订单将按配置期限自动关闭并释放临时资源；以服务端关闭结果为准。
+                  提交后若 {minutes}{" "}
+                  分钟内未人工确认收款，订单将按配置期限自动关闭并释放临时资源；以服务端关闭结果为准。
                 </p>
               ) : (
                 <p className="v1-deadline">
@@ -1471,9 +1532,8 @@ function ReviewContent() {
                     hour12: false,
                   })}
                   （后台配置{" "}
-                  {(
-                    data.config as unknown as { quoteMinutes?: number }
-                  ).quoteMinutes ?? 15}{" "}
+                  {(data.config as unknown as { quoteMinutes?: number })
+                    .quoteMinutes ?? 15}{" "}
                   分钟）。过期或价格版本变化时必须重新获取并确认；已提交订单的报价锁价。
                 </p>
                 {expired && (
@@ -1544,7 +1604,7 @@ function ReviewContent() {
                 confirmedQuote !== quote.id ||
                 !allArtifactsAcknowledged(artifacts, acks) ||
                 !artifacts.length ||
-                !data.slots.some((s) => s.enabled)
+                !data.slots.some((s) => slotCurrentlySelectable(s, clock))
               }
             >
               确认并提交订单

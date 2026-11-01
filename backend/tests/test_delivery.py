@@ -274,7 +274,7 @@ def act_as(app):
 
 
 def make_ready_order(db, *, status='READY_FOR_DELIVERY', total=1200, paid=True,
-                     packed=True):
+                     packed=True, delivery_starts_at=None):
     from tests.auth_helpers import make_order
 
     principal = Principal()
@@ -307,6 +307,20 @@ def make_ready_order(db, *, status='READY_FOR_DELIVERY', total=1200, paid=True,
     if paid:
         order.settlement_kind = 'CASH_MANUAL' if total else 'ZERO_PAYABLE'
         order.cash_received_cents = total
+        order.confirmed_slot_id = order.requested_slot_id
+    # Use a stable Shanghai daytime window rather than depending on whether
+    # now+2h and now-1h happen to straddle midnight. These fixtures represent
+    # already confirmed, explicitly sealed deliveries.
+    starts = delivery_starts_at or utcnow().replace(hour=3, minute=0, second=0, microsecond=0)
+    slot = db.get(DeliverySlot, order.requested_slot_id)
+    slot.date = to_shanghai_date(starts)
+    slot.starts_at, slot.ends_at = starts, starts + timedelta(hours=3)
+    slot.open_at = starts - timedelta(days=2)
+    slot.cutoff_at = starts - timedelta(hours=1)
+    slot.sealed_at = utcnow()
+    order.data = {**(order.data or {}), 'confirmedSlotSnapshot': {
+        'id': slot.id, 'date': slot.date, 'startsAt': slot.starts_at.isoformat(),
+        'endsAt': slot.ends_at.isoformat()}}
     order.packing_status = 'PACKED' if packed else 'READY'
     order.status = status
     db.commit()
@@ -319,8 +333,8 @@ def make_courier(staff_factory, name='配送员'):
                          username=f'courier-{uuid4().hex[:10]}')
 
 
-def create_batch(api, client, courier, *, offset_hours=-1, duration=3):
-    starts_at = utcnow() + timedelta(hours=offset_hours)
+def create_batch(api, client, courier, *, offset_hours=0, duration=3):
+    starts_at = utcnow().replace(hour=3, minute=0, second=0, microsecond=0) + timedelta(hours=offset_hours)
     ends_at = starts_at + timedelta(hours=duration)
     response = api(client, '/admin/batches', {
         'name': f'测试批次 {uuid4().hex[:6]}',
@@ -358,6 +372,13 @@ def create_slot(api, client, *, offset_hours=48, capacity=4, name='测试时段'
         'capacity': capacity, 'enabled': True, 'reason': '测试时段'})
     assert response.status_code == 200, response.text
     return response.json()['data']
+
+
+def use_confirmed_test_slot(order, slot):
+    order.requested_slot_id = order.confirmed_slot_id = slot['id']
+    order.data = {**(order.data or {}), 'confirmedSlotSnapshot': {
+        'id': slot['id'], 'date': slot['date'], 'startsAt': slot['startsAt'],
+        'endsAt': slot['endsAt']}}
 
 
 def add_orders(api, client, batch, order_ids, action='ADD', target_batch_id=None):
@@ -431,7 +452,15 @@ def test_batch_start_is_all_or_nothing_and_sets_assignment_started(db, api, clie
     good = make_ready_order(db)
     unpaid = make_ready_order(db, paid=False)
     batch = create_batch(api, client, courier)
-    add_orders(api, client, batch, [good.id, unpaid.id])
+    rejected = api(client, '/admin/batch-operations/preview', {
+        'action': 'ADD', 'orderIds': [unpaid.id], 'sourceBatchIds': [batch['id']],
+        'versions': {batch['id']: batch['version']}, 'payload': {'reason': '测试未付款'}})
+    assert 'PAYMENT_REQUIRED' in {item['code'] for item in rejected.json()['data']['blockers']}
+    add_orders(api, client, batch, [good.id])
+    # Pre-existing invalid data still must be stopped by the start guard.
+    db.add(DeliveryAssignment(order_id=unpaid.id, batch_id=batch['id'],
+                              courier_id=courier.id, status='PLANNED', active=True, data={}))
+    db.commit()
     published = publish_batch(api, client, batch['id'])
 
     blocked = start_batch(api, client, batch['id'], published['version'])
@@ -542,8 +571,9 @@ def test_reassignment_revokes_old_courier_access_and_location_exception_binds_ve
     act_as(courier)
     assert api(client, f'/courier/orders/{order.id}', None, method='GET').status_code == 200
     act_as(staff_factory(role='ADMIN'))
+    current_batch = api(client, f"/admin/batches/{batch['id']}", None, method='GET').json()['data']
     reassigned = api(client, f"/admin/batches/{batch['id']}", {
-        'expectedVersion': 1, 'courierId': replacement.id, 'reason': '改派测试'},
+        'expectedVersion': current_batch['version'], 'courierId': replacement.id, 'reason': '改派测试'},
         method='PATCH')
     assert reassigned.status_code == 200, reassigned.text
     db.expire_all()
@@ -657,16 +687,19 @@ def test_transfer_split_merge_reschedule_cancel_and_soft_delete(db, api, client,
     assert active.batch_id == batch_b.id
     assert active.courier_id == courier.id
 
-    # Remove releases the execution without touching the order facts.
-    remove = add_orders(api, client, db.get(DeliveryBatch, batch_b.id), [first.id],
-                        action='REMOVE')
+    # Paid orders need an explicit destination rather than silent release.
+    remove = api(client, '/admin/batch-operations/preview', {
+        'action': 'REMOVE', 'orderIds': [first.id], 'sourceBatchIds': [batch_b.id],
+        'versions': {batch_b.id: db.get(DeliveryBatch, batch_b.id).version},
+        'payload': {'reason': '移出'}})
+    assert 'DESTINATION_REQUIRED' in {item['code'] for item in remove.json()['data']['blockers']}
+    add_orders(api, client, db.get(DeliveryBatch, batch_b.id), [first.id],
+               action='TRANSFER', target_batch_id=batch_a_id)
     db.expire_all()
     assert db.scalar(select(DeliveryAssignment).where(
         DeliveryAssignment.order_id == first.id,
-        DeliveryAssignment.active.is_(True))) is None
+        DeliveryAssignment.active.is_(True))).batch_id == batch_a_id
     assert db.get(Order, first.id).status == 'READY_FOR_DELIVERY'
-    # Add it back to the original batch.
-    add_orders(api, client, db.get(DeliveryBatch, batch_a_id), [first.id])
 
     # Split moves one order to a new batch atomically.
     split = api(client, '/admin/batch-operations/preview', {
@@ -705,8 +738,8 @@ def test_transfer_split_merge_reschedule_cancel_and_soft_delete(db, api, client,
         'action': 'RESCHEDULE', 'orderIds': [], 'sourceBatchIds': [batch_b.id],
         'versions': {batch_b.id: current_b['version']},
         'payload': {'reason': '天气原因',
-                    'startsAt': (utcnow() + timedelta(hours=5)).isoformat(),
-                    'endsAt': (utcnow() + timedelta(hours=6)).isoformat()}})
+                    'startsAt': (db.get(DeliveryBatch, batch_b.id).starts_at + timedelta(hours=1)).isoformat(),
+                    'endsAt': (db.get(DeliveryBatch, batch_b.id).ends_at + timedelta(hours=1)).isoformat()}})
     assert reschedule.status_code == 200, reschedule.text
     assert reschedule.json()['data']['blockers'] == []
     api(client, '/admin/batch-operations/commit',
@@ -714,12 +747,20 @@ def test_transfer_split_merge_reschedule_cancel_and_soft_delete(db, api, client,
     db.expire_all()
     assert db.get(DeliveryBatch, batch_b.id).status == 'PLANNED'
 
-    # Cancel releases the active assignment without deleting the order.
+    # Cancel is blocked until the paid member has an explicit destination.
     cancel = api(client, '/admin/batch-operations/preview', {
         'action': 'CANCEL', 'orderIds': [], 'sourceBatchIds': [batch_b.id],
         'versions': {batch_b.id: db.get(DeliveryBatch, batch_b.id).version},
         'payload': {'reason': '当天取消'}})
     assert cancel.status_code == 200, cancel.text
+    assert 'DESTINATION_REQUIRED' in {item['code'] for item in cancel.json()['data']['blockers']}
+    add_orders(api, client, db.get(DeliveryBatch, batch_b.id), [second.id],
+               action='TRANSFER', target_batch_id=batch_a_id)
+    db.expire_all()
+    cancel = api(client, '/admin/batch-operations/preview', {
+        'action': 'CANCEL', 'sourceBatchIds': [batch_b.id],
+        'versions': {batch_b.id: db.get(DeliveryBatch, batch_b.id).version},
+        'payload': {'reason': '空批次取消'}})
     assert cancel.json()['data']['blockers'] == []
     api(client, '/admin/batch-operations/commit',
         {'planId': cancel.json()['data']['planId']})
@@ -727,12 +768,16 @@ def test_transfer_split_merge_reschedule_cancel_and_soft_delete(db, api, client,
     assert db.get(DeliveryBatch, batch_b.id).status == 'CANCELLED'
     assert db.scalar(select(DeliveryAssignment).where(
         DeliveryAssignment.order_id == second.id,
-        DeliveryAssignment.active.is_(True))) is None
+        DeliveryAssignment.active.is_(True))).batch_id == batch_a_id
     assert db.scalar(select(DeliveryAssignment).where(
         DeliveryAssignment.order_id == first.id,
         DeliveryAssignment.active.is_(True))) is not None
 
     # Delete is a soft delete: batch facts and payment stay in the database.
+    destination = create_batch(api, client, courier)
+    add_orders(api, client, db.get(DeliveryBatch, batch_a_id), [first.id, second.id],
+               action='TRANSFER', target_batch_id=destination['id'])
+    db.expire_all()
     deleted = api(client, f"/admin/batches/{batch_a_id}", {
         'expectedVersion': db.get(DeliveryBatch, batch_a_id).version,
         'reason': '建错了'}, method='DELETE')
@@ -828,9 +873,9 @@ def test_start_before_estimated_window_is_allowed_but_other_guards_remain(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
-    order = make_ready_order(db)
     starts_at = (utcnow() + timedelta(days=1)).replace(
         hour=2, minute=0, second=0, microsecond=0)
+    order = make_ready_order(db, delivery_starts_at=starts_at)
     batch = create_batch_fixed(api, client, courier, starts_at)
     add_orders(api, client, batch, [order.id])
     published = publish_batch(api, client, batch['id'])
@@ -849,9 +894,9 @@ def test_publish_and_start_after_estimated_window_are_allowed(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
-    order = make_ready_order(db)
     starts_at = (utcnow() - timedelta(days=2)).replace(
         hour=2, minute=0, second=0, microsecond=0)
+    order = make_ready_order(db, delivery_starts_at=starts_at)
     batch = create_batch_fixed(api, client, courier, starts_at)
     add_orders(api, client, batch, [order.id])
     published = publish_batch(api, client, batch['id'])
@@ -866,11 +911,12 @@ def test_postponed_batch_can_be_republished_and_started_outside_window(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
-    order = make_ready_order(db)
     starts_at = (utcnow() - timedelta(days=2)).replace(
         hour=2, minute=0, second=0, microsecond=0)
+    order = make_ready_order(db, delivery_starts_at=starts_at)
     batch = create_batch_fixed(api, client, courier, starts_at)
     add_orders(api, client, batch, [order.id])
+    batch = api(client, f"/admin/batches/{batch['id']}", None, method='GET').json()['data']
 
     # A same-day ETA update keeps the batch planned; republish remains valid
     # even though both estimated windows are already in the past.
@@ -985,13 +1031,13 @@ def test_slot_backed_batch_rejects_orders_from_another_slot(
     batch = api(client, '/admin/batches', {
         'name': 'A 批次', 'slotId': slot['id'], 'courierId': courier.id}).json()['data']
     first = make_ready_order(db)
-    first.requested_slot_id = slot['id']
+    use_confirmed_test_slot(first, slot)
     db.commit()
     add_orders(api, client, batch, [first.id])
 
     other = create_slot(api, client, name='B 时段')
     second = make_ready_order(db)
-    second.requested_slot_id = other['id']
+    use_confirmed_test_slot(second, other)
     db.commit()
     preview = api(client, '/admin/batch-operations/preview', {
         'action': 'ADD', 'orderIds': [second.id], 'sourceBatchIds': [batch['id']],
@@ -1014,7 +1060,7 @@ def test_start_rechecks_order_slot_against_batch_after_assignment(
     batch = api(client, '/admin/batches', {
         'name': '时段批次', 'slotId': slot['id'], 'courierId': courier.id}).json()['data']
     order = make_ready_order(db)
-    order.requested_slot_id = slot['id']
+    use_confirmed_test_slot(order, slot)
     db.commit()
     add_orders(api, client, batch, [order.id])
     published = publish_batch(api, client, batch['id'])
@@ -1023,7 +1069,7 @@ def test_start_rechecks_order_slot_against_batch_after_assignment(
     # change the slot once delivery is arranged, so start must revalidate the
     # batch/order invariant rather than trusting the earlier _assign_order check.
     other = create_slot(api, client, name='漂移时段')
-    order.requested_slot_id = other['id']
+    use_confirmed_test_slot(order, other)
     db.commit()
     blocked = start_batch(api, client, batch['id'], published['version'])
     assert blocked.status_code == 409, blocked.text
@@ -1440,9 +1486,9 @@ def test_batch_delete_blocks_active_delivery_and_preserves_order(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
-    order = make_ready_order(db)
     starts_at = (utcnow() + timedelta(days=1)).replace(
         hour=2, minute=0, second=0, microsecond=0)
+    order = make_ready_order(db, delivery_starts_at=starts_at)
     batch = create_batch_fixed(api, client, courier, starts_at)
     add_orders(api, client, batch, [order.id])
     published = publish_batch(api, client, batch['id'])

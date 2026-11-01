@@ -1,6 +1,13 @@
+import { slotCurrentlySelectable } from "../customer/checkout";
+import { growthRequest } from "../growth/client";
 import { formatDisplayTime } from "../lib/display-format";
+import {
+  requestedSlotOf,
+  confirmedSlotOf,
+  slotBlockLabel,
+} from "../v1/customer";
 import { AdminSupplementaryPanel } from "../v1/supplementary";
-import { assertQuote, settlementInput } from "../growth/pricing";
+import { assertQuote, settlementWithReceipt } from "../growth/pricing";
 import { AdminAccessLinks } from "../growth/order-links";
 import { useIdentity } from "../growth/identity";
 import { useState } from "react";
@@ -36,7 +43,7 @@ import {
   trashBlockers,
   type TrashBlocker,
 } from "../lib/trash-blockers";
-import type { Order } from "../lib/types";
+import type { Order, Slot } from "../lib/types";
 import {
   Badge,
   Button,
@@ -78,7 +85,8 @@ export function AdminOrders() {
   const filtered = data.orders.filter(
     (o) =>
       (!status || o.status === status) &&
-      (!campus || campusOfOrder(data.campuses, data.buildings, o)?.id === campus) &&
+      (!campus ||
+        campusOfOrder(data.campuses, data.buildings, o)?.id === campus) &&
       (!building || o.locationId === building) &&
       `${o.pickupCode} ${o.nickname} ${o.phone} ${o.files.map((f) => f.name).join(" ")}`
         .toLowerCase()
@@ -141,10 +149,10 @@ export function AdminOrders() {
             {data.buildings
               .filter((b) => !campus || b.campusId === campus)
               .map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
           </select>
           <Button variant="secondary" onClick={() => setMore(!more)}>
             <Filter size={16} />
@@ -275,7 +283,11 @@ export function AdminOrders() {
                       </td>
                       <td>
                         <CampusTag
-                          campus={campusOfOrder(data.campuses, data.buildings, o)}
+                          campus={campusOfOrder(
+                            data.campuses,
+                            data.buildings,
+                            o,
+                          )}
                         />
                         <small>
                           {
@@ -338,7 +350,7 @@ export function AdminOrders() {
 export function AdminOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { data, act, updateOrder, toast } = useStore();
+  const { data, act, updateOrder, toast, refresh, actionIssues } = useStore();
   const [payment, setPayment] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -346,6 +358,11 @@ export function AdminOrderDetail() {
   const [reason, setReason] = useState("");
   const [received, setReceived] = useState("");
   const [zeroConfirmed, setZeroConfirmed] = useState(false);
+  const [receiptId, setReceiptId] = useState("");
+  const [receiptNotice, setReceiptNotice] = useState("");
+  const [recordedReceiptOrder, setRecordedReceiptOrder] = useState<
+    string | null
+  >(null);
   const { staff } = useIdentity();
   const [note, setNote] = useState("");
   const [internal, setInternal] = useState(false);
@@ -359,7 +376,7 @@ export function AdminOrderDetail() {
       />
     );
   const confirm = async () => {
-    let settlement: ReturnType<typeof settlementInput>;
+    let settlement: ReturnType<typeof settlementWithReceipt>;
     try {
       if (!order.quote) throw new Error("缺少完整报价快照，请刷新订单后核对");
       assertQuote(order.quote);
@@ -368,7 +385,14 @@ export function AdminOrderDetail() {
         order.quote.totalCents !== order.totalCents
       )
         throw new Error("订单报价不一致，请重新加载");
-      settlement = settlementInput(order.totalCents, received, zeroConfirmed);
+      settlement = settlementWithReceipt(
+        order.totalCents,
+        received,
+        zeroConfirmed,
+        order.unmatchedReceipts || [],
+        receiptId,
+        recordedReceiptOrder === order.id,
+      );
       if (!order.currentQuoteId)
         throw new Error("缺少订单锁定报价，请刷新订单后核对");
       if (order.blockers?.length)
@@ -420,6 +444,18 @@ export function AdminOrderDetail() {
             : o,
         ),
       }),
+      "POST",
+      undefined,
+      (error) => {
+        const details = (error as { details?: { receiptId?: string } }).details;
+        if (details?.receiptId) {
+          setRecordedReceiptOrder(order.id);
+          setReceiptNotice(
+            "款项已登记为待核对实收。协调并接受有效新时段后，请选择该记录完成结算，无需再次付款。",
+          );
+          void refresh();
+        }
+      },
     );
     setBusy(false);
     if (ok) {
@@ -469,19 +505,23 @@ export function AdminOrderDetail() {
                 处理配送交付
               </Link>
             )}
-            {order.status === "PENDING_CONFIRMATION" && (
-              <Button
-                disabled={!!order.blockers?.length || !order.currentQuoteId}
-                onClick={() => {
-                  setZeroConfirmed(false);
-                  setReceived("");
-                  setPayment(true);
-                }}
-              >
-                <Receipt size={17} />
-                {order.totalCents === 0 ? "确认零元结算" : "确认线下收款"}
-              </Button>
-            )}
+            {order.status === "PENDING_CONFIRMATION" &&
+              (staff?.capabilities?.includes("*") ||
+                staff?.capabilities?.includes("payment.manage")) && (
+                <Button
+                  disabled={!!order.blockers?.length || !order.currentQuoteId}
+                  onClick={() => {
+                    setZeroConfirmed(false);
+                    setReceived("");
+                    setReceiptId("");
+                    setReceiptNotice("");
+                    setPayment(true);
+                  }}
+                >
+                  <Receipt size={17} />
+                  {order.totalCents === 0 ? "确认零元结算" : "确认线下收款"}
+                </Button>
+              )}
           </div>
         }
       />
@@ -678,12 +718,30 @@ export function AdminOrderDetail() {
                 </div>
                 <div>
                   <dt>原预约时段</dt>
-                  <dd>{data.slots.find((s) => s.id === order.slotId)?.name}</dd>
+                  <dd>
+                    {slotBlockLabel(requestedSlotOf(order)) ||
+                      data.slots.find((s) => s.id === order.slotId)?.name ||
+                      "历史预约快照缺失"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>确认时段</dt>
+                  <dd>
+                    {slotBlockLabel(confirmedSlotOf(order)) || "尚未确认"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>当前预计安排</dt>
+                  <dd>
+                    {slotBlockLabel((order as any).arrangement?.effective) ||
+                      "待协调"}
+                  </dd>
                 </div>
                 <div>
                   <dt>最新批次</dt>
                   <dd>
-                    {data.batches.find((b) => b.id === order.batchId)?.name ||
+                    {(order as any).arrangement?.batch?.name ||
+                      data.batches.find((b) => b.id === order.batchId)?.name ||
                       "尚未安排"}
                   </dd>
                 </div>
@@ -709,6 +767,52 @@ export function AdminOrderDetail() {
           </div>
           <div className="order-detail-column">
             <AdminSupplementaryPanel orderId={order.id} />
+            {order.status === "PENDING_CONFIRMATION" &&
+              (staff?.capabilities?.includes("*") ||
+                staff?.capabilities?.includes("payment.manage")) && (
+                <PendingSlotProposal
+                  slots={data.slots}
+                  proposal={(order as any).slotProposal}
+                  onSubmit={async (slotId, reason) => {
+                    await growthRequest(
+                      `/admin/orders/${encodeURIComponent(order.id)}/slot-proposals`,
+                      {
+                        method: "POST",
+                        body: {
+                          expectedVersion: order.version,
+                          slotId,
+                          reason,
+                        },
+                      },
+                    );
+                    await refresh();
+                    toast("时段建议已提交，等待客户接受后再结算");
+                  }}
+                />
+              )}
+            {!!order.deliveryNotices?.length && (
+              <DeliveryNoticePanel
+                notices={order.deliveryNotices}
+                canRetry={
+                  !!(
+                    staff?.capabilities?.includes("*") ||
+                    staff?.capabilities?.includes("delivery.manage") ||
+                    staff?.capabilities?.includes("mail.manage")
+                  )
+                }
+                onRetry={async (notice, reason) => {
+                  await growthRequest(
+                    `/admin/delivery-notices/${encodeURIComponent(notice.id)}/retry`,
+                    {
+                      method: "POST",
+                      body: { expectedVersion: notice.version, reason },
+                    },
+                  );
+                  await refresh();
+                  toast("通知已重新检查，发送状态以最新记录为准");
+                }}
+              />
+            )}
             <Panel title="费用快照">
               <PriceRows total={order.totalCents} quote={order.quote} />
               <p className="form-hint">历史订单金额不会随新价目修改。</p>
@@ -740,6 +844,45 @@ export function AdminOrderDetail() {
               <dd className="amount">{money(order.totalCents)}</dd>
             </div>
           </dl>
+          {receiptNotice && <Notice>{receiptNotice}</Notice>}
+          {actionIssues[`/admin/orders/${id}/confirm-payment`] && (
+            <Notice type="error">
+              {actionIssues[`/admin/orders/${id}/confirm-payment`]}
+            </Notice>
+          )}
+          {!!order.unmatchedReceipts?.length && (
+            <Field label="复用待核对实收（必选，不再登记新款）">
+              <select
+                value={receiptId}
+                onChange={(event) => {
+                  setReceiptId(event.target.value);
+                  const receipt = order.unmatchedReceipts?.find(
+                    (item) => item.id === event.target.value,
+                  );
+                  if (receipt)
+                    setReceived(
+                      (
+                        (receipt.refundableCents ??
+                          receipt.amountCents - (receipt.refundedCents || 0)) /
+                        100
+                      ).toFixed(2),
+                    );
+                }}
+              >
+                <option value="">请选择实收记录</option>
+                {order.unmatchedReceipts?.map((receipt) => (
+                  <option key={receipt.id} value={receipt.id}>
+                    {formatDisplayTime(receipt.createdAt)} · 净额{" "}
+                    {money(
+                      receipt.refundableCents ??
+                        receipt.amountCents - (receipt.refundedCents || 0),
+                    )}{" "}
+                    · {receipt.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="实际收到金额（元）">
             <input
               type="number"
@@ -928,5 +1071,198 @@ export function AdminOrderDetail() {
         </Modal>
       )}
     </>
+  );
+}
+
+type DeliveryNoticeView = NonNullable<Order["deliveryNotices"]>[number];
+export function DeliveryNoticePanel({
+  notices,
+  canRetry,
+  onRetry,
+}: {
+  notices: DeliveryNoticeView[];
+  canRetry: boolean;
+  onRetry: (notice: DeliveryNoticeView, reason: string) => Promise<void>;
+}) {
+  const [target, setTarget] = useState<DeliveryNoticeView | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const labels: Record<string, string> = {
+    PENDING: "等待发送",
+    FAILED: "发送失败",
+    UNKNOWN: "发送结果未知，请人工核实",
+    ACCEPTED: "SMTP 已接受",
+    NO_EMAIL: "无有效邮箱，需人工联系",
+    EXPIRED: "发送任务已过期",
+  };
+  const retry = async () => {
+    if (!target || busy) return;
+    if (!reason.trim()) {
+      setError("请填写重试原因");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onRetry(target, reason.trim());
+      setTarget(null);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel title="配送变更通知">
+      <p className="form-hint">
+        SMTP 接受表示邮件服务器已接收，实际收件情况需另行核实。
+      </p>
+      {notices.map((notice) => (
+        <div key={notice.id} className="detail-dl vertical">
+          <p>
+            <strong>{labels[notice.status] || notice.status}</strong> ·{" "}
+            {formatDisplayTime(notice.createdAt)}
+          </p>
+          <p className="muted">
+            尝试 {notice.attempts} 次
+            {notice.lastError ? ` · 原因：${notice.lastError}` : ""}
+          </p>
+          {canRetry &&
+            ["FAILED", "NO_EMAIL", "EXPIRED"].includes(notice.status) && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setTarget(notice);
+                  setReason("");
+                  setError("");
+                }}
+              >
+                重试通知
+              </Button>
+            )}
+        </div>
+      ))}
+      {target && (
+        <Modal
+          title="重试配送通知"
+          onClose={() => {
+            if (!busy) setTarget(null);
+          }}
+        >
+          <Notice>
+            重试会复用原变更通知记录；结果未知的邮件需先人工核实。
+          </Notice>
+          {error && <Notice type="error">{error}</Notice>}
+          <Field label="重试原因">
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </Field>
+          <Button busy={busy} onClick={() => void retry()}>
+            确认重试
+          </Button>
+        </Modal>
+      )}
+    </Panel>
+  );
+}
+
+export function PendingSlotProposal({
+  slots,
+  proposal,
+  onSubmit,
+}: {
+  slots: Slot[];
+  proposal?: {
+    slotId: string;
+    reason?: string;
+    confirmed?: boolean;
+    rejected?: boolean;
+    proposed?: any;
+  } | null;
+  onSubmit: (slotId: string, reason: string) => Promise<void>;
+}) {
+  const [slotId, setSlotId] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const available = slots.filter((slot) => slotCurrentlySelectable(slot));
+  const submit = async () => {
+    if (busy) return;
+    if (
+      !available.some(
+        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
+      )
+    ) {
+      setError("请选择当前可预约的新时段");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("请填写客户可见的调整原因");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onSubmit(slotId, reason.trim());
+      setSlotId("");
+      setReason("");
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel title="协调申请时段">
+      <p className="form-hint">
+        新建议需由客户接受，接受不占名额。已有待核对实收可在确认后复用，无需再次付款。
+      </p>
+      {proposal && (
+        <Notice>
+          {proposal.rejected
+            ? "客户已拒绝，需重新协调"
+            : proposal.confirmed
+              ? "客户已接受，待人工确认结算"
+              : "已有新时段建议待客户确认"}
+          {proposal.proposed && (
+            <span> · {slotBlockLabel(proposal.proposed)}</span>
+          )}
+          {proposal.reason && <span> · 原因：{proposal.reason}</span>}
+        </Notice>
+      )}
+      {error && <Notice type="error">{error}</Notice>}
+      <Field label="建议其他时段">
+        <select
+          value={slotId}
+          onChange={(event) => setSlotId(event.target.value)}
+        >
+          <option value="">请选择可预约时段</option>
+          {available.map((slot) => (
+            <option key={slot.id} value={slot.id}>
+              {slot.date} · {slot.name} · {slot.start}–{slot.end}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {!available.length && (
+        <Notice>当前暂无可建议的开放时段，请联系调度管理员。</Notice>
+      )}
+      <Field label="调整原因（客户可见）">
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </Field>
+      <Button
+        busy={busy}
+        disabled={!available.length}
+        onClick={() => void submit()}
+      >
+        提出时段建议
+      </Button>
+    </Panel>
   );
 }

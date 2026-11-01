@@ -130,9 +130,9 @@ router = APIRouter()
 
 PLAN_TTL = timedelta(minutes=10)
 OPEN_EXCEPTION_STATUSES = ('OPEN', 'IN_PROGRESS')
-# Deterministic lock order for every delivery transaction that touches more
-# than one aggregate: batch rows (sorted by id) -> order rows (sorted by id)
-# -> delivery assignments (sorted by id).  Address review only needs
+# Deterministic lock order for delivery scheduling: order rows (sorted by id)
+# -> slot rows (sorted by id) -> assignments (sorted by id) -> batch rows.
+# Sealing needs slot -> group -> batch. Address review only needs
 # order -> assignment; map configuration locks section first, then locations.
 # Capacity is supplied by DeliverySlot but is consumed by commerce settlement;
 # batch operations never increment DeliverySlot.occupied (Q16).
@@ -505,6 +505,14 @@ def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignme
         blockers.append(_blocker('BATCH_DELETED', '批次已删除', batch.id))
     if batch.status != 'PUBLISHED':
         blockers.append(_blocker('BATCH_NOT_PUBLISHED', '批次尚未发布，不能开始配送', batch.id))
+    slot_ids = {_batch_slot_id(batch)} | {
+        _order_effective_slot_id(order) for order in orders_by_id.values()}
+    for slot_id in sorted(slot_ids - {None}):
+        slot = db.get(DeliverySlot, slot_id)
+        if (slot is not None and slot.cutoff_at is not None
+                and not batch_effective_sealed(slot, utcnow())):
+            blockers.append(_blocker('BATCH_NOT_SEALED',
+                                     '名单尚未封批，请联系管理员结束接单后再出发', batch.id))
     if _valid_courier(db, batch.courier_id) is None:
         blockers.append(_blocker('COURIER_REQUIRED', '批次未分配有效配送员', batch.id))
     if not assignments:
@@ -927,24 +935,31 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
             raise DomainError('SLOT_WINDOW_INCOMPLETE', '调整时段必须同时提供日期、开始与结束时间', 422)
     if acceptance_supplied and (payload.open_at is None or payload.cutoff_at is None):
         raise DomainError('SLOT_CONFIG_INCOMPLETE', '调整接单规则必须同时提供开放下单时间与截单时间', 422)
-    if window_supplied or acceptance_supplied:
+    window_changed = window_supplied and (
+        payload.date != slot.date or payload.start != to_shanghai_hhmm(slot.starts_at)
+        or payload.end != to_shanghai_hhmm(slot.ends_at))
+    acceptance_changed = acceptance_supplied and (
+        payload.open_at != slot.open_at or payload.cutoff_at != slot.cutoff_at)
+    # Ordinary edit forms repost existing window fields. Only a real time
+    # change invokes the arrangement guard; preserve the original instants.
+    if window_changed or acceptance_changed:
         if slot.sealed_at is not None:
             raise DomainError('SLOT_SEALED', '时段已封批，不能再调整配送或接单时间', 409,
                               {'slotId': slot.id})
         live_orders = db.scalar(select(func.count(Order.id)).where(
-            (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id),
-            Order.deleted_at.is_(None),
-            Order.status.notin_(('CANCELLED', 'DELIVERED')))) or 0
-        live_batches = sum(1 for batch in db.scalars(select(DeliveryBatch).where(
-            DeliveryBatch.deleted_at.is_(None),
-            DeliveryBatch.status.notin_(('CANCELLED', 'COMPLETED'))))
+            (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id))) or 0
+        live_batches = sum(1 for batch in db.scalars(select(DeliveryBatch))
             if _batch_slot_id(batch) == slot.id)
-        if live_orders or live_batches:
+        filling_rules = (not window_changed and acceptance_changed
+                         and (slot.open_at is None or slot.cutoff_at is None)
+                         and (slot.open_at is None or payload.open_at == slot.open_at)
+                         and (slot.cutoff_at is None or payload.cutoff_at == slot.cutoff_at))
+        if (live_orders or live_batches) and not filling_rules:
             raise DomainError('SLOT_TIME_LOCKED',
                               '已有预约引用该时段，请使用调整配送安排并通知客户', 409,
                               {'slotId': slot.id, 'orderCount': live_orders,
                                'batchCount': live_batches})
-        starts_at, ends_at = payload.window() if window_supplied else (
+        starts_at, ends_at = payload.window() if window_changed else (
             slot.starts_at, slot.ends_at)
         new_date = payload.date or slot.date
         opens = payload.open_at if payload.open_at is not None else slot.open_at
@@ -957,8 +972,9 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
         opens, cutoff, resolved_start, resolved_end = slot_acceptance_window(
             new_date, to_shanghai_hhmm(starts_at), to_shanghai_hhmm(ends_at), opens, cutoff)
         slot.date = new_date
-        slot.starts_at = resolved_start
-        slot.ends_at = resolved_end
+        if window_changed:
+            slot.starts_at = resolved_start
+            slot.ends_at = resolved_end
         slot.open_at = opens
         slot.cutoff_at = cutoff
     if payload.name is not None:
@@ -985,6 +1001,45 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
     return ok(_slot_view(db, slot, utcnow(), admin=True))
 
 
+def _schedule_snapshot(db, batch_ids, order_ids=()) -> dict:
+    """Persist the reviewed identities as well as versions, including members.
+
+    Automatic collection can add an assignment without editing batch metadata,
+    so checking only the batch version cannot validate an impact preview.
+    """
+    batches = list(db.execute(select(
+        DeliveryBatch.id, DeliveryBatch.version, DeliveryBatch.status,
+        DeliveryBatch.slot_id, DeliveryBatch.group_id, DeliveryBatch.campus_id,
+        DeliveryBatch.courier_id, DeliveryBatch.starts_at, DeliveryBatch.ends_at,
+        DeliveryBatch.deleted_at).where(DeliveryBatch.id.in_(sorted(set(batch_ids))))
+        .order_by(DeliveryBatch.id)))
+    assignments = list(db.execute(select(
+        DeliveryAssignment.id, DeliveryAssignment.version, DeliveryAssignment.order_id,
+        DeliveryAssignment.batch_id, DeliveryAssignment.status,
+        DeliveryAssignment.courier_id, DeliveryAssignment.address_review).where(
+        DeliveryAssignment.batch_id.in_(sorted(set(batch_ids))),
+        DeliveryAssignment.active.is_(True)).order_by(DeliveryAssignment.id)))
+    ids = sorted(set(order_ids) | {row.order_id for row in assignments})
+    orders = list(db.execute(select(
+        Order.id, Order.version, Order.status, Order.confirmed_slot_id,
+        Order.deleted_at).where(Order.id.in_(ids)).order_by(Order.id)))
+    def values(rows):
+        return [[value.isoformat() if isinstance(value, datetime) else value
+                 for value in row] for row in rows]
+    return {'batches': values(batches), 'assignments': values(assignments),
+            'orders': values(orders)}
+
+
+def _seal_snapshot(db, slot: DeliverySlot) -> dict:
+    group_ids = set(db.scalars(select(DeliveryGroup.id).where(DeliveryGroup.slot_id == slot.id)))
+    batch_ids = [batch.id for batch in db.scalars(select(DeliveryBatch))
+                 if not batch.deleted_at and (_batch_slot_id(batch) == slot.id
+                                              or batch.group_id in group_ids)]
+    order_ids = list(db.scalars(select(Order.id).where(
+        (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id))))
+    return _schedule_snapshot(db, batch_ids, order_ids)
+
+
 @router.post('/admin/slots/{slot_id}/seal/preview', response_model=Envelope[SlotSealPlanView])
 def admin_slot_seal_preview(slot_id: str, payload: SlotSealPreview, db=Depends(get_db),
                             actor: Actor = Depends(actor_dep)):
@@ -996,12 +1051,14 @@ def admin_slot_seal_preview(slot_id: str, payload: SlotSealPreview, db=Depends(g
         raise DomainError('VERSION_CONFLICT', '时段已被修改，请刷新后重试', 409,
                           {'expectedVersion': payload.expected_version,
                            'currentVersion': slot.version})
+    snapshot = _seal_snapshot(db, slot)
     preview = seal_preview(db, slot, actor)
     plan = BatchPlan(
         staff_id=actor.staff_id, expires_at=utcnow() + PLAN_TTL,
         data={'action': 'SEAL_SLOT', 'slotId': slot.id,
               'expectedVersion': slot.version,
-              'blockers': preview['blockers'], 'impact': preview['impact']})
+              'blockers': preview['blockers'], 'impact': preview['impact'],
+              'snapshot': snapshot})
     db.add(plan)
     db.flush()
     return ok({'planId': plan.id, 'action': 'SEAL_SLOT',
@@ -1033,6 +1090,9 @@ def admin_slot_seal(slot_id: str, payload: SlotSealCommit, db=Depends(get_db),
             raise DomainError('PLAN_STALE', '时段已变化，请重新预览封批影响', 409,
                               {'planId': payload.plan_id})
     preview = seal_preview(db, slot, actor)
+    if (plan.data or {}).get('snapshot') != _seal_snapshot(db, slot):
+        raise DomainError('PLAN_STALE', '封批影响名单已变化，请重新预览', 409,
+                          {'planId': payload.plan_id})
     if preview['blockers']:
         raise DomainError('SEAL_BLOCKED', '当前存在阻断，不能封批', 409,
                           {'slotId': slot.id, 'blockers': preview['blockers']})
@@ -1091,6 +1151,13 @@ def admin_slot_delete(slot_id: str, payload: SlotDeleteInput | None = None,
 # ---------------------------------------------------------------------------
 # batch CRUD and lifecycle
 # ---------------------------------------------------------------------------
+
+
+@router.get('/admin/delivery-repair/preview', response_model=Envelope[dict])
+def admin_delivery_repair_preview(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    from .delivery_repair import delivery_repair_preview
+    return ok(delivery_repair_preview(db))
 
 
 @router.get('/admin/batches', response_model=Envelope[BatchListView])
@@ -1186,16 +1253,21 @@ def admin_batch_update(batch_id: str, payload: BatchUpdate, db=Depends(get_db),
         batch.name = payload.name
     window_fields = {'date', 'time', 'starts_at', 'ends_at'} & payload.model_fields_set
     if window_fields:
-        if (batch.slot_id or (batch.data or {}).get('slotId') or assignments):
-            raise DomainError(
-                'CHANGE_PREVIEW_REQUIRED',
-                '该批次已有配送安排或订单，请通过“调整配送安排”预览并提交', 409,
-                {'batchId': batch.id})
         if {'starts_at', 'ends_at'} & window_fields:
             starts_at, ends_at = batch_window(None, None, payload.starts_at, payload.ends_at)
+            window_changed = (starts_at, ends_at) != (batch.starts_at, batch.ends_at)
         else:
             starts_at, ends_at = batch_window(payload.date, payload.time)
-        batch.starts_at, batch.ends_at = starts_at, ends_at
+            window_changed = (to_shanghai_date(starts_at) != to_shanghai_date(batch.starts_at)
+                              or to_shanghai_window(starts_at, ends_at)
+                              != to_shanghai_window(batch.starts_at, batch.ends_at))
+        if window_changed:
+            if (batch.slot_id or (batch.data or {}).get('slotId') or assignments):
+                raise DomainError(
+                    'CHANGE_PREVIEW_REQUIRED',
+                    '该批次已有配送安排或订单，请通过“调整配送安排”预览并提交', 409,
+                    {'batchId': batch.id})
+            batch.starts_at, batch.ends_at = starts_at, ends_at
     if 'courier_id' in payload.model_fields_set:
         if payload.courier_id and _valid_courier(db, payload.courier_id) is None:
             raise DomainError('COURIER_INVALID', '配送员不可用', 422)
@@ -1244,12 +1316,25 @@ def _release_assignments(db, batch: DeliveryBatch, actor: Actor, reason: str,
     db.flush()
 
 
+def _destination_blockers(db, assignments) -> list[dict]:
+    return [_blocker('DESTINATION_REQUIRED',
+                     '已付款订单仍需配送，请先转移到明确的目标批次再移除原批次', order.id)
+            for assignment in assignments
+            if assignment.status != 'DELIVERED'
+            and (order := db.get(Order, assignment.order_id)) is not None
+            and order.status not in ('CANCELLED', 'DELIVERED') and _payment_confirmed(order)]
+
+
 def _batch_delete_or_cancel(db, actor: Actor, batch: DeliveryBatch, reason: str,
                             *, delete: bool) -> None:
     if batch.status in ('DELIVERING', 'COMPLETED'):
         raise DomainError('INVALID_TRANSITION', '配送中或已完成批次不能取消或删除', 409,
                           {'status': batch.status})
     assignments = _active_batch_assignments(db, batch.id)
+    destination_blockers = _destination_blockers(db, assignments)
+    if destination_blockers:
+        raise DomainError('DESTINATION_REQUIRED', '请先安排待配送订单的目标批次', 409,
+                          {'blockers': destination_blockers})
     if any(assignment.status in ('STARTED', 'DELIVERED') for assignment in assignments):
         raise DomainError('BATCH_HAS_STARTED_EXECUTIONS',
                           '请先处理已开始的配送执行和已送达凭证', 409)
@@ -1278,6 +1363,10 @@ def _batch_to_trash(db, actor: Actor, batch: DeliveryBatch, reason: str):
         raise DomainError('INVALID_TRANSITION', '配送中批次不能删除，请先处理实际配送执行', 409,
                           {'status': batch.status})
     assignments = _active_batch_assignments(db, batch.id)
+    destination_blockers = _destination_blockers(db, assignments)
+    if destination_blockers:
+        raise DomainError('DESTINATION_REQUIRED', '请先安排待配送订单的目标批次', 409,
+                          {'blockers': destination_blockers})
     if any(assignment.status == 'STARTED' for assignment in assignments):
         raise DomainError('BATCH_HAS_STARTED_EXECUTIONS',
                           '请先处理已开始的配送执行和已送达凭证', 409)
@@ -1312,19 +1401,20 @@ def admin_batch_delete(batch_id: str, payload: BatchVersionInput | None = None,
 def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(get_db),
                         actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    batch = lock(db, DeliveryBatch, batch_id, payload.expected_version)
+    batch, orders, _assignments = _lock_batch_context(db, batch_id, payload.expected_version)
     if batch.deleted_at or batch.status not in ('PLANNED', 'POSTPONED'):
         raise DomainError('INVALID_TRANSITION', '只有规划中或已延期的批次可以发布', 409,
                           {'status': batch.status})
     if _valid_courier(db, batch.courier_id) is None:
         raise DomainError('COURIER_REQUIRED', '发布前必须分配有效配送员', 422)
-    slot_id = batch.slot_id or _batch_slot_id(batch)
-    if slot_id:
+    batch_slot_id = _batch_slot_id(batch)
+    slot_ids = {batch_slot_id} | {_order_effective_slot_id(order) for order in orders.values()}
+    for slot_id in sorted(slot_ids - {None}):
         slot = db.get(DeliverySlot, slot_id)
         if slot is None or _slot_archived(slot):
             raise DomainError('SLOT_UNAVAILABLE', '批次关联的配送时段不可用', 409,
                               {'slotId': slot_id})
-        if not batch_effective_sealed(slot, utcnow()):
+        if (slot_id == batch_slot_id or slot.cutoff_at is not None) and not batch_effective_sealed(slot, utcnow()):
             raise DomainError('BATCH_NOT_SEALED', '接单截止或提前封批后才能发布批次', 409,
                               {'batchId': batch.id, 'slotId': slot.id,
                                'cutoffAt': slot.cutoff_at.isoformat() if slot.cutoff_at else None})
@@ -1363,12 +1453,19 @@ def _lock_assignments(db, order_ids) -> list[DeliveryAssignment]:
     return list(db.scalars(select(DeliveryAssignment)
                            .where(DeliveryAssignment.order_id.in_(sorted(set(order_ids))))
                            .order_by(DeliveryAssignment.id)
-                           .with_for_update()))
+                           .with_for_update().execution_options(populate_existing=True)))
+
+
+def _lock_schedule_slots(db, batches, orders=()) -> None:
+    ids = {_batch_slot_id(batch) for batch in batches} | {
+        _order_effective_slot_id(order) for order in orders}
+    for slot_id in sorted(ids - {None}):
+        lock(db, DeliverySlot, slot_id)
 
 
 def _lock_batch_context(db, batch_id: str, expected_version: int | None = None,
                         *, active_only: bool = True):
-    """Lock a batch's work in the global order: orders, assignments, then batch.
+    """Lock a batch's work in order: orders, slots, assignments, then batch.
 
     Batch metadata is read unlocked first only to discover the order ids.  A
     concurrent membership change is detected after the batch lock and aborted,
@@ -1387,6 +1484,7 @@ def _lock_batch_context(db, batch_id: str, expected_version: int | None = None,
     initial = list(db.scalars(statement))
     order_ids = sorted({assignment.order_id for assignment in initial})
     orders = _lock_orders(db, order_ids)
+    _lock_schedule_slots(db, [batch], orders.values())
     _lock_assignments(db, order_ids)
     locked_batch = lock(db, DeliveryBatch, batch_id, expected_version)
     current = list(db.scalars(statement))
@@ -1455,7 +1553,8 @@ def batch_start(batch_id: str, payload: BatchVersionInput, db=Depends(get_db),
 
 
 def _operation_order_ids(db, payload: BatchOperationPreview) -> list[str]:
-    ids = set(payload.order_ids)
+    whole_batch = payload.action in ('MERGE', 'RESCHEDULE', 'CANCEL', 'DELETE', 'PUBLISH', 'START')
+    ids = set() if whole_batch else set(payload.order_ids)
     if payload.action in ('REMOVE', 'TRANSFER', 'SPLIT', 'RESCHEDULE', 'CANCEL', 'DELETE',
                           'MERGE', 'PUBLISH', 'START') and not ids:
         for batch_id in payload.source_batch_ids:
@@ -1512,6 +1611,29 @@ def _campus_mismatch_blocker(db, target: DeliveryBatch, order: Order) -> dict | 
     return None
 
 
+def _effective_order_window(db, order: Order) -> tuple[datetime, datetime] | None:
+    current = arrangement_for_order(db, order).get('effective') or {}
+    if current.get('startsAt') and current.get('endsAt'):
+        return (datetime.fromisoformat(current['startsAt'].replace('Z', '+00:00')),
+                datetime.fromisoformat(current['endsAt'].replace('Z', '+00:00')))
+    slot = db.get(DeliverySlot, _order_effective_slot_id(order))
+    return (slot.starts_at, slot.ends_at) if slot is not None else None
+
+
+def _window_change_blocker(db, target: DeliveryBatch, order: Order, reason: str) -> dict | None:
+    original = _effective_order_window(db, order)
+    if original is None or original == (target.starts_at, target.ends_at):
+        return None
+    # Only a different delivery *date* is a cross-day move. A window that
+    # merely runs past midnight stays on the same date and only needs a reason.
+    if to_shanghai_date(original[0]) != to_shanghai_date(target.starts_at):
+        return _blocker('CUSTOMER_CONFIRMATION_REQUIRED',
+                        '跨日配送安排须提出新时段建议并由客户确认', order.id)
+    if not reason.strip():
+        return _blocker('REASON_REQUIRED', '配送窗口变化必须填写公开原因并通知客户', order.id)
+    return None
+
+
 def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict:
     blockers: list[dict] = []
     impacts: list[dict] = []
@@ -1563,6 +1685,8 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
             blockers.append(_blocker('BATCH_NOT_EDITABLE', '目标批次不能增加订单', target_batch.id))
         else:
             for order in orders.values():
+                if not _payment_confirmed(order):
+                    blockers.append(_blocker('PAYMENT_REQUIRED', '人工结算成功后才能安排配送执行', order.id))
                 if order.status in ('CANCELLED', 'DELIVERED', 'DELIVERING'):
                     blockers.append(_blocker('ORDER_NOT_AVAILABLE', '订单状态不允许加入批次', order.id))
                 existing = _active_assignment(db, order.id)
@@ -1576,6 +1700,10 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                     campus_mismatch = _campus_mismatch_blocker(db, target_batch, order)
                     if campus_mismatch is not None:
                         blockers.append(campus_mismatch)
+                    window_blocker = _window_change_blocker(
+                        db, target_batch, order, str(payload.payload.get('reason') or ''))
+                    if window_blocker is not None:
+                        blockers.append(window_blocker)
                     impacts.append({'batchId': target_batch.id, 'orderId': order.id,
                                     'pickupCode': order.pickup_code, 'message': '将加入批次'})
     elif action in ('REMOVE', 'TRANSFER', 'SPLIT', 'MERGE'):
@@ -1603,6 +1731,8 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
             if assignment.status in ('STARTED', 'DELIVERED'):
                 blockers.append(_blocker('ASSIGNMENT_STARTED', '已经开始配送的执行不能转移', assignment.id))
             order = orders.get(order_id)
+            if action == 'REMOVE':
+                blockers.extend(_destination_blockers(db, [assignment]))
             if order is not None:
                 if target_batch is not None and action in ('TRANSFER', 'MERGE'):
                     mismatch = _slot_mismatch_blocker(target_batch, order)
@@ -1611,27 +1741,43 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
                     campus_mismatch = _campus_mismatch_blocker(db, target_batch, order)
                     if campus_mismatch is not None:
                         blockers.append(campus_mismatch)
+                    window_blocker = _window_change_blocker(
+                        db, target_batch, order, str(payload.payload.get('reason') or ''))
+                    if window_blocker is not None:
+                        blockers.append(window_blocker)
                 impacts.append({'batchId': target_batch.id if target_batch else None,
                                 'orderId': order.id, 'pickupCode': order.pickup_code,
                                 'message': {'REMOVE': '将移出批次', 'TRANSFER': '将转移到目标批次',
                                             'SPLIT': '将拆分为新批次', 'MERGE': '将合并到目标批次'}[action]})
     elif action == 'RESCHEDULE':
+        if not str(payload.payload.get('reason') or '').strip():
+            blockers.append(_blocker('REASON_REQUIRED', '调整配送时间必须填写公开原因'))
         try:
             starts_at, ends_at = _payload_window(payload.payload)
         except DomainError as error:
             blockers.append(_blocker('INVALID_WINDOW', error.message))
         else:
             for batch in source_batches:
-                if batch.status in ('DELIVERING', 'COMPLETED', 'CANCELLED'):
+                if batch.status in ('COMPLETED', 'CANCELLED'):
                     blockers.append(_blocker('BATCH_NOT_EDITABLE', '当前批次不能改期', batch.id))
                 else:
+                    if to_shanghai_date(batch.starts_at) != to_shanghai_date(starts_at):
+                        blockers.append(_blocker('CUSTOMER_CONFIRMATION_REQUIRED',
+                                                 '跨日改订须提出新时段建议并由客户确认', batch.id))
                     impacts.append({'batchId': batch.id,
                                     'message': f'将改期为 {to_shanghai_date(starts_at)} '
                                                f'{to_shanghai_window(starts_at, ends_at)}'})
+                    for assignment in _active_batch_assignments(db, batch.id):
+                        if assignment.status != 'DELIVERED' and assignment.order_id in orders:
+                            order = orders[assignment.order_id]
+                            impacts.append({'batchId': batch.id, 'orderId': order.id,
+                                            'pickupCode': order.pickup_code,
+                                            'message': '预计窗口将调整，提交后通知客户'})
     elif action in ('CANCEL', 'DELETE'):
         if not payload.payload.get('reason'):
             blockers.append(_blocker('REASON_REQUIRED', '取消或删除批次必须填写原因'))
         for batch in source_batches:
+            blockers.extend(_destination_blockers(db, _source_assignments(db, [batch.id])))
             if batch.status == 'DELIVERING':
                 blockers.append(_blocker('BATCH_NOT_EDITABLE', '配送中批次不能取消或删除',
                                          batch.id))
@@ -1676,7 +1822,8 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
     return {'blockers': blockers, 'impacts': impacts}
 
 
-def _store_plan(db, actor: Actor, payload: BatchOperationPreview, preview: dict) -> BatchPlan:
+def _store_plan(db, actor: Actor, payload: BatchOperationPreview, preview: dict,
+                snapshot: dict) -> BatchPlan:
     plan = BatchPlan(staff_id=actor.staff_id, expires_at=utcnow() + PLAN_TTL, data={
         'action': payload.action,
         'orderIds': payload.order_ids,
@@ -1686,6 +1833,7 @@ def _store_plan(db, actor: Actor, payload: BatchOperationPreview, preview: dict)
         'payload': payload.payload,
         'blockers': preview['blockers'],
         'impacts': preview['impacts'],
+        'snapshot': snapshot,
     })
     db.add(plan)
     db.flush()
@@ -1696,8 +1844,10 @@ def _store_plan(db, actor: Actor, payload: BatchOperationPreview, preview: dict)
 def batch_operation_preview(payload: BatchOperationPreview, db=Depends(get_db),
                             actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
+    batch_ids = payload.source_batch_ids + ([payload.target_batch_id] if payload.target_batch_id else [])
+    snapshot = _schedule_snapshot(db, batch_ids, _operation_order_ids(db, payload))
     preview = _preview_operation(db, actor, payload)
-    plan = _store_plan(db, actor, payload, preview)
+    plan = _store_plan(db, actor, payload, preview, snapshot)
     return ok({'planId': plan.id, 'action': payload.action,
                'blockers': preview['blockers'], 'impacts': preview['impacts'],
                'expiresAt': plan.expires_at})
@@ -1705,6 +1855,14 @@ def batch_operation_preview(payload: BatchOperationPreview, db=Depends(get_db),
 
 def _assign_order(db, batch: DeliveryBatch, order: Order, actor: Actor,
                   reason: str) -> DeliveryAssignment:
+    if not _payment_confirmed(order):
+        raise DomainError('PAYMENT_REQUIRED', '人工结算成功后才能安排配送执行', 409,
+                          {'orderId': order.id})
+    window_blocker = _window_change_blocker(db, batch, order, reason)
+    if window_blocker is not None:
+        raise DomainError(window_blocker['code'], window_blocker['message'], 409,
+                          {'orderId': order.id})
+    original_window = _effective_order_window(db, order)
     existing = db.scalar(select(DeliveryAssignment)
                          .where(DeliveryAssignment.order_id == order.id,
                                 DeliveryAssignment.active.is_(True))
@@ -1733,6 +1891,15 @@ def _assign_order(db, batch: DeliveryBatch, order: Order, actor: Actor,
     except IntegrityError as error:
         raise DomainError('BATCH_CONFLICT', '订单已有其他有效配送批次', 409,
                           {'orderId': order.id}) from error
+    if original_window is not None and original_window != (batch.starts_at, batch.ends_at):
+        change = record_change(
+            db, order, kind='ETA_UPDATED',
+            original={'startsAt': original_window[0].isoformat(),
+                      'endsAt': original_window[1].isoformat()},
+            proposed={'startsAt': batch.starts_at.isoformat(), 'endsAt': batch.ends_at.isoformat()},
+            reason=reason, actor_id=actor.id, batch_id=batch.id, slot_id=_batch_slot_id(batch))
+        from .growth import notify_delivery_change
+        notify_delivery_change(db, order, change)
     # A merchant-rework order may still point at an old DELIVERING batch whose
     # only executed assignment was deactivated by after_sales.  Creating the new
     # assignment is the point where that old projection can be closed, so the
@@ -1764,6 +1931,7 @@ def _execute_operation(db, actor: Actor, action: str, payload: BatchOperationPre
         batch = target_batch or next(iter(source_batches.values()))
         for order in orders.values():
             _assign_order(db, batch, order, actor, reason)
+        touch(batch)
         affected.append(batch)
     elif action in ('REMOVE', 'TRANSFER', 'SPLIT'):
         targets = [target_batch] if target_batch else []
@@ -1797,6 +1965,8 @@ def _execute_operation(db, actor: Actor, action: str, payload: BatchOperationPre
             _deactivate_assignment(db, assignment, actor, reason)
             if action != 'REMOVE':
                 _assign_order(db, target_batch, orders[order_id], actor, reason)
+        for changed_batch in [*source_batches.values(), *targets]:
+            touch(changed_batch)
         affected.extend(source_batches.values())
     elif action == 'MERGE':
         if target_batch is None:
@@ -1817,6 +1987,7 @@ def _execute_operation(db, actor: Actor, action: str, payload: BatchOperationPre
                            'mergedAt': utcnow().isoformat(), 'mergedBy': actor.id}
             touch(source)
         affected.append(target_batch)
+        touch(target_batch)
         affected.extend(batch for batch in source_batches.values() if batch.id != target_batch.id)
     elif action == 'RESCHEDULE':
         starts_at, ends_at = _payload_window(payload.payload)
@@ -1882,20 +2053,19 @@ def batch_operation_commit(payload: BatchOperationCommit, db=Depends(get_db),
     source_ids = list(operation.source_batch_ids)
     target_id = operation.target_batch_id
     all_batch_ids = source_ids + ([target_id] if target_id else [])
-    order_ids = _operation_order_ids(db, operation)
+    snapshot = data.get('snapshot')
+    if snapshot is None:
+        raise DomainError('PLAN_STALE', '请重新预览批次操作', 409)
+    order_ids = sorted({row[0] for row in snapshot.get('orders', [])})
     locked_orders = _lock_orders(db, order_ids)
-    locked_assignments = _lock_assignments(db, order_ids)
-    # Re-check discovered membership before taking the batch rows.  The plan
-    # may have been previewed against a stale assignment set; abort rather than
-    # execute a partial operation on an order we do not hold.
-    current_order_ids = set(_operation_order_ids(db, operation))
-    current_assignment_ids = set(db.scalars(
-        select(DeliveryAssignment.id).where(
-            DeliveryAssignment.order_id.in_(sorted(current_order_ids)))))
-    if (not current_order_ids.issubset(locked_orders)
-            or current_assignment_ids != {assignment.id for assignment in locked_assignments}):
-        raise DomainError('BATCH_CHANGED', '批次内容已变化，请重新预览', 409)
+    # Slot locks precede assignment/batch locks, matching settlement/sealing.
+    initial_batches = [db.get(DeliveryBatch, batch_id) for batch_id in sorted(set(all_batch_ids))]
+    _lock_schedule_slots(db, [batch for batch in initial_batches if batch is not None],
+                         locked_orders.values())
+    _lock_assignments(db, order_ids)
     batches = _lock_batches(db, all_batch_ids)
+    if snapshot != _schedule_snapshot(db, all_batch_ids, _operation_order_ids(db, operation)):
+        raise DomainError('PLAN_STALE', '批次影响名单或版本已变化，请重新预览', 409)
     preview = _preview_operation(db, actor, operation)
     if preview['blockers']:
         raise DomainError('BATCH_OPERATION_BLOCKED', '批次操作存在阻断项，未执行',
@@ -1903,8 +2073,11 @@ def batch_operation_commit(payload: BatchOperationCommit, db=Depends(get_db),
     source_batches = {batch_id: batches[batch_id] for batch_id in source_ids}
     target_batch = batches.get(target_id) if target_id else None
     reason = (operation.payload or {}).get('reason') or operation.action
+    selected_orders = {order_id: locked_orders[order_id]
+                       for order_id in _operation_order_ids(db, operation)
+                       if order_id in locked_orders}
     affected = _execute_operation(db, actor, operation.action, operation, source_batches,
-                                  target_batch, locked_orders, reason)
+                                  target_batch, selected_orders, reason)
     plan.committed_at = utcnow()
     plan.data = {**data, 'committedBy': actor.id,
                  'committedAt': plan.committed_at.isoformat()}
@@ -1919,7 +2092,7 @@ def batch_operation_commit(payload: BatchOperationCommit, db=Depends(get_db),
             seen.add(batch.id)
             unique.append(batch)
     result_orders = [_delivery_order_view(db, order, actor)
-                     for order in sorted(locked_orders.values(), key=lambda item: item.id)]
+                     for order in sorted(selected_orders.values(), key=lambda item: item.id)]
     return ok({'action': operation.action, 'planId': plan.id,
                'batches': [_batch_view(db, batch) for batch in unique],
                'orders': result_orders})

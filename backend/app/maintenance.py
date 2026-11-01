@@ -78,6 +78,7 @@ from .models import (
     Coupon,
     DeliveryAssignment,
     DeliveryBatch,
+    DeliveryChange,
     DeliveryProof,
     DeletionRequest,
     EmailJob,
@@ -1737,6 +1738,14 @@ def _delete_batch_graph(db, batch, now: datetime) -> None:
             DeliveryProof.assignment_id.in_(assignment_ids)))
         db.execute(delete(DeliveryAssignment).where(
             DeliveryAssignment.batch_id == batch.id))
+    # Delivery change history belongs to the order, not the batch. Keep the
+    # durable public timeline and detach the deleted batch instead of failing
+    # the batch purge on delivery_changes.batch_id.
+    for change in db.scalars(select(DeliveryChange).where(
+            DeliveryChange.batch_id == batch.id)):
+        change.batch_id = None
+        touch(change)
+    db.flush()
     db.delete(batch)
 
 
@@ -2162,16 +2171,12 @@ def _purge_tokens(db, now: datetime) -> int:
 
 
 def _purge_email_payloads(db, now: datetime) -> int:
+    from .mail import _purge_payload
     rows = list(db.scalars(select(EmailJob).where(
-        EmailJob.expires_at <= now, EmailJob.protected_payload.isnot(None))))
+        EmailJob.expires_at <= now, EmailJob.protected_payload.isnot(None))
+        .with_for_update(skip_locked=True)))
     for job in rows:
-        job.protected_payload = None
-        data = dict(job.data or {})
-        data['purgedAt'] = now.isoformat()
-        job.data = data
-        if job.status in ('QUEUED', 'PROCESSING'):
-            job.status = 'EXPIRED'
-        touch(job)
+        _purge_payload(job, 'EXPIRED', 'MAIL_PAYLOAD_EXPIRED')
     if rows:
         db.flush()
     return len(rows)
@@ -2653,6 +2658,8 @@ def maintenance_sweep(db) -> dict:
         unverified = _purge_expired_unverified_accounts(db, now)
         purged_tokens = _purge_tokens(db, now)
         purged_emails = _purge_email_payloads(db, now)
+        from .growth import recover_delivery_notices
+        queued_delivery_notices = recover_delivery_notices(db)
         queued_purges = _queue_due_trash(db, now)
         deleted_files = _retention_files(db, now)
         deleted_files += _cleanup_orphan_assets(db, now)
@@ -2668,6 +2675,7 @@ def maintenance_sweep(db) -> dict:
             'unverifiedFilesDeleted': unverified['files'],
             'purgedTokens': purged_tokens,
             'purgedEmailPayloads': purged_emails,
+            'queuedDeliveryNotices': queued_delivery_notices,
             'purgeJobsQueued': queued_purges,
             'deletedFiles': deleted_files,
             'deletedExportFiles': deleted_export_files,

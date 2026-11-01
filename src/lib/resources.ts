@@ -31,9 +31,16 @@ export function planResources(
     if (
       path === `${ADMIN}/slots` ||
       path === `${ADMIN}/orders` ||
+      path.startsWith(`${ADMIN}/orders/`) ||
       path.startsWith(`${ADMIN}/batches`)
     )
-      result.push({ name: "slots", path: "/public/slots" });
+      result.push({
+        name: "slots",
+        path:
+          capabilities.includes("*") || capabilities.includes("delivery.manage")
+            ? "/admin/slots"
+            : "/public/slots",
+      });
     return result;
   }
   if (path.startsWith("/courier")) {

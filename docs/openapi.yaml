@@ -10440,6 +10440,14 @@
             ],
             "title": "Deliveryassignmentid"
           },
+          "deliveryNotices": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Deliverynotices",
+            "type": "array"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/FileView"
@@ -10609,6 +10617,13 @@
           "totalCents": {
             "title": "Totalcents",
             "type": "integer"
+          },
+          "unmatchedReceipts": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptView"
+            },
+            "title": "Unmatchedreceipts",
+            "type": "array"
           },
           "version": {
             "title": "Version",
@@ -15312,28 +15327,15 @@
         "additionalProperties": false,
         "properties": {
           "expectedVersion": {
-            "anyOf": [
-              {
-                "minimum": 1,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expectedversion"
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
           },
           "planId": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Planid"
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Planid",
+            "type": "string"
           },
           "reason": {
             "maxLength": 300,
@@ -15343,6 +15345,8 @@
           }
         },
         "required": [
+          "expectedVersion",
+          "planId",
           "reason"
         ],
         "title": "SlotSealCommit",
@@ -22848,6 +22852,131 @@
           }
         },
         "summary": "Approve Deletion Request"
+      }
+    },
+    "/admin/delivery-notices/{id}/retry": {
+      "post": {
+        "operationId": "retry_delivery_notice_route_api_v1_admin_delivery_notices__id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Retry Delivery Notice Route"
+      }
+    },
+    "/admin/delivery-repair/preview": {
+      "get": {
+        "operationId": "admin_delivery_repair_preview_api_v1_admin_delivery_repair_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_dict_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Delivery Repair Preview"
       }
     },
     "/admin/delivery-staff": {
@@ -35509,6 +35638,103 @@
           }
         },
         "summary": "Agree Slot"
+      }
+    },
+    "/orders/{order_id}/slot-rejection": {
+      "post": {
+        "operationId": "reject_slot_api_v1_orders__order_id__slot_rejection_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionReason"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrderView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reject Slot"
       }
     },
     "/orders/{order_id}/supplementary-charges": {

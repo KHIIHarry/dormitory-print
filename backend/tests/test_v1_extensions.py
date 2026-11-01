@@ -196,8 +196,10 @@ def _order_hydrated(api, admin_client, order_id):
 def _deliver_one(api, admin_client, db, order, courier_client,
                  courier_staff, key):
     """Packed order -> batch -> one real proof; returns the delivered view."""
+    slot_start = db.get(DeliverySlot, order['requestedSlotId']).starts_at
     batch = base.create_batch(api, admin_client, courier_staff,
-                              f'N/F 单件批次 {uuid4().hex[:6]}')
+                              f'N/F 单件批次 {uuid4().hex[:6]}',
+                              starts_at=slot_start)
     base.add_order_to_batch(api, admin_client, db, batch, order['id'],
                             f'{key}-add')
     base.publish_and_start(api, admin_client, db, batch['id'], key)
@@ -382,7 +384,8 @@ def test_default_percent_payroll_and_one_shared_proof_for_two_orders(
     orders = _two_packed_orders(api, admin_client, db, guest, location, slot,
                                 'batch')
     batch = base.create_batch(api, admin_client, courier,
-                              f'N/F 批量批次 {uuid4().hex[:6]}')
+                              f'N/F 批量批次 {uuid4().hex[:6]}',
+                              starts_at=slot.starts_at)
     for index, order in enumerate(orders):
         added = base.add_order_to_batch(
             api, admin_client, db, batch, order['id'], f'batch-add-{index}')
@@ -564,7 +567,9 @@ def test_supplementary_charges_adjust_real_payroll_only_when_flagged(
                  rate_bps=0)
     second_guest = client_factory()
     base.guest(second_guest)
-    second = _quote_and_submit(second_guest, api, db, location, slot, 'fixed')
+    # The first delivery sealed its slot; a new fee test needs an open slot.
+    location2, slot2 = _location_slot(db)
+    second = _quote_and_submit(second_guest, api, db, location2, slot2, 'fixed')
     assert _settle(admin_client, api, second.order,
                    key='fixed-pay').status_code == 200
     fixed_view = _order_hydrated(api, admin_client, second.order['id'])

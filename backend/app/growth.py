@@ -1937,6 +1937,12 @@ def _local_label(value, fmt: str = '%Y-%m-%d %H:%M') -> str:
 
 
 def _order_slot_label(db, order) -> str:
+    from .delivery_plan import arrangement_for_order
+    current = arrangement_for_order(db, order).get('effective') or {}
+    if current.get('startsAt'):
+        label = _window_label(current['startsAt'], current.get('endsAt'))
+        if label:
+            return label
     slot_id = order.confirmed_slot_id or order.requested_slot_id
     slot = db.get(DeliverySlot, slot_id) if slot_id else None
     if slot is None:
@@ -2085,29 +2091,13 @@ def notify_delivery_updated(db, order):
                   f'order-email:DELIVERY_UPDATED:{order.id}:{order.version}')
 
 
-def notify_delivery_change(db, order, change):
-    """Persist one durable notice intent and enqueue at most one mail per change."""
-    account = _active_customer(db, order)
-    recipient = (account.email if account is not None else '') or ''
-    dedupe = f'delivery-notice:{change.id}:{order.id}:DELIVERY_UPDATED'
-    notice = db.scalar(select(DeliveryNotice).where(DeliveryNotice.dedupe_key == dedupe))
-    if notice is None:
-        notice = DeliveryNotice(order_id=order.id, change_id=change.id,
-                                kind='DELIVERY_UPDATED', recipient=recipient[:320],
-                                status='PENDING', dedupe_key=dedupe, data={})
-        db.add(notice)
-        db.flush()
-    if not recipient:
-        notice.status = 'NO_EMAIL'
-        notice.last_error = '订单账号没有已验证邮箱'
-        db.flush()
-        return notice
+def _delivery_change_variables(db, order, change):
     original_window, new_window = _arrangement_windows(change)
     if change.kind == 'RESCHEDULE_PROPOSED':
         confirmation = '需要确认：请打开订单页，明确接受或拒绝新的配送安排。'
     else:
         confirmation = '无需再次确认，请以最新安排为准。'
-    variables = {
+    return {
         'brandName': _mail_brand(db),
         'orderCode': str(getattr(order, 'pickup_code', '') or ''),
         'deliveryLocation': _order_location_label(db, order),
@@ -2119,16 +2109,160 @@ def notify_delivery_change(db, order, change):
         'changeReason': change.reason or '配送安排已更新，请核对。',
         'confirmationRequired': confirmation,
     }
-    job = _queue(db, 'DELIVERY_UPDATED', recipient, variables,
-                 f'order-email:DELIVERY_UPDATED:{order.id}:{change.id}')
-    if job is None:
+
+
+def _enqueue_delivery_notice(db, notice, order, change):
+    """Only queue a never-sent intent; keep failure facts outside the savepoint."""
+    account = _active_customer(db, order)
+    if (account is None or account.deleted_at is not None or not account.email
+            or (notice.recipient and notice.recipient != account.email)):
+        notice.status = 'NO_EMAIL'
+        notice.last_error = 'NO_VERIFIED_EMAIL'
+        touch(notice)
+        db.flush()
+        return notice
+    if not notice.recipient:
+        notice.recipient = account.email
+    # Freeze public event facts so a later rejection or account/location edit
+    # does not turn recovery into a different notification.
+    metadata = dict(notice.data or {})
+    variables = metadata.get('variables') or _delivery_change_variables(db, order, change)
+    metadata.setdefault('variables', variables)
+    metadata.setdefault('eventKind', change.kind)
+    metadata.setdefault('eventCreatedAt', change.created_at.isoformat())
+    metadata.setdefault('arrangementVersion', order.arrangement_version or 0)
+    notice.data = metadata
+    import hashlib
+    recipient_key = hashlib.sha256(notice.recipient.encode()).hexdigest()[:24]
+    business_key = f'order-email:DELIVERY_UPDATED:{order.id}:{change.id}:{recipient_key}'
+    try:
+        with db.begin_nested():
+            job = enqueue_email(db, notice.kind, notice.recipient, variables, business_key)
+            job.data = {**(job.data or {}), 'deliveryChangeId': change.id,
+                        'eventCreatedAt': metadata['eventCreatedAt'],
+                        'arrangementVersion': metadata['arrangementVersion']}
+            db.flush()
+    except Exception as error:
         notice.status = 'PENDING'
-        notice.last_error = '邮件暂未进入发送队列'
+        notice.last_error = (error.code if isinstance(error, DomainError) else 'MAIL_QUEUE_FAILED')
     else:
         notice.status = 'PENDING'
+        notice.last_error = ''
         notice.email_job_id = job.id
+    touch(notice)
     db.flush()
     return notice
+
+
+def notify_delivery_change(db, order, change):
+    """Persist a stable event intent even when SMTP, template or queue is broken."""
+    dedupe = f'delivery-notice:{change.id}:{order.id}:DELIVERY_UPDATED'
+    advisory_lock(db, dedupe)
+    notice = db.scalar(select(DeliveryNotice).where(
+        DeliveryNotice.dedupe_key == dedupe).with_for_update())
+    if notice is None:
+        account = _active_customer(db, order)
+        notice = DeliveryNotice(order_id=order.id, change_id=change.id,
+                                kind='DELIVERY_UPDATED',
+                                recipient=account.email if account else '',
+                                status='PENDING', dedupe_key=dedupe, data={})
+        db.add(notice)
+        db.flush()
+    # Replayed business commits never reset a transport outcome or requeue a
+    # terminal Job. Only the explicit, guarded retry path can do that.
+    if notice.email_job_id or notice.status in ('ACCEPTED', 'UNKNOWN'):
+        return notice
+    return _enqueue_delivery_notice(db, notice, order, change)
+
+
+def recover_delivery_notices(db, limit=100):
+    """Retry only intents that never acquired an EmailJob, under SKIP LOCKED."""
+    rows = list(db.scalars(select(DeliveryNotice).where(
+        DeliveryNotice.status == 'PENDING', DeliveryNotice.email_job_id.is_(None)
+    ).order_by(DeliveryNotice.updated_at, DeliveryNotice.id)
+        .limit(limit).with_for_update(skip_locked=True)))
+    queued = 0
+    for notice in rows:
+        order = db.get(Order, notice.order_id)
+        change = db.get(DeliveryChange, notice.change_id) if notice.change_id else None
+        if order is None or change is None:
+            notice.status = 'FAILED'
+            notice.last_error = 'DELIVERY_EVENT_MISSING'
+            touch(notice)
+            continue
+        _enqueue_delivery_notice(db, notice, order, change)
+        queued += int(notice.email_job_id is not None)
+    return queued
+
+
+def _delivery_notice_view(notice):
+    return {'id': notice.id, 'version': notice.version, 'changeId': notice.change_id,
+            'status': notice.status, 'attempts': notice.attempts,
+            'lastError': notice.last_error, 'emailJobId': notice.email_job_id,
+            'createdAt': notice.created_at.isoformat(), 'updatedAt': notice.updated_at.isoformat()}
+
+
+def delivery_notice_summary(db, order_id):
+    """Redacted operational state. Callers must enforce order/admin permission."""
+    return [_delivery_notice_view(row) for row in db.scalars(
+        select(DeliveryNotice).where(DeliveryNotice.order_id == order_id)
+        .order_by(DeliveryNotice.created_at.desc(), DeliveryNotice.id.desc()).limit(20))]
+
+
+def retry_delivery_notice(db, notice):
+    """Caller owns locking and authorization; never resend an unknown outcome."""
+    from .mail import retry_failed_email_job
+    from .models import EmailJob
+    if notice.status == 'UNKNOWN':
+        raise DomainError('MAIL_RESULT_UNKNOWN', '发送结果未知，请先人工核实，不能直接补发', 409)
+    if notice.status == 'ACCEPTED':
+        return notice
+    order = db.get(Order, notice.order_id)
+    change = db.get(DeliveryChange, notice.change_id) if notice.change_id else None
+    if order is None or change is None:
+        raise DomainError('NOT_FOUND', '配送变更记录不存在', 404)
+    if notice.email_job_id:
+        job = db.get(EmailJob, notice.email_job_id)
+        if job is None:
+            raise DomainError('MAIL_RESULT_UNKNOWN', '原发送任务不存在，请先人工核实', 409)
+        if job.status == 'SMTP_ACCEPTED':
+            notice.status = 'ACCEPTED'
+            return notice
+        if job.status == 'UNKNOWN':
+            raise DomainError('MAIL_RESULT_UNKNOWN', '发送结果未知，请先人工核实，不能直接补发', 409)
+        if job.status not in ('FAILED', 'EXPIRED'):
+            return notice
+        variables = (notice.data or {}).get('variables') or _delivery_change_variables(db, order, change)
+        account = _active_customer(db, order)
+        if not account or account.deleted_at or account.email != notice.recipient:
+            raise DomainError('MAIL_INVALID_RECIPIENT', '订单账号已无对应的有效已验证邮箱', 409)
+        retry_failed_email_job(db, job, notice.recipient, variables)
+        notice.status = 'PENDING'
+        notice.last_error = ''
+        touch(notice)
+        db.flush()
+        return notice
+    return _enqueue_delivery_notice(db, notice, order, change)
+
+
+@router.post('/admin/delivery-notices/{id}/retry', response_model=Envelope[dict])
+def retry_delivery_notice_route(id: str, payload: ReasonInput, db=Depends(get_db),
+                                actor: Actor = Depends(actor_dep)):
+    require_admin(actor)
+    if not ({'*', 'delivery.manage', 'mail.manage'} & actor.capabilities):
+        raise DomainError('FORBIDDEN', '账号未获配送通知管理权限', 403)
+    from .models import EmailJob
+    notice = db.get(DeliveryNotice, id)
+    if notice is None:
+        raise DomainError('NOT_FOUND', '配送通知不存在', 404)
+    # Transport locks EmailJob before syncing its notice; use the same order.
+    if notice.email_job_id:
+        lock(db, EmailJob, notice.email_job_id)
+    notice = lock(db, DeliveryNotice, id, payload.expected_version)
+    retry_delivery_notice(db, notice)
+    audit(db, actor, 'DELIVERY_NOTICE_RETRY', 'DELIVERY_NOTICE', notice.id,
+          reason=payload.reason, data={'changeId': notice.change_id, 'status': notice.status})
+    return ok(_delivery_notice_view(notice))
 
 
 def notify_courier_dispatch(db, batch):

@@ -172,6 +172,7 @@ export function OrderList() {
                   {formatDisplayTime(o.createdAt)}
                 </span>
               </div>
+              <OrderArrangementSummary order={o} />
               <div className="order-card-footer">
                 <span>
                   {o.files.length} 个文件 <i>·</i> 合计{" "}
@@ -334,13 +335,21 @@ export function Contact() {
         {order.settlement?.confirmedAt ? (
           <div className="settlement-confirmed" role="status">
             <CheckCircle2 size={18} />
-            <span>{order.settlement.settlementKind === "ZERO_PAYABLE" ? "零元结算已确认，正在安排打印" : "收款已确认，正在安排打印"}</span>
+            <span>
+              {order.settlement.settlementKind === "ZERO_PAYABLE"
+                ? "零元结算已确认，正在安排打印"
+                : "收款已确认，正在安排打印"}
+            </span>
           </div>
         ) : (
-          <Button variant="secondary" busy={refreshing} onClick={async () => {
-            await refresh();
-            if (DEMO) toast("演示订单等待管理员确认收款");
-          }}>
+          <Button
+            variant="secondary"
+            busy={refreshing}
+            onClick={async () => {
+              await refresh();
+              if (DEMO) toast("演示订单等待管理员确认收款");
+            }}
+          >
             <RefreshCw size={16} /> 查看是否已确认
           </Button>
         )}
@@ -566,6 +575,7 @@ export function OrderDetail() {
           <ArrangementPanel
             order={order}
             busy={arrangementBusy}
+            canAgree={can("ORDER_AGREE_SLOT")}
             onAccept={async (slotId) => {
               if (DEMO) {
                 toast("演示模式：已接受新的配送安排");
@@ -574,7 +584,7 @@ export function OrderDetail() {
               setArrangementBusy(true);
               try {
                 await growthRequest(
-                  `/orders/${encodeURIComponent(order.id)}/arrangement-agreement`,
+                  `/orders/${encodeURIComponent(order.id)}/${order.status === "PENDING_CONFIRMATION" && (order as any).slotProposal ? "slot-agreement" : "arrangement-agreement"}`,
                   {
                     method: "POST",
                     body: {
@@ -600,7 +610,7 @@ export function OrderDetail() {
               setArrangementBusy(true);
               try {
                 await growthRequest(
-                  `/orders/${encodeURIComponent(order.id)}/arrangement-rejection`,
+                  `/orders/${encodeURIComponent(order.id)}/${order.status === "PENDING_CONFIRMATION" && (order as any).slotProposal ? "slot-rejection" : "arrangement-rejection"}`,
                   {
                     method: "POST",
                     body: {
@@ -609,7 +619,7 @@ export function OrderDetail() {
                     },
                   },
                 );
-                toast("已保留原配送安排，管理员会继续协调");
+                toast("已拒绝新安排，管理员会继续协调");
                 await refresh();
               } catch (error) {
                 toast((error as Error).message);
@@ -657,9 +667,11 @@ export function OrderDetail() {
                 <dd>
                   {order.addressReview
                     ? "楼栋已修改，待管理员复核"
-                    : batch
-                      ? `${batch.date} ${batch.name} ${batch.time}`
-                      : "待分配批次"}
+                    : (order as any).arrangement?.batch
+                      ? (order as any).arrangement.batch.name
+                      : batch
+                        ? `${batch.date} ${batch.name} ${batch.time}`
+                        : "待分配批次"}
                 </dd>
               </div>
               <div>
@@ -724,7 +736,14 @@ export function OrderDetail() {
               ))}
             </div>
           </Panel>
-          <CustomerSupplementaryPanel orderId={order.id} canDispute={order.accessKind === "OWNER" || order.accessKind === "GUEST_OWNER" || order.allowedActions?.includes("ORDER_AFTER_SALES")} />
+          <CustomerSupplementaryPanel
+            orderId={order.id}
+            canDispute={
+              order.accessKind === "OWNER" ||
+              order.accessKind === "GUEST_OWNER" ||
+              order.allowedActions?.includes("ORDER_AFTER_SALES")
+            }
+          />
           <AfterSalesPanel orderId={order.id} order={order} />
         </div>
         <aside>
@@ -803,9 +822,7 @@ export function OrderDetail() {
                       )),
                 )
                 .map((b) => {
-                  const campus = data.campuses.find(
-                    (c) => c.id === b.campusId,
-                  );
+                  const campus = data.campuses.find((c) => c.id === b.campusId);
                   return (
                     <option value={b.id} key={b.id}>
                       {campus ? `${campus.name} · ${b.name}` : b.name}
@@ -890,7 +907,6 @@ export function OrderDetail() {
   );
 }
 
-
 const ARRANGEMENT_LABELS: Record<string, string> = {
   REQUESTED: "已提交申请，等待确认收款",
   CONFIRMED: "配送时段已确认",
@@ -907,27 +923,43 @@ function arrangementWindow(snapshot: any) {
   if (!snapshot) return "";
   const date = snapshot.date || "";
   const name = snapshot.name || "";
-  const start = snapshot.startsAt ? formatDisplayTime(snapshot.startsAt) : snapshot.start || "";
-  const end = snapshot.endsAt ? formatDisplayTime(snapshot.endsAt) : snapshot.end || "";
+  const start = snapshot.startsAt
+    ? formatDisplayTime(snapshot.startsAt)
+    : snapshot.start || "";
+  const end = snapshot.endsAt
+    ? formatDisplayTime(snapshot.endsAt)
+    : snapshot.end || "";
   return [date, name, start && end ? `${start} – ${end}` : start]
     .filter(Boolean)
     .join(" · ");
 }
 
-function ArrangementPanel({
+export function ArrangementPanel({
   order,
   busy,
   onAccept,
   onReject,
+  canAgree,
 }: {
   order: Order;
   busy: boolean;
+  canAgree: boolean;
   onAccept: (slotId: string) => Promise<void>;
   onReject: () => Promise<void>;
 }) {
   const arrangement = (order as any).arrangement;
   if (!arrangement) return null;
-  const pending = arrangement.pendingProposal;
+  const unpaid = (order as any).slotProposal;
+  const unpaidPending =
+    order.status === "PENDING_CONFIRMATION" &&
+    unpaid &&
+    !unpaid.confirmed &&
+    !unpaid.rejected;
+  const pending =
+    arrangement.pendingProposal ||
+    (unpaidPending
+      ? { proposed: unpaid.proposed || unpaid, reason: unpaid.reason }
+      : null);
   const pendingSlot = pending?.proposed || {};
   const effective = arrangement.effective || arrangement.confirmed;
   return (
@@ -935,7 +967,9 @@ function ArrangementPanel({
       <dl className="detail-dl">
         <div>
           <dt>当前状态</dt>
-          <dd>{ARRANGEMENT_LABELS[arrangement.status] || arrangement.status}</dd>
+          <dd>
+            {ARRANGEMENT_LABELS[arrangement.status] || arrangement.status}
+          </dd>
         </div>
         <div>
           <dt>当前安排</dt>
@@ -958,25 +992,63 @@ function ArrangementPanel({
           </div>
         )}
       </dl>
+      {order.status === "PENDING_CONFIRMATION" && unpaid?.confirmed && (
+        <Notice>
+          已接受时段建议 {arrangementWindow(unpaid.proposed || unpaid)}
+          ；仍需管理员确认收款，名额尚未保证。
+        </Notice>
+      )}
+      {order.status === "PENDING_CONFIRMATION" && unpaid?.rejected && (
+        <Notice>
+          已拒绝时段建议，等待管理员继续协调。
+          {unpaid.reason && <span>原调整原因：{unpaid.reason}</span>}
+        </Notice>
+      )}
       {pending && (
         <>
           <Notice>
-            管理员建议调整到 {arrangementWindow(pendingSlot)}。接受后才会更新确认时段；
-            拒绝不会自动取消原安排，管理员会继续与你协调。
+            管理员建议调整到 {arrangementWindow(pendingSlot)}。
+            {unpaidPending
+              ? "接受后仍需管理员在截单前确认收款，名额尚未保证。"
+              : "接受后才会更新确认时段。"}
+            拒绝后管理员会继续与你协调。
+            {pending.reason && <span>原因：{pending.reason}</span>}
           </Notice>
-          <div className="button-row">
-            <Button
-              busy={busy}
-              onClick={() => void onAccept(pendingSlot.slotId)}
-            >
-              接受新安排
-            </Button>
-            <Button variant="secondary" busy={busy} onClick={() => void onReject()}>
-              保持原安排
-            </Button>
-          </div>
+          {canAgree && (
+            <div className="button-row">
+              <Button
+                busy={busy}
+                onClick={() =>
+                  void onAccept(pendingSlot.slotId || pendingSlot.id)
+                }
+              >
+                接受新安排
+              </Button>
+              <Button
+                variant="secondary"
+                busy={busy}
+                onClick={() => void onReject()}
+              >
+                拒绝新安排
+              </Button>
+            </div>
+          )}
         </>
       )}
     </Panel>
+  );
+}
+
+export function OrderArrangementSummary({ order }: { order: Order }) {
+  const arrangement = (order as any).arrangement;
+  if (!arrangement) return null;
+  return (
+    <p className="form-hint">
+      {ARRANGEMENT_LABELS[arrangement.status] || arrangement.status}
+      {arrangementWindow(arrangement.effective) && (
+        <span> · {arrangementWindow(arrangement.effective)}</span>
+      )}
+      {arrangement.reason && <span> · {arrangement.reason}</span>}
+    </p>
   );
 }

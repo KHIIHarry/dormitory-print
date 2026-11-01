@@ -131,3 +131,18 @@ export function allArtifactsAcknowledged(
 ) {
   return artifacts.length > 0 && artifacts.every((a) => acks.includes(a.id));
 }
+
+export function slotCurrentlySelectable(
+  slot: {
+    enabled: boolean;
+    selectable?: boolean;
+    cutoffAt?: string | null;
+    sealedAt?: string | null;
+  },
+  now = Date.now(),
+) {
+  if (!slot.enabled || slot.selectable === false || slot.sealedAt) return false;
+  if (!slot.cutoffAt) return true;
+  const cutoff = Date.parse(slot.cutoffAt);
+  return Number.isFinite(cutoff) && now < cutoff;
+}

@@ -82,10 +82,10 @@ BLOCKER_MESSAGES = {
 
 
 def service_accepting(db) -> bool:
-    services = get_config(db, 'services').data or {}
+    announcement = get_config(db, 'announcement').data or {}
     workflow = get_config(db, 'workflow').data or {}
     pauses = workflow.get('pauses') or {}
-    return bool(services.get('serviceEnabled', True)) and not bool(pauses.get('newOrders'))
+    return bool(announcement.get('serviceEnabled', False)) and not bool(pauses.get('newOrders'))
 
 
 def slot_acceptance(db, slot: DeliverySlot, now: datetime | None = None,
@@ -204,7 +204,17 @@ def regular_batch_for_group(db, group: DeliveryGroup, slot: DeliverySlot,
         DeliveryBatch.is_regular.is_(True),
         DeliveryBatch.deleted_at.is_(None)))
     if batch is not None:
-        return batch
+        if batch.status in ('CANCELLED', 'COMPLETED'):
+            active = db.scalar(select(DeliveryAssignment.id).where(
+                DeliveryAssignment.batch_id == batch.id,
+                DeliveryAssignment.active.is_(True)).limit(1))
+            if active is not None or batch_effective_sealed(slot):
+                raise DomainError('BATCH_NOT_ACCEPTING', '原批次不能继续接单，请协调配送安排', 409)
+            batch.is_regular = False
+            touch(batch)
+            db.flush()
+        else:
+            return batch
     batch = DeliveryBatch(
         name=f'{slot.date} {slot.name} · {campus.name}',
         courier_id=None,
@@ -252,6 +262,8 @@ def add_to_auto_batch(db, actor, order: Order, slot: DeliverySlot,
         DeliveryAssignment.order_id == order.id,
         DeliveryAssignment.active.is_(True)))
     if existing is not None:
+        if existing.batch_id != batch.id:
+            raise DomainError('BATCH_CONFLICT', '订单已有其他有效配送执行，请先处理原分配', 409)
         return batch, existing
     assignment = DeliveryAssignment(
         order_id=order.id, batch_id=batch.id, courier_id=batch.courier_id,
@@ -273,6 +285,8 @@ def add_to_auto_batch(db, actor, order: Order, slot: DeliverySlot,
             DeliveryAssignment.active.is_(True)))
         if existing is None:
             raise
+        if existing.batch_id != batch.id:
+            raise DomainError('BATCH_CONFLICT', '订单已有其他有效配送执行', 409)
         return batch, existing
     return batch, assignment
 
@@ -300,15 +314,26 @@ def arrangement_for_order(db, order: Order) -> dict:
     batch = db.get(DeliveryBatch, assignment.batch_id) if assignment else None
     changes = _latest_changes(db, order)
     latest = changes[0] if changes else None
-    pending = next((row for row in changes if row.status == 'PENDING'), None)
+    pending = db.scalar(select(DeliveryChange).where(
+        DeliveryChange.order_id == order.id, DeliveryChange.status == 'PENDING')
+        .order_by(DeliveryChange.created_at.desc(), DeliveryChange.id.desc()).limit(1))
+    applied = db.scalar(select(DeliveryChange).where(
+        DeliveryChange.order_id == order.id, DeliveryChange.status == 'APPLIED')
+        .order_by(DeliveryChange.created_at.desc(), DeliveryChange.id.desc()).limit(1))
     requested = data.get('requestedSlotSnapshot')
     confirmed = data.get('confirmedSlotSnapshot')
     current = confirmed
-    if latest is not None and latest.status == 'APPLIED' and latest.proposed:
-        current = latest.proposed
-    elif latest is not None and latest.status == 'PENDING' and latest.original:
-        # A pending proposal never becomes the promised arrangement.
-        current = latest.original
+    if applied is not None and applied.proposed:
+        current = applied.proposed
+    elif pending is not None and pending.original:
+        current = pending.original
+    if current is None and batch is not None:
+        current = {'startsAt': batch.starts_at.isoformat(), 'endsAt': batch.ends_at.isoformat(),
+                   'name': batch.name, 'source': 'CURRENT_BATCH'}
+    if current is None and order.confirmed_slot_id:
+        fallback = db.get(DeliverySlot, order.confirmed_slot_id)
+        if fallback is not None:
+            current = {**slot_snapshot(fallback), 'source': 'CURRENT_SLOT'}
     if current is None:
         current = requested
     if order.status == 'CANCELLED':
@@ -317,6 +342,9 @@ def arrangement_for_order(db, order: Order) -> dict:
         state = 'DELIVERED'
     elif pending is not None:
         state = 'WAITING_CUSTOMER'
+    elif ((latest is not None and latest.status == 'REJECTED')
+          or (data.get('slotProposal') or {}).get('rejected')):
+        state = 'NEEDS_COORDINATION'
     elif order.confirmed_slot_id is None:
         state = 'REQUESTED'
     elif assignment is None:
@@ -330,7 +358,7 @@ def arrangement_for_order(db, order: Order) -> dict:
     else:
         state = 'CONFIRMED'
     confirmed_slot = db.get(DeliverySlot, order.confirmed_slot_id) if order.confirmed_slot_id else None
-    sealed = bool((batch and batch.sealed_at) or (confirmed_slot and confirmed_slot.sealed_at))
+    sealed = bool(batch and (batch.sealed_at or batch_effective_sealed(confirmed_slot)))
     return {
         'version': order.arrangement_version or 0,
         'status': state,
@@ -338,6 +366,7 @@ def arrangement_for_order(db, order: Order) -> dict:
         'effective': current,
         'originalRequest': requested,
         'confirmed': confirmed,
+        'originalConfirmation': data.get('settlementSlotSnapshot') or confirmed,
         'reason': latest.reason if latest else '',
         'sealed': sealed,
         'batch': ({
@@ -370,6 +399,10 @@ def record_change(db, order: Order, *, kind: str, original: dict, proposed: dict
                   confirmation_required: bool = False,
                   internal_note: str = '', plan_id: str | None = None,
                   data: dict | None = None) -> DeliveryChange:
+    reason = (reason or '').strip()
+    if not reason or len(reason) > 300:
+        raise DomainError('INVALID_CHANGE_REASON', '配送变更原因须为 1 到 300 个字符', 422,
+                          field_errors={'reason': ['请填写 1 到 300 个字符的原因']})
     change = DeliveryChange(
         order_id=order.id, batch_id=batch_id, slot_id=slot_id, kind=kind,
         status=status, confirmation_required=confirmation_required,
@@ -454,7 +487,8 @@ def apply_seal(db, slot: DeliverySlot, actor, reason: str, plan_id: str | None =
     slot.sealed_by = actor.staff_id
     slot.seal_reason = reason
     touch(slot)
-    groups = list(db.scalars(select(DeliveryGroup).where(DeliveryGroup.slot_id == slot.id)))
+    groups = list(db.scalars(select(DeliveryGroup).where(DeliveryGroup.slot_id == slot.id)
+                            .order_by(DeliveryGroup.id).with_for_update()))
     for group in groups:
         group.sealed_at = now
         group.sealed_by = actor.staff_id
@@ -463,7 +497,7 @@ def apply_seal(db, slot: DeliverySlot, actor, reason: str, plan_id: str | None =
     batches = list(db.scalars(select(DeliveryBatch).where(
         DeliveryBatch.deleted_at.is_(None),
         (DeliveryBatch.slot_id == slot.id) | (DeliveryBatch.group_id.in_([g.id for g in groups]))).order_by(
-        DeliveryBatch.id)))
+        DeliveryBatch.id).with_for_update()))
     for batch in batches:
         if batch.sealed_at is None:
             batch.sealed_at = now
@@ -494,8 +528,6 @@ def persist_seal_facts(db, slot: DeliverySlot, actor, reason: str) -> None:
 
 def _target_slot_problem(db, order, slot, now=None) -> tuple[str, str] | None:
     """Return (code, message) when *slot* cannot receive this paid order."""
-    from .models import DeliverySlot as _Slot  # local: avoids import cycles
-
     now = now or utcnow()
     if slot is None or slot.id is None:
         return 'SLOT_NOT_FOUND', '配送时段不存在'
@@ -518,10 +550,23 @@ def _target_slot_problem(db, order, slot, now=None) -> tuple[str, str] | None:
         return 'CAMPUS_CONFIG_MISSING', '订单缺少校区信息'
     if slot.id == order.confirmed_slot_id:
         return 'SLOT_UNCHANGED', '目标时段与原安排相同'
+    state = slot_acceptance(db, slot, now)
+    if state['status'] != OPEN:
+        return SLOT_ERRORS[state['status']]
     return None
 
 
+def _ensure_reschedulable(db, order: Order) -> None:
+    if (order.status in ('DELIVERING', 'DELIVERED', 'CANCELLED')
+            or order.deleted_at or order.refund_locked):
+        raise DomainError('INVALID_TRANSITION', '配送已开始、订单已结束或退款处理中，不能直接改订', 409)
+    assignment = _assignment_for_order(db, order)
+    if assignment is not None and assignment.status in ('STARTED', 'DELIVERED'):
+        raise DomainError('ASSIGNMENT_STARTED', '当前配送执行已开始，不能直接改订', 409)
+
+
 def propose_reschedule(db, actor, order: Order, slot, reason: str) -> DeliveryChange:
+    _ensure_reschedulable(db, order)
     problem = _target_slot_problem(db, order, slot)
     if problem is not None:
         code, message = problem
@@ -534,6 +579,10 @@ def propose_reschedule(db, actor, order: Order, slot, reason: str) -> DeliveryCh
         raise DomainError('ARRANGEMENT_NOT_CONFIRMED', '订单尚未确认配送时段', 409)
     current = arrangement_for_order(db, order)
     original = current.get('effective') or current.get('confirmed') or {}
+    for old in db.scalars(select(DeliveryChange).where(
+            DeliveryChange.order_id == order.id, DeliveryChange.status == 'PENDING')):
+        old.status = 'SUPERSEDED'
+        touch(old)
     proposed = {'slotId': slot.id, 'date': slot.date, 'name': slot.name,
                 'startsAt': slot.starts_at.isoformat(), 'endsAt': slot.ends_at.isoformat(),
                 'openAt': slot.open_at.isoformat(), 'cutoffAt': slot.cutoff_at.isoformat(),
@@ -569,8 +618,11 @@ def reject_reschedule(db, actor, order: Order, reason: str) -> DeliveryChange:
                    'rejectedBy': actor.id if actor else None}
     touch(change)
     data = dict(order.data or {})
-    data.pop('slotProposal', None)
+    data['slotProposal'] = {**(data.get('slotProposal') or {}),
+                            'rejected': True, 'confirmed': False}
     order.data = data
+    order.arrangement_version = int(order.arrangement_version or 0) + 1
+    order.arrangement_updated_at = utcnow()
     touch(order)
     return change
 
@@ -578,6 +630,7 @@ def reject_reschedule(db, actor, order: Order, reason: str) -> DeliveryChange:
 def confirm_reschedule(db, actor, order: Order, slot_id: str) -> DeliveryChange:
     from .models import DeliveryAssignment
 
+    _ensure_reschedulable(db, order)
     data = dict(order.data or {})
     proposal = data.get('slotProposal') or {}
     if not proposal or proposal.get('slotId') != slot_id:
@@ -610,6 +663,8 @@ def confirm_reschedule(db, actor, order: Order, slot_id: str) -> DeliveryChange:
         with db.begin_nested():
             group = group_for_slot_campus(db, target, campus)
             target_batch = regular_batch_for_group(db, group, target, campus)
+            if target_batch.status not in ('PLANNED', 'POSTPONED'):
+                raise DomainError('BATCH_NOT_ACCEPTING', '目标批次已发布或出发，不能加入', 409)
             if assignment is not None:
                 assignment.active = False
                 assignment.status = 'CANCELLED'
@@ -620,7 +675,7 @@ def confirm_reschedule(db, actor, order: Order, slot_id: str) -> DeliveryChange:
                 touch(assignment)
             db.flush()
             db.add(DeliveryAssignment(
-                order_id=order.id, batch_id=target_batch.id, courier_id=None,
+                order_id=order.id, batch_id=target_batch.id, courier_id=target_batch.courier_id,
                 status='PLANNED', active=True, address_review=order.address_review,
                 data={'assignedAt': utcnow().isoformat(),
                       'assignedBy': actor.id if actor else None,
@@ -641,6 +696,7 @@ def confirm_reschedule(db, actor, order: Order, slot_id: str) -> DeliveryChange:
     order.confirmed_slot_id = target.id
     data = dict(order.data or {})
     data.pop('slotProposal', None)
+    data.setdefault('settlementSlotSnapshot', data.get('confirmedSlotSnapshot'))
     data['confirmedSlotSnapshot'] = slot_snapshot(target, public=False)
     data['lastArrangementChange'] = {
         'changeId': change.id, 'kind': change.kind, 'reason': change.reason,
@@ -657,6 +713,14 @@ def confirm_reschedule(db, actor, order: Order, slot_id: str) -> DeliveryChange:
                    'batchId': target_batch.id, 'oldBatchId': old_batch_id}
     touch(change)
     touch(order)
+    if old_batch_id:
+        from .delivery import refresh_batch
+        refresh_batch(db, old_batch_id)
+    applied = record_change(
+        db, order, kind='RESCHEDULE_CONFIRMED', original=change.original,
+        proposed=slot_snapshot(target), reason=change.reason,
+        actor_id=actor.id if actor else None, batch_id=target_batch.id,
+        slot_id=target.id, data={'proposalId': change.id})
     from .growth import notify_delivery_change
-    notify_delivery_change(db, order, change)
+    notify_delivery_change(db, order, applied)
     return change

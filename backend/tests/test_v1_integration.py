@@ -379,12 +379,14 @@ def settle(api, admin_client, order, key):
     }, key=key)
 
 
-def create_batch(api, admin_client, courier, name):
+def create_batch(api, admin_client, courier, name, starts_at=None):
     now = utcnow()
+    start = starts_at or (now - timedelta(minutes=30))
+    end = start + timedelta(hours=2) if starts_at else now + timedelta(hours=2)
     response = api(admin_client, '/admin/batches', {
         'name': name,
-        'startsAt': (now - timedelta(minutes=30)).isoformat(),
-        'endsAt': (now + timedelta(hours=2)).isoformat(),
+        'startsAt': start.isoformat(),
+        'endsAt': end.isoformat(),
         'courierId': courier.id,
         'reason': 'V1 验收配送批次',
     })
@@ -424,8 +426,21 @@ def add_order_to_batch(api, admin_client, db, batch, order_id, key):
 
 
 def publish_and_start(api, admin_client, db, batch_id, key):
-    from app.models import DeliveryBatch
+    from app.models import DeliveryAssignment, DeliveryBatch, DeliverySlot, Order
 
+    batch = db.get(DeliveryBatch, batch_id)
+    slot_ids = {batch.slot_id} | {
+        (db.get(Order, order_id).confirmed_slot_id or
+         db.get(Order, order_id).requested_slot_id)
+        for order_id in db.scalars(select(DeliveryAssignment.order_id).where(
+            DeliveryAssignment.batch_id == batch_id))
+    }
+    for slot_id in slot_ids - {None}:
+        slot = db.get(DeliverySlot, slot_id)
+        if slot is not None and slot.sealed_at is None:
+            slot.sealed_at = utcnow()
+            slot.seal_reason = '测试封批'
+    db.commit()
     published = api(admin_client, f'/admin/batches/{batch_id}/publish',
                     {'expectedVersion': db.get(DeliveryBatch, batch_id).version},
                     key=f'{key}-publish')
@@ -767,7 +782,9 @@ def test_v1_paid_fulfilment_delivery_and_merchant_rework_redelivery(
     courier = staff_factory(role='COURIER', capabilities=[])
     courier_client = staff_client(client_factory, db, courier)
 
-    batch = create_batch(api, admin_client, courier, 'V1 首轮配送')
+    slot_start = db.get(DeliverySlot, order['requestedSlotId']).starts_at
+    batch = create_batch(api, admin_client, courier, 'V1 首轮配送',
+                         starts_at=slot_start)
     add_order_to_batch(api, admin_client, db, batch, order['id'], key='v1-flow-first')
     publish_and_start(api, admin_client, db, batch['id'], key='v1-flow-first')
 
@@ -871,7 +888,8 @@ def test_v1_paid_fulfilment_delivery_and_merchant_rework_redelivery(
     assert ready.json()['data']['status'] == 'REPRINT_READY'
 
     # A new batch and a new assignment are required; the first proof stays.
-    second_batch = create_batch(api, admin_client, courier, 'V1 重做配送')
+    second_batch = create_batch(api, admin_client, courier, 'V1 重做配送',
+                                starts_at=slot_start)
     add_order_to_batch(api, admin_client, db, second_batch, order['id'], key='v1-flow-second')
     publish_and_start(api, admin_client, db, second_batch['id'], key='v1-flow-second')
     second_assignment = active_assignment(db, order['id'])

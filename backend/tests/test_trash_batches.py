@@ -4,7 +4,8 @@ A completed batch used to be permanently un-deletable; the policy decision is
 that an admin may delete it, it lands in the trash, and it can be restored
 within the retention window.
 """
-from datetime import timedelta
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 import pytest
@@ -13,7 +14,7 @@ from sqlalchemy import select
 from app.core import Actor, actor_dep, utcnow
 from app.delivery_schemas import to_shanghai_date
 from app.models import (
-    DeliveryAssignment, DeliveryBatch, Order, TrashEntry, WageEntry,
+    DeliveryAssignment, DeliveryBatch, DeliveryChange, Order, TrashEntry, WageEntry,
 )
 from tests.test_delivery import make_courier, make_ready_order
 
@@ -184,6 +185,9 @@ def test_purged_batch_removes_executions_and_detaches_settled_wages(
     db.add(settlement)
     db.flush()
     db.add(WageSettlementItem(settlement_id=settlement.id, entry_id=wage.id))
+    change = DeliveryChange(order_id=order.id, batch_id=batch['id'],
+                            kind='ETA_UPDATED', status='APPLIED', data={})
+    db.add(change)
     db.commit()
 
     deleted = api(client, f"/admin/batches/{batch['id']}", {
@@ -203,6 +207,9 @@ def test_purged_batch_removes_executions_and_detaches_settled_wages(
     assert retained is not None
     assert retained.assignment_id is None
     assert retained.snapshot['purgedAssignmentId'] == assignment_id
+    kept_change = db.get(DeliveryChange, change.id)
+    assert kept_change is not None
+    assert kept_change.batch_id is None
 
 
 def test_retroactive_policy_still_needs_settlement_before_order_trash(
@@ -275,8 +282,10 @@ def test_delete_batch_when_member_order_was_already_deleted(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
-    order = make_ready_order(db)
-    starts_at = utcnow() + timedelta(days=1)
+    local = datetime.combine((utcnow() + timedelta(days=1)).date(),
+                             time(10, 0), tzinfo=ZoneInfo('Asia/Shanghai'))
+    starts_at = local.astimezone(timezone.utc).replace(tzinfo=None)
+    order = make_ready_order(db, delivery_starts_at=starts_at)
     created = api(client, '/admin/batches', {
         'name': f'订单删除批次 {uuid4().hex[:6]}',
         'date': to_shanghai_date(starts_at),

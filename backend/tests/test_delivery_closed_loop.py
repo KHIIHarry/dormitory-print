@@ -317,7 +317,7 @@ def test_same_group_joins_and_other_campus_gets_its_own_batch(db, admin_client):
         DeliveryAssignment.order_id == second.id)).batch_id == east_batch.id
 
 
-def test_legacy_unconfigured_slot_settles_without_auto_batch(db, admin_client):
+def test_legacy_unconfigured_slot_requires_reconciliation_before_settlement(db, admin_client):
     world = make_world(db, campus=False)
     slot = world.slot
     slot.open_at = None
@@ -332,7 +332,10 @@ def test_legacy_unconfigured_slot_settles_without_auto_batch(db, admin_client):
         requested_slot_id=slot.id, close_at=utcnow() + timedelta(hours=24), data={})
     db.add(order)
     db.commit()
-    settle(db, order, admin_client_actor(admin_client.staff))
+    from app.core import DomainError
+    with pytest.raises(DomainError) as error:
+        settle(db, order, admin_client_actor(admin_client.staff))
+    assert error.value.code == 'SLOT_CONFIG_MISSING'
     assert db.scalar(select(DeliveryBatch).where(DeliveryBatch.slot_id == slot.id)) is None
 
 

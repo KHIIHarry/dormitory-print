@@ -329,6 +329,95 @@ def test_seed_backfills_html_only_for_untouched_defaults(db):
     assert edited.version == 2
 
 
+@pytest.mark.parametrize('is_default', [True, False])
+def test_legacy_delivery_template_upgrades_contract_without_losing_custom_content(
+        admin_client, api, db, is_default):
+    from app.mail import DEFAULT_TEMPLATES
+    from app.models import MailTemplate
+
+    old_variables = ['brandName', 'orderCode', 'deliveryLocation',
+                     'deliverySlot', 'orderLink', 'logoUrl']
+    old_text = ('自定义配送说明 {{brandName}} {{orderCode}} {{deliveryLocation}} '
+                '{{deliverySlot}} {{orderLink}}')
+    old_html = ('<p>保留商家设计 {{deliverySlot}}</p>' if not is_default
+                else DEFAULT_TEMPLATES['DELIVERY_UPDATED']['htmlBody'])
+    row = MailTemplate(
+        key='DELIVERY_UPDATED', subject='原配送通知 {{orderCode}}',
+        text_body=old_text, html_body=old_html, enabled=True, version=3,
+        data={'name': '配送信息变更', 'isDefault': is_default, 'critical': False,
+              'variables': [{'key': key} for key in old_variables],
+              'required': old_variables[:-1], 'updatedBy': '原编辑者'},
+    )
+    db.add(row)
+    db.commit()
+
+    # Direct detail access must repair old metadata without first listing templates.
+    detail = api(admin_client, '/admin/mail/templates/DELIVERY_UPDATED', method='GET')
+    assert detail.status_code == 200, detail.text
+    template = detail.json()['data']
+    allowed = {item['key'] for item in template['variables']}
+    assert {'originalWindow', 'newWindow', 'changeReason',
+            'confirmationRequired', 'changeType'} <= allowed
+    assert template['version'] == 4
+    if is_default:
+        assert template['subject'] == DEFAULT_TEMPLATES['DELIVERY_UPDATED']['subject']
+        assert template['textBody'] == DEFAULT_TEMPLATES['DELIVERY_UPDATED']['textBody']
+        assert template['htmlBody'] == DEFAULT_TEMPLATES['DELIVERY_UPDATED']['htmlBody']
+    else:
+        assert template['subject'] == '原配送通知 {{orderCode}}'
+        assert template['textBody'] == old_text
+        assert template['htmlBody'] == old_html
+        assert template['updatedBy'] == '原编辑者'
+
+    again = api(admin_client, '/admin/mail/templates/DELIVERY_UPDATED', method='GET')
+    assert again.json()['data']['version'] == template['version']
+    preview = api(admin_client, '/admin/mail/templates/DELIVERY_UPDATED/preview', {})
+    assert preview.status_code == 200, preview.text
+    assert '{{' not in preview.json()['data']['htmlBody']
+    if is_default:
+        assert '原时段运力调整' in preview.json()['data']['textBody']
+
+    # Expanding the allowlist must not force new placeholders into custom text.
+    saved = api(admin_client, '/admin/mail/templates/DELIVERY_UPDATED', {
+        'expectedVersion': template['version'], 'subject': template['subject'],
+        'textBody': template['textBody'], 'htmlBody': template['htmlBody'],
+        'enabled': True, 'reason': '确认兼容旧模板',
+    }, method='PATCH')
+    assert saved.status_code == 200, saved.text
+    rejected = api(admin_client, '/admin/mail/templates/DELIVERY_UPDATED/preview', {
+        'htmlBody': '<p>{{unauthorizedCustomerSecret}}</p>',
+    })
+    assert rejected.status_code == 422
+    assert rejected.json()['error']['code'] == 'MAIL_TEMPLATE_INVALID'
+
+
+def test_legacy_custom_delivery_template_accepts_current_notification_payload(
+        db, smtp_server, settings_allow_local):
+    from app.mail import DEFAULT_TEMPLATES, SAMPLE_VARIABLES, enqueue_email
+    from app.models import MailTemplate
+
+    _, port = smtp_server
+    seed_mail_config(db, port)
+    old_variables = ['brandName', 'orderCode', 'deliveryLocation',
+                     'deliverySlot', 'orderLink']
+    row = MailTemplate(
+        key='DELIVERY_UPDATED', subject='自定义 {{orderCode}}',
+        text_body=' '.join('{{' + key + '}}' for key in old_variables),
+        html_body='<p>自定义配送提醒 {{deliverySlot}}</p>', enabled=True,
+        data={'isDefault': False, 'variables': old_variables,
+              'required': old_variables, 'critical': False},
+    )
+    db.add(row)
+    db.flush()
+    payload = {key: SAMPLE_VARIABLES[key]
+               for key in DEFAULT_TEMPLATES['DELIVERY_UPDATED']['variables']
+               if key != 'logoUrl'}
+    job = enqueue_email(db, 'DELIVERY_UPDATED', 'student@example.invalid', payload,
+                        business_key='delivery-upgrade-current-payload')
+    assert job.status == 'QUEUED'
+    assert row.html_body == '<p>自定义配送提醒 {{deliverySlot}}</p>'
+
+
 def test_mail_available_requires_valid_enabled_config(db, smtp_server, settings_allow_local):
     from app.mail import mail_available
 

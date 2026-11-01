@@ -318,6 +318,7 @@ def record_refund(db,actor,case,body):
     order.refunded_cents+=body.amount_cents
     full=order.refunded_cents==order.cash_received_cents
     if full and order.status!='DELIVERED':
+        slot=lock(db,DeliverySlot,order.confirmed_slot_id) if order.confirmed_slot_id else None
         order.status='CANCELLED'
         affected_batches=set()
         for assignment in db.scalars(select(DeliveryAssignment).where(DeliveryAssignment.order_id==order.id,DeliveryAssignment.active.is_(True)).order_by(DeliveryAssignment.id).with_for_update()):
@@ -326,8 +327,7 @@ def record_refund(db,actor,case,body):
             if assignment.status!='DELIVERED':assignment.status='CANCELLED'
             touch(assignment)
         _refresh_affected_batches(db,affected_batches)
-        if order.confirmed_slot_id:
-            slot=lock(db,DeliverySlot,order.confirmed_slot_id)
+        if slot is not None:
             if slot.occupied>0:slot.occupied-=1;touch(slot)
         for task in db.scalars(select(PrintTask).where(PrintTask.order_id==order.id,PrintTask.active.is_(True))):
             task.active=False

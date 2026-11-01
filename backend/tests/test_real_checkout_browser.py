@@ -10,6 +10,7 @@ from datetime import timedelta
 import hashlib
 import json
 import os
+import secrets
 from pathlib import Path
 import shutil
 import socket
@@ -30,9 +31,15 @@ from sqlalchemy import func, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_v1_integration as base
+from app.core import token_hash
 from app.models import (
     Artifact,
     Asset,
+    AuthSession,
+    DeliveryAssignment,
+    DeliveryBatch,
+    DeliveryChange,
+    DeliveryNotice,
     DeliverySlot,
     Job,
     Location,
@@ -43,6 +50,27 @@ from app.models import (
     utcnow,
 )
 from app.settings import get_settings
+
+# The in-process admin client must see the same routers as the real server.
+APP_MODULES = [
+    'auth', 'growth', 'mail', 'media', 'commerce', 'production',
+    'delivery', 'after_sales', 'exports', 'maintenance',
+]
+
+
+def _account_client(client_factory, db, account):
+    raw = secrets.token_urlsafe(32)
+    db.add(AuthSession(
+        kind='CUSTOMER', account_id=account.id,
+        principal_id=account.principal_id,
+        session_version=account.session_version,
+        token_hash=token_hash(raw),
+        expires_at=utcnow() + timedelta(days=2),
+    ))
+    db.commit()
+    client = client_factory()
+    client.cookies.set('dormprint_account_session', raw)
+    return client
 
 
 def free_port():
@@ -66,7 +94,7 @@ def wait_ready(process, url):
 
 
 def test_real_checkout_upload_ready_and_submit(
-    db, account_factory, tmp_path
+    db, account_factory, staff_factory, client_factory, api, admin_client, tmp_path
 ):
     root = Path(__file__).resolve().parents[2]
     database_url = os.environ.get('DORMPRINT_DATABASE_URL')
@@ -77,14 +105,24 @@ def test_real_checkout_upload_ready_and_submit(
     account = account_factory(
         email='live-checkout@example.test', display_name='真实浏览器验收客户'
     )
+    campus = base.ensure_test_campus(db)
     now = utcnow()
-    location = Location(name='验收宿舍楼', x=0.4, y=0.6)
+    location = Location(name='验收宿舍楼', x=0.4, y=0.6, campus_id=campus.id)
     slot = DeliverySlot(
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='验收时段', starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1), capacity=2,
+        open_at=now - timedelta(hours=1),
+        cutoff_at=now + timedelta(hours=2),
     )
-    db.add_all([location, slot])
+    slot2 = DeliverySlot(
+        date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
+        name='验收改期时段', starts_at=now + timedelta(days=1, hours=3),
+        ends_at=now + timedelta(days=1, hours=4), capacity=2,
+        open_at=now - timedelta(hours=1),
+        cutoff_at=now + timedelta(hours=2),
+    )
+    db.add_all([location, slot, slot2])
     db.commit()
 
     pdf_path = tmp_path / 'checkout.pdf'
@@ -103,6 +141,7 @@ def test_real_checkout_upload_ready_and_submit(
         'DORMPRINT_BROWSER_PDF': str(pdf_path),
         'DORMPRINT_BROWSER_BUILDING': location.name,
         'DORMPRINT_BROWSER_SLOT': slot.name,
+        'DORMPRINT_BROWSER_CAMPUS': campus.name,
         'PYTHONUNBUFFERED': '1',
     }
     processes, logs = [], []
@@ -212,6 +251,115 @@ def test_real_checkout_upload_ready_and_submit(
         for name in ('checkout-contact.png', 'checkout-success.png'):
             screenshot = root / 'docs/qa/live-checkout' / name
             assert screenshot.is_file() and screenshot.stat().st_size > 1000, screenshot
+
+        # ---------- real settlement -> auto batch -> reschedule -> delivery ----------
+        view = api(admin_client, f'/admin/orders/{order.id}', method='GET')
+        assert view.status_code == 200, view.text
+        settled = base.settle(api, admin_client, view.json()['data'],
+                              'real-delivery-settle')
+        assert settled.status_code == 200, settled.text
+        paid = settled.json()['data']
+        assert paid['status'] == 'PENDING_PRINT', paid
+        db.expire_all()
+        auto_assignment = db.scalar(select(DeliveryAssignment).where(
+            DeliveryAssignment.order_id == order.id,
+            DeliveryAssignment.active.is_(True)))
+        assert auto_assignment is not None, 'settlement did not create an assignment'
+        auto_batch = db.get(DeliveryBatch, auto_assignment.batch_id)
+        assert auto_batch is not None and auto_batch.status == 'PLANNED'
+        assert auto_batch.campus_id == campus.id
+        assert db.get(DeliverySlot, slot.id).occupied == 1
+
+        packed = base.run_print_to_packed(api, admin_client, paid)
+        assert packed['status'] == 'READY_FOR_DELIVERY', packed
+
+        proposal = api(
+            admin_client, f'/admin/orders/{order.id}/arrangement-proposals',
+            {'expectedVersion': packed['version'], 'slotId': slot2.id,
+             'reason': '真实链路验收：客户改到次日时段'},
+            key='real-delivery-propose')
+        assert proposal.status_code == 200, proposal.text
+
+        customer = _account_client(client_factory, db, account)
+        customer_view = api(customer, f'/orders/{order.id}', method='GET')
+        assert customer_view.status_code == 200, customer_view.text
+        accepted = api(
+            customer, f'/orders/{order.id}/arrangement-agreement',
+            {'expectedVersion': customer_view.json()['data']['version'],
+             'slotId': slot2.id, 'confirm': True},
+            key='real-delivery-accept')
+        assert accepted.status_code == 200, accepted.text
+        db.expire_all()
+        moved = db.get(Order, order.id)
+        assert moved.confirmed_slot_id == slot2.id, moved.confirmed_slot_id
+        moved_assignment = db.scalar(select(DeliveryAssignment).where(
+            DeliveryAssignment.order_id == order.id,
+            DeliveryAssignment.active.is_(True)))
+        assert moved_assignment is not None
+        moved_batch = db.get(DeliveryBatch, moved_assignment.batch_id)
+        assert moved_batch.id != auto_batch.id, 'reschedule did not move the batch'
+
+        courier = staff_factory(role='COURIER', capabilities=[])
+        moved_batch.courier_id = courier.id
+        moved_assignment.courier_id = courier.id
+        db.commit()
+
+        slot2_row = db.get(DeliverySlot, slot2.id)
+        db.refresh(slot2_row)
+        seal_preview = api(
+            admin_client, f'/admin/slots/{slot2.id}/seal/preview',
+            {'expectedVersion': slot2_row.version}, key='real-delivery-seal-preview')
+        assert seal_preview.status_code == 200, seal_preview.text
+        plan = seal_preview.json()['data']
+        assert plan['blockers'] == [], plan
+        sealed = api(
+            admin_client, f'/admin/slots/{slot2.id}/seal',
+            {'expectedVersion': slot2_row.version, 'planId': plan['planId'],
+             'reason': '真实链路验收封批'},
+            key='real-delivery-seal')
+        assert sealed.status_code == 200, sealed.text
+
+        db.expire_all()
+        moved_batch = db.get(DeliveryBatch, moved_batch.id)
+        published = api(
+            admin_client, f'/admin/batches/{moved_batch.id}/publish',
+            {'expectedVersion': moved_batch.version, 'reason': '真实链路验收发布'},
+            key='real-delivery-publish')
+        assert published.status_code == 200, published.text
+        started = api(
+            admin_client, f'/admin/batches/{moved_batch.id}/start',
+            {'expectedVersion': published.json()['data']['version'],
+             'reason': '真实链路验收出发'},
+            key='real-delivery-start')
+        assert started.status_code == 200, started.text
+
+        db.expire_all()
+        moved_assignment = db.get(DeliveryAssignment, moved_assignment.id)
+        courier_client = base.staff_client(client_factory, db, courier)
+        proof_photo = base.upload_proof(courier_client, moved_assignment)
+        delivered = base.submit_proof(
+            api, courier_client, order.id, moved_assignment,
+            proof_photo['assetId'], key='real-delivery-proof')
+        assert delivered['order']['status'] == 'DELIVERED', delivered
+
+        db.expire_all()
+        final = db.get(Order, order.id)
+        assert final.status == 'DELIVERED'
+        kinds = set(db.scalars(select(DeliveryChange.kind).where(
+            DeliveryChange.order_id == order.id)))
+        assert {'RESCHEDULE_PROPOSED', 'RESCHEDULE_CONFIRMED'} <= kinds, kinds
+        notice = db.scalar(select(DeliveryNotice).where(
+            DeliveryNotice.order_id == order.id).order_by(
+            DeliveryNotice.created_at.asc()))
+        assert notice is not None, 'reschedule did not leave a delivery notice'
+        print('REAL_DELIVERY_EVIDENCE ' + json.dumps({
+            'orderId': order.id,
+            'autoBatchId': auto_batch.id,
+            'rescheduledBatchId': moved_batch.id,
+            'changes': sorted(kinds),
+            'noticeId': notice.id,
+            'noticeStatus': notice.status,
+        }, ensure_ascii=False), flush=True)
     finally:
         for process in reversed(processes):
             process.terminate()

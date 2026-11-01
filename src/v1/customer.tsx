@@ -1,3 +1,4 @@
+import { formatDisplayTime } from "../lib/display-format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -84,6 +85,8 @@ type SlotBrief = {
   weekday?: string;
   start?: string;
   end?: string;
+  startsAt?: string;
+  endsAt?: string;
 };
 
 type V1Order = Order & {
@@ -1255,12 +1258,22 @@ export function CustomerAccountDataPage() {
 
 export function requestedSlotOf(order: Order) {
   const value = order as V1Order;
-  return value.requestedSlot || value.requestedSlotSnapshot || null;
+  return (
+    value.requestedSlot ||
+    value.requestedSlotSnapshot ||
+    (order as any).arrangement?.originalRequest ||
+    null
+  );
 }
 
 export function confirmedSlotOf(order: Order) {
   const value = order as V1Order;
-  return value.confirmedSlot || value.confirmedSlotSnapshot || null;
+  return (
+    value.confirmedSlot ||
+    value.confirmedSlotSnapshot ||
+    (order as any).arrangement?.confirmed ||
+    null
+  );
 }
 
 export function slotBlockLabel(
@@ -1274,7 +1287,11 @@ export function slotBlockLabel(
     date,
     slot.weekday,
     slot.name,
-    slot.start && slot.end ? `${slot.start}–${slot.end}` : "",
+    slot.startsAt && slot.endsAt
+      ? `${formatDisplayTime(slot.startsAt)}–${formatDisplayTime(slot.endsAt)}`
+      : slot.start && slot.end
+        ? `${slot.start}–${slot.end}`
+        : "",
   ]
     .filter(Boolean)
     .join(" ");

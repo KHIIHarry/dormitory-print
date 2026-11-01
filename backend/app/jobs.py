@@ -117,7 +117,7 @@ def process_claim(job_id,lease_token):
                 if email and email.status in ('QUEUED','RETRY','RETRY_PENDING'):
                     job.status='QUEUED'
                     job.data={**job.data,'availableAt':email.available_at.isoformat()}
-                elif email and email.status in ('FAILED','EXPIRED','CANCELLED'):job.status='FAILED'
+                elif email and email.status in ('UNKNOWN','FAILED','EXPIRED','CANCELLED'):job.status='FAILED'
                 else:job.status='READY'
             elif kind=='EXPORT':
                 export=session.get(ExportJob,target_id)

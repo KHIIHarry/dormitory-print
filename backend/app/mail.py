@@ -553,6 +553,14 @@ def _send(values: dict, payload: dict) -> None:
         message.add_alternative(payload['htmlBody'], subtype='html')
     try:
         client.send_message(message)
+    except (smtplib.SMTPResponseException, smtplib.SMTPRecipientsRefused) as error:
+        # The server answered with an explicit rejection code: the message was
+        # definitely not accepted, so an operator may retry it safely.
+        raise MailTransportError('MAIL_SEND_REJECTED', 'SMTP 服务器明确拒收邮件') from error
+    except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as error:
+        # DATA may have been accepted before the final response was lost.
+        # Retrying this outcome automatically can deliver a duplicate.
+        raise MailTransportError('MAIL_RESULT_UNKNOWN', 'SMTP 发送结果未知，请人工核实') from error
     except smtplib.SMTPException as error:
         raise MailTransportError('MAIL_SEND_FAILED', 'SMTP 服务器拒绝接收邮件') from error
     finally:
@@ -624,11 +632,46 @@ def _template_view(row: MailTemplate) -> MailTemplateDTO:
     )
 
 
+def _upgrade_delivery_template(row: MailTemplate, default: dict) -> None:
+    """Upgrade the trusted variable contract without overwriting custom mail.
+
+    The delivery rollout replaced HTML independently of persisted metadata.
+    Repair that hybrid on every entry point, including direct preview/send.
+    New variables are allowed in custom templates but are not newly required.
+    """
+    before = _template_data(row)
+    data = dict(before)
+    old_required = data.get('required') or [
+        key for key in _variables_for(data) if key != 'logoUrl'
+    ]
+    data['variables'] = [
+        {'key': key, 'description': VARIABLE_DESCRIPTIONS.get(key, '')}
+        for key in default['variables']
+    ]
+    content = (row.subject, row.text_body, row.html_body)
+    if data.get('isDefault'):
+        row.subject = default['subject']
+        row.text_body = default['textBody']
+        row.html_body = default.get('htmlBody') or ''
+        data['required'] = [key for key in default['variables'] if key != 'logoUrl']
+    else:
+        data['required'] = old_required
+    if data != before or content != (row.subject, row.text_body, row.html_body):
+        row.data = data
+        touch(row)
+
+
 def ensure_template(db, key: str) -> MailTemplate:
     key = key.strip().upper()
     default = _template_default(key)
-    row = db.scalar(select(MailTemplate).where(MailTemplate.key == key))
+    query = select(MailTemplate).where(MailTemplate.key == key)
+    if key == 'DELIVERY_UPDATED':
+        # Serialise automatic upgrades with editor writes and refresh cached rows.
+        query = query.with_for_update().execution_options(populate_existing=True)
+    row = db.scalar(query)
     if row:
+        if key == 'DELIVERY_UPDATED':
+            _upgrade_delivery_template(row, default)
         return row
     row = MailTemplate(
         key=key,
@@ -656,8 +699,9 @@ def seed_templates(db) -> list[MailTemplate]:
     """Create missing templates and backfill HTML for untouched defaults.
 
     Older installations stored system defaults with an empty ``html_body``.
-    Only rows that are still marked as defaults are upgraded, so an edited
-    template is never overwritten and its version is not bumped.
+    Only rows still marked as defaults receive replacement HTML. Delivery
+    contract upgrades are handled by ensure_template, with a version bump;
+    custom subject/text/HTML remain untouched.
     """
     rows = [ensure_template(db, key) for key in TEMPLATE_KEYS]
     for row in rows:
@@ -833,7 +877,7 @@ def update_template(db, key: str, payload: dict, expected_version: int,
         'variables': data.get('variables') or [],
         'critical': critical,
     }
-    validate_template_content(content, _variables_for(content), critical)
+    validate_template_content(content, data.get('required') or _variables_for(content), critical)
     row.subject = content['subject']
     row.text_body = content['textBody']
     row.html_body = content['htmlBody']
@@ -933,10 +977,21 @@ def _mask_email(value: str) -> str:
     return (local[:1] + '***@' + domain) if local else '***'
 
 
+# These outcomes cannot prove the message was not accepted, so retrying them
+# could deliver a duplicate. The marker survives payload expiry because the
+# expiry error class alone would otherwise look like a safe, unsent failure.
+_AMBIGUOUS_SEND_ERRORS = {'MAIL_SEND_FAILED', 'MAIL_RESULT_UNKNOWN'}
+
+
 def _purge_payload(job: EmailJob, status: str, error: str | None = None) -> None:
     job.protected_payload = None
     data = dict(job.data or {})
-    data['lastErrorClass'] = error
+    if data.get('lastErrorClass') in _AMBIGUOUS_SEND_ERRORS:
+        data['ambiguousSend'] = True
+    if data.get('ambiguousSend') and error == 'MAIL_PAYLOAD_EXPIRED':
+        data['expiryError'] = error
+    else:
+        data['lastErrorClass'] = error
     data['purgedAt'] = utcnow().isoformat()
     history = list(data.get('history') or [])
     history.append({'status': status, 'at': utcnow().isoformat()})
@@ -944,6 +999,7 @@ def _purge_payload(job: EmailJob, status: str, error: str | None = None) -> None
     job.data = data
     job.status = status
     touch(job)
+    _sync_delivery_notice(job, 'UNKNOWN' if status == 'UNKNOWN' else 'FAILED')
     session = object_session(job)
     if session is not None:
         session.flush()
@@ -964,7 +1020,7 @@ def process_email_job(db, job_id: str) -> None:
     """Send one queued job. Transaction ownership stays with the caller."""
     purge_expired_payloads(db, limit=50)
     job = lock(db, EmailJob, job_id)
-    if job.status in ('SMTP_ACCEPTED', 'FAILED', 'EXPIRED', 'CANCELLED'):
+    if job.status in ('SMTP_ACCEPTED', 'UNKNOWN', 'FAILED', 'EXPIRED', 'CANCELLED'):
         return
     now = utcnow()
     if job.status in ('RETRY', 'RETRY_PENDING') and job.available_at and job.available_at > now:
@@ -987,7 +1043,11 @@ def process_email_job(db, job_id: str) -> None:
         _, values = _config_values(db)
         _send(values, payload)
     except MailTransportError as error:
-        _fail_or_retry(job, now, error.error_class)
+        if error.error_class == 'MAIL_RESULT_UNKNOWN':
+            job.attempts += 1
+            _purge_payload(job, 'UNKNOWN', error.error_class)
+        else:
+            _fail_or_retry(job, now, error.error_class)
         return
     except (ValueError, TypeError):
         _purge_payload(job, 'FAILED', 'MAIL_PAYLOAD_INVALID')
@@ -1030,6 +1090,8 @@ def _fail_or_retry(job: EmailJob, now, error_class: str) -> None:
     job.attempts += 1
     data = dict(job.data or {})
     data['lastErrorClass'] = error_class
+    if error_class in _AMBIGUOUS_SEND_ERRORS:
+        data['ambiguousSend'] = True
     history = list(data.get('history') or [])
     if job.attempts >= _retry_max_attempts():
         job.status = 'FAILED'
@@ -1043,10 +1105,58 @@ def _fail_or_retry(job: EmailJob, now, error_class: str) -> None:
     data['history'] = history[-20:]
     job.data = data
     touch(job)
-    _sync_delivery_notice(job, 'FAILED' if job.status == 'FAILED' else 'UNKNOWN')
+    _sync_delivery_notice(job, 'FAILED' if job.status == 'FAILED' else 'PENDING')
     session = object_session(job)
     if session is not None:
         session.flush()
+
+
+def retry_failed_email_job(db, job: EmailJob, recipient: str, variables: dict) -> None:
+    """Explicit retry of a definitely unaccepted message, reusing both outboxes."""
+    from .models import Job
+    known_unsent = {'MAIL_CONFIG_INVALID', 'MAIL_AUTH_FAILED', 'MAIL_TLS_FAILED',
+                    'MAIL_DNS_FAILED', 'MAIL_CONNECTION_FAILED', 'MAIL_SSRF_BLOCKED',
+                    'MAIL_SEND_REJECTED', 'MAIL_PAYLOAD_EXPIRED', 'MAIL_PAYLOAD_MISSING',
+                    'MAIL_PAYLOAD_INVALID'}
+    data = job.data or {}
+    if (job.status not in ('FAILED', 'EXPIRED')
+            or data.get('ambiguousSend')
+            or data.get('lastErrorClass') not in known_unsent):
+        raise DomainError('MAIL_RESULT_UNKNOWN', '无法确认原任务未发送，请先人工核实', 409)
+    if not mail_available(db):
+        raise DomainError('EMAIL_SERVICE_UNAVAILABLE', '邮件服务暂不可用，请先恢复配置', 503)
+    row = ensure_template(db, job.template_key)
+    if not row.enabled:
+        raise DomainError('MAIL_TEMPLATE_INVALID', '该通知模板已停用', 422)
+    template = _template_payload(row)
+    if 'logoUrl' in _variables_for(template):
+        variables = {**variables, 'logoUrl': f"{get_settings().public_origin.rstrip('/')}" '/assets/icon-192.png'}
+    rendered = render_template(template, variables)
+    root = db.scalar(select(Job).where(Job.kind == 'EMAIL', Job.target_id == job.id)
+                     .with_for_update())
+    if root is None:
+        root = enqueue_job(db, 'EMAIL', job.id, _worker_business_key(job.business_key))
+    if root.status == 'PROCESSING':
+        raise DomainError('MAIL_JOB_BUSY', '原发送任务仍在处理中，请稍后核实', 409)
+    now = utcnow()
+    job.protected_payload = seal({'to': recipient, **rendered, 'fromName': None})
+    job.status = 'QUEUED'
+    job.available_at = now
+    job.expires_at = now + timedelta(hours=_ttl_hours())
+    data = dict(job.data or {})
+    history = list(data.get('history') or [])
+    history.append({'status': 'MANUAL_RETRY', 'at': now.isoformat()})
+    data.update({'lastErrorClass': None, 'history': history[-20:],
+                 'previousAttempts': int(data.get('previousAttempts') or 0) + job.attempts})
+    job.data = data
+    job.attempts = 0
+    root.status = 'QUEUED'
+    root.lease_token = None
+    root.lease_until = None
+    root.data = {**(root.data or {}), 'availableAt': now.isoformat()}
+    touch(root)
+    touch(job)
+    db.flush()
 
 
 def test_connection(db) -> dict:
@@ -1274,6 +1384,8 @@ def mail_outbox_status(job_id: str, db=Depends(get_db), actor: Actor = Depends(a
     status = str(job.status or 'QUEUED')
     if status == 'SMTP_ACCEPTED':
         message = 'SMTP 服务器已接受，不代表已送达收件箱'
+    elif status == 'UNKNOWN':
+        message = '发送结果未知，请先人工核实，不能直接补发'
     elif status == 'FAILED':
         message = '发送失败，请按错误类别检查 SMTP 配置或收件地址'
     elif status in ('RETRY', 'RETRY_PENDING'):
