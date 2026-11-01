@@ -39,6 +39,8 @@ import {
 import { Empty, Loading } from "./components/ui";
 import { Home } from "./customer/home";
 import { Login } from "./admin/login";
+import { AppErrorBoundary } from "./components/error-boundary";
+import { installChunkRecovery } from "./lib/chunk-recovery";
 const AdminBenefits = lazy(() => import("./v1/benefits").then((m) => ({ default: m.AdminBenefitsPage })));
 const AdminQrTools = lazy(() => import("./v1/qr-tools").then((m) => ({ default: m.AdminQRCodeToolsPage })));
 const AdminPayroll = lazy(() => import("./v1/payroll").then((m) => ({ default: m.AdminPayrollPage })));
@@ -505,6 +507,7 @@ function App() {
     </QueryClientProvider>
   );
 }
+installChunkRecovery();
 const rootHost = window as typeof window & {
   __dormprintRoot?: ReturnType<typeof ReactDOM.createRoot>;
 };
@@ -512,6 +515,8 @@ const rootHost = window as typeof window & {
   document.getElementById("root")!,
 )).render(
   <React.StrictMode>
-    <App />
+    <AppErrorBoundary scope="root">
+      <App />
+    </AppErrorBoundary>
   </React.StrictMode>,
 );

@@ -9,6 +9,7 @@ import {
   type SkeletonVariant,
 } from "./feedback";
 import { useReducedMotion } from "./presence";
+import { AppErrorBoundary } from "./error-boundary";
 function variantFor(path: string): SkeletonVariant {
   if (path.includes("/account")) return "profile";
   if (path.endsWith("/rewards")) return "coupons";
@@ -36,7 +37,7 @@ export function ResourceOutlet() {
     clearActionIssues,
     resources,
   } = useStore();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   // Action errors describe the page they failed on; do not carry them (or
   // duplicate banners from an earlier attempt) into the next page.
   useLayoutEffect(() => {
@@ -115,9 +116,11 @@ export function ResourceOutlet() {
               retry={refresh}
             />
           )}
-          <Suspense fallback={<PageSkeleton />}>
-            <Outlet />
-          </Suspense>
+          <AppErrorBoundary scope="route" resetKey={`${pathname}${search}`}>
+            <Suspense fallback={<PageSkeleton />}>
+              <Outlet />
+            </Suspense>
+          </AppErrorBoundary>
         </>
       )}
     </>

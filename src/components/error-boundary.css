@@ -1,0 +1,104 @@
+.app-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 22px;
+  background:
+    radial-gradient(circle at 18% 12%, #f7e8dc 0, transparent 42%),
+    radial-gradient(circle at 84% 88%, #f3ece3 0, transparent 45%), #fbfaf8;
+}
+.app-error--root {
+  min-height: 100vh;
+}
+.app-error--route {
+  min-height: min(62vh, 620px);
+}
+.app-error-card {
+  width: min(560px, 100%);
+  padding: 38px 36px 34px;
+  border: 1px solid var(--line, #eae7e4);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 20px 55px #5c3e2114;
+}
+.app-error-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 26px;
+  color: var(--ink, #313131);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+.app-error-brand small {
+  color: var(--muted, #7d7b78);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.4px;
+}
+.app-error-title {
+  margin: 0 0 12px;
+  color: var(--ink, #313131);
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.3px;
+}
+.app-error-text {
+  margin: 0 0 26px;
+  color: var(--muted, #7d7b78);
+  font-size: 13px;
+  line-height: 1.85;
+}
+.app-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.app-error-actions .btn {
+  min-height: 42px;
+  padding: 10px 18px;
+  font-size: 12px;
+}
+.app-error-detail {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line, #eae7e4);
+  color: var(--muted, #7d7b78);
+  font-size: 11px;
+}
+.app-error-detail summary {
+  cursor: pointer;
+  user-select: none;
+}
+.app-error-detail code {
+  display: block;
+  margin-top: 10px;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  background: #f7f3ee;
+  color: #8a6a51;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+@media (max-width: 560px) {
+  .app-error {
+    padding: 30px 16px;
+  }
+  .app-error-card {
+    padding: 28px 22px 26px;
+    border-radius: 18px;
+  }
+  .app-error-title {
+    font-size: 21px;
+  }
+  .app-error-actions {
+    flex-direction: column;
+  }
+  .app-error-actions .btn {
+    width: 100%;
+  }
+}
