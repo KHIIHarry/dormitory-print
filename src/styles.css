@@ -8288,3 +8288,43 @@ button.session-action svg { stroke-width: 1.7; }
 .batch-campus .red-text {
   font-size: 10px;
 }
+
+/* Parent brand and product brand remain separate links in the customer header. */
+.customer-brand-group {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 15px;
+  min-width: 0;
+}
+.parent-brand-link, .customer-brand-link {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.parent-brand-link img {
+  display: block;
+  width: auto;
+  height: 39px;
+}
+.brand-divider {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 29px;
+  background: #ded7d1;
+}
+@media (max-width: 767px) {
+  .customer-app .site-header-inner { padding-inline: 16px; gap: 8px; }
+  .customer-brand-group { gap: 8px; }
+  .parent-brand-link img { height: 27px; }
+  .brand-divider { height: 25px; }
+  .customer-brand-group .brand { font-size: 18px; gap: 7px; }
+  .customer-brand-group .brand-icon { width: 29px; }
+}
+@media (max-width: 350px) {
+  .customer-app .site-header-inner { padding-inline: 12px; }
+  .customer-brand-group { gap: 6px; }
+  .parent-brand-link img { height: 23px; }
+  .customer-brand-group .brand { font-size: 16px; gap: 6px; }
+  .customer-brand-group .brand-icon { width: 27px; }
+}

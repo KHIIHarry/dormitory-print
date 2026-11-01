@@ -98,9 +98,15 @@ export function CustomerLayout() {
       <Network />
       <header className="site-header">
         <div className="site-header-inner">
-          <Link to="/u/" aria-label="宿舍打印首页">
-            <Logo />
-          </Link>
+          <div className="customer-brand-group">
+            <a className="parent-brand-link" href="http://xiaoliyou.com" aria-label="校里有官网">
+              <img src="/assets/xly-brand-horizontal-v2.svg" alt="校里有" />
+            </a>
+            <span className="brand-divider" aria-hidden="true" />
+            <Link className="customer-brand-link" to="/u/" aria-label="宿舍打印首页">
+              <Logo />
+            </Link>
+          </div>
           <nav>
             {nav.map(([label, to, Icon]) => (
               <NavLink end={to === "/u/"} key={to} to={to}>
