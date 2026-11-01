@@ -221,6 +221,7 @@ type ApiState = {
   deletionRequests: Record<string, unknown>[];
   exportStatus: string;
   exportFailures: number;
+  sessions: Record<string, unknown>[];
 };
 
 async function installApi(
@@ -231,6 +232,7 @@ async function installApi(
     deletionRequests?: Record<string, unknown>[];
     exportStatus?: string;
     exportFailures?: number;
+    sessions?: Record<string, unknown>[];
   } = {},
 ) {
   const state: ApiState = {
@@ -240,6 +242,7 @@ async function installApi(
     deletionRequests: options.deletionRequests || [],
     exportStatus: options.exportStatus || "READY",
     exportFailures: options.exportFailures || 0,
+    sessions: options.sessions || [],
   };
 
   const json = (route: Route, data: unknown, status = 200) =>
@@ -304,6 +307,16 @@ async function installApi(
         ],
       });
     if (path === "/customer/account") return json(route, customerSession.account);
+    if (path === "/customer/account/sessions" && method === "GET")
+      return json(route, { items: state.sessions });
+    if (path === "/customer/account/sessions/revoke" && method === "POST") {
+      const sessionId = (body as { sessionId?: string })?.sessionId;
+      state.sessions =
+        sessionId === "ALL_OTHERS"
+          ? state.sessions.filter((item) => item.current)
+          : state.sessions.filter((item) => item.id !== sessionId);
+      return json(route, { success: true });
+    }
     if (path === "/customer/account/exports" && method === "POST") {
       if (state.exportFailures > 0) {
         state.exportFailures--;
@@ -1202,4 +1215,77 @@ test("Codex routes /u/orders/:id/after-sales and /u/account/data render the expo
   await expect(
     page.getByRole("button", { name: "申请导出我的资料" }),
   ).toBeVisible();
+});
+
+test("security page shows the owner's browser and login IP per session and marks unrecoverable history as 未记录", async ({
+  page,
+}) => {
+  const state = await installApi(page, {
+    sessions: [
+      {
+        id: "S-CURRENT",
+        device: "Chrome · Windows",
+        browser: "Chrome",
+        platform: "Windows",
+        ipAddress: "203.0.113.9",
+        lastSeenAt: "2026-10-30T04:00:00.000Z",
+        current: true,
+      },
+      {
+        id: "S-IPV6",
+        device: "Safari · macOS",
+        browser: "Safari",
+        platform: "macOS",
+        ipAddress: "2001:db8::7",
+        lastSeenAt: "2026-10-29T04:00:00.000Z",
+        current: false,
+      },
+      {
+        id: "S-HISTORY",
+        device: "浏览器信息未记录",
+        browser: null,
+        platform: null,
+        ipAddress: null,
+        lastSeenAt: "2026-10-01T04:00:00.000Z",
+        current: false,
+      },
+    ],
+  });
+  await page.goto(appUrl("/u/account/security"));
+  const panel = page.locator("section.panel").filter({ hasText: "登录设备" });
+  const current = panel.locator(".account-row").filter({ hasText: "Chrome · Windows" });
+  await expect(current).toBeVisible();
+  await expect(current.getByText("登录 IP：203.0.113.9")).toBeVisible();
+  const ipv6 = panel.locator(".account-row").filter({ hasText: "Safari · macOS" });
+  await expect(ipv6.getByText("登录 IP：2001:db8::7")).toBeVisible();
+  // A session whose browser cannot be recovered shows 未记录, never a guess.
+  const history = panel
+    .locator(".account-row")
+    .filter({ hasText: "浏览器信息未记录" });
+  await expect(history).toHaveCount(1);
+  await expect(history.getByText("登录 IP：未记录")).toBeVisible();
+  await expect(history).not.toContainText(/Chrome|Safari|Edge|微信/);
+
+  await ipv6
+    .getByRole("button", {
+      name: "撤销设备会话：Safari · macOS（登录 IP：2001:db8::7）",
+    })
+    .click();
+  await expect(
+    page.getByText("撤销 Safari · macOS（登录 IP：2001:db8::7）的账号访问权限？"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "确认撤销" }).click();
+  await expect(page.getByText("会话已撤销。")).toBeVisible();
+  await expect(
+    panel.locator(".account-row").filter({ hasText: "Safari · macOS" }),
+  ).toHaveCount(0);
+  const revokes = state.calls.filter(
+    (call) => call.path === "/customer/account/sessions/revoke",
+  );
+  expect(revokes).toHaveLength(1);
+  expect(revokes[0].body).toEqual({ sessionId: "S-IPV6" });
+  const reloads = state.calls.filter(
+    (call) => call.path === "/customer/account/sessions" && call.method === "GET",
+  );
+  expect(reloads.length).toBeGreaterThanOrEqual(2);
 });

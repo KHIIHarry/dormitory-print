@@ -57,6 +57,12 @@ export type ReferralRecord = {
 export type SessionDevice = {
   id: string;
   device: string;
+  /** 登录时识别出的浏览器名称，历史会话无法恢复时为 null。 */
+  browser: string | null;
+  /** 登录时的操作系统，历史会话无法恢复时为 null。 */
+  platform: string | null;
+  /** 服务端可信来源记录的登录 IP（IPv4/IPv6），历史会话无法恢复时为 null。 */
+  ipAddress: string | null;
   lastSeenAt: string;
   current: boolean;
 };

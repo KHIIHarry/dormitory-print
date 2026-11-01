@@ -223,6 +223,12 @@ class PasswordChangedResult(DTO):
 class SessionDeviceView(DTO):
     id: str
     device: str
+    # Derived from the login User-Agent and the server-trusted peer address.
+    # None means the session predates this record or the value was unreadable:
+    # clients must show "未记录" instead of guessing.
+    browser: str | None = Field(default=None, max_length=32)
+    platform: str | None = Field(default=None, max_length=32)
+    ip_address: str | None = Field(default=None, max_length=64)
     last_seen_at: datetime
     current: bool
     created_at: datetime | None = None

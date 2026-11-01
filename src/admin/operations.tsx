@@ -21,6 +21,7 @@ import {
   Users,
 } from "lucide-react";
 import { ADMIN, DEMO, useStore } from "../lib/store";
+import { NumberInput } from "../components/number-input";
 import { mutation, now, request } from "../lib/api";
 import { growthRequest } from "../growth/client";
 import type { Building, Config, ExceptionItem, Staff } from "../lib/types";
@@ -185,7 +186,12 @@ function LegacyMapEditor() {
               <Upload size={16} />
               {mapUploadHint ? "正在上传底图…" : "更换底图"}
             </Button>
-            <Button onClick={() => { setMapIssue(""); setPublish(true); }}>
+            <Button
+              onClick={() => {
+                setMapIssue("");
+                setPublish(true);
+              }}
+            >
               <Save size={16} />
               预览并发布
             </Button>
@@ -267,29 +273,19 @@ function LegacyMapEditor() {
               </Field>
               <div className="form-grid">
                 <Field label="横向位置（%）">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
+                  <NumberInput
+                    min={0}
+                    max={100}
                     value={active.x}
-                    onChange={(e) =>
-                      patch({
-                        x: Math.max(0, Math.min(100, Number(e.target.value))),
-                      })
-                    }
+                    onValueChange={(value) => patch({ x: value ?? 0 })}
                   />
                 </Field>
                 <Field label="纵向位置（%）">
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
+                  <NumberInput
+                    min={0}
+                    max={100}
                     value={active.y}
-                    onChange={(e) =>
-                      patch({
-                        y: Math.max(0, Math.min(100, Number(e.target.value))),
-                      })
-                    }
+                    onValueChange={(value) => patch({ y: value ?? 0 })}
                   />
                 </Field>
               </div>
@@ -351,7 +347,9 @@ function LegacyMapEditor() {
           </Notice>
           {(mapIssue || actionIssues["/admin/maps"]) && (
             <Notice type="error">
-              <span role="alert">{mapIssue || actionIssues["/admin/maps"]}</span>
+              <span role="alert">
+                {mapIssue || actionIssues["/admin/maps"]}
+              </span>
             </Notice>
           )}
           {version > 1 && !migrate && (
@@ -389,7 +387,10 @@ function LegacyMapEditor() {
                     setVersion(next.version);
                 },
                 (error) => {
-                  if ((error as { message?: string })?.message === "输入内容不符合要求")
+                  if (
+                    (error as { message?: string })?.message ===
+                    "输入内容不符合要求"
+                  )
                     setMapIssue(mapPublishError(error, buildings));
                 },
               );
@@ -492,21 +493,24 @@ function SettingsForm() {
     ["corner", "左上角单钉（每册）"],
     ["side", "左侧双钉（每册）"],
   ] as const;
+  type MarginValues = Partial<
+    Record<"top" | "right" | "bottom" | "left", number | null>
+  >;
   const marginInputs = (
-    value: Config["margins"] | undefined,
-    onChange: (next: Config["margins"]) => void,
+    value: MarginValues | undefined,
+    onChange: (next: MarginValues) => void,
   ) =>
     (["top", "right", "bottom", "left"] as const).map((key, i) => (
       <Field key={key} label={`${["上", "右", "下", "左"][i]}留白（mm）`}>
-        <input
-          type="number"
-          min="0"
+        <NumberInput
+          min={0}
+          max={100}
           step="0.1"
-          value={value?.[key] ?? ""}
-          onChange={(e) =>
+          value={value?.[key]}
+          onValueChange={(next) =>
             onChange({
               ...(value || { top: 3, bottom: 3, left: 3, right: 3 }),
-              [key]: Math.max(0, Number(e.target.value)),
+              [key]: next,
             })
           }
         />
@@ -579,22 +583,16 @@ function SettingsForm() {
       setReview(false);
       toast("配置已保存");
     } catch (error) {
-      setSaveError(
-        (error as Error).message || "配置保存失败，请刷新后重试",
-      );
+      setSaveError((error as Error).message || "配置保存失败，请刷新后重试");
     } finally {
       setBusy(false);
     }
   };
-  const priceValue = (key: keyof Config["prices"]) =>
-    config.prices?.[key] === null || config.prices?.[key] === undefined
-      ? ""
-      : config.prices[key]! / 100;
-  const setPrice = (key: keyof Config["prices"], raw: string) =>
+  const setPrice = (key: keyof Config["prices"], cents: number | null) =>
     patch({
       prices: {
         ...(config.prices || {}),
-        [key]: raw === "" ? null : Math.max(0, Math.round(Number(raw) * 100)),
+        [key]: cents,
       },
     });
   const formats: string[] = Array.isArray(config.formats) ? config.formats : [];
@@ -659,13 +657,13 @@ function SettingsForm() {
                     key={key}
                     label={`${label}（元 / ${key === "corner" || key === "side" ? "册" : "张"}）`}
                   >
-                    <input
-                      type="number"
-                      min="0"
+                    <NumberInput
+                      min={0}
                       step="0.01"
+                      scale={100}
                       placeholder="未配置"
-                      value={priceValue(key)}
-                      onChange={(e) => setPrice(key, e.target.value)}
+                      value={config.prices?.[key]}
+                      onValueChange={(cents) => setPrice(key, cents)}
                     />
                   </Field>
                 ))}
@@ -686,86 +684,69 @@ function SettingsForm() {
               <h2>服务与上传限制</h2>
               <div className="form-grid">
                 <Field label="单订单最多文件数">
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={config.maxFiles ?? ""}
-                    onChange={(e) =>
-                      patch({ maxFiles: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={100}
+                    value={config.maxFiles}
+                    onValueChange={(value) => patch({ maxFiles: value })}
                   />
                 </Field>
                 <Field label="单文件大小上限（MB）">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxMb ?? ""}
-                    onChange={(e) =>
-                      patch({ maxMb: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={200}
+                    value={config.maxMb}
+                    onValueChange={(value) => patch({ maxMb: value })}
                   />
                 </Field>
                 <Field label="单订单总大小上限（MB）">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxOrderMb ?? ""}
-                    onChange={(e) =>
-                      patch({ maxOrderMb: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={2000}
+                    value={config.maxOrderMb}
+                    onValueChange={(value) => patch({ maxOrderMb: value })}
                   />
                 </Field>
                 <Field label="单文件最大页数">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxPages ?? ""}
-                    onChange={(e) =>
-                      patch({ maxPages: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={10000}
+                    value={config.maxPages}
+                    onValueChange={(value) => patch({ maxPages: value })}
                   />
                 </Field>
                 <Field label="单任务最大份数">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxCopies ?? ""}
-                    onChange={(e) =>
-                      patch({ maxCopies: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={1000}
+                    value={config.maxCopies}
+                    onValueChange={(value) => patch({ maxCopies: value })}
                   />
                 </Field>
                 <Field label="展开后最大页数">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxExpandedPages ?? ""}
-                    onChange={(e) =>
-                      patch({
-                        maxExpandedPages: Math.max(1, Number(e.target.value)),
-                      })
+                  <NumberInput
+                    min={1}
+                    max={100000}
+                    value={config.maxExpandedPages}
+                    onValueChange={(value) =>
+                      patch({ maxExpandedPages: value })
                     }
                   />
                 </Field>
                 <Field label="图片最大像素">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxPixels ?? ""}
-                    onChange={(e) =>
-                      patch({ maxPixels: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={100000000}
+                    value={config.maxPixels}
+                    onValueChange={(value) => patch({ maxPixels: value })}
                   />
                 </Field>
                 <Field label="最终 PDF 上限（MB）">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.maxFinalMb ?? ""}
-                    onChange={(e) =>
-                      patch({ maxFinalMb: Math.max(1, Number(e.target.value)) })
-                    }
+                  <NumberInput
+                    min={1}
+                    max={2000}
+                    value={config.maxFinalMb}
+                    onValueChange={(value) => patch({ maxFinalMb: value })}
                   />
                 </Field>
               </div>
@@ -805,19 +786,15 @@ function SettingsForm() {
                     key={kind}
                     label={`${kind === "CORNER" ? "左上角单钉" : "左侧双钉"}每册张数上限`}
                   >
-                    <input
-                      type="number"
-                      min="1"
+                    <NumberInput
+                      min={1}
                       placeholder="未设置"
-                      value={config.bindingLimits?.[kind] ?? ""}
-                      onChange={(e) =>
+                      value={config.bindingLimits?.[kind]}
+                      onValueChange={(value) =>
                         patch({
                           bindingLimits: {
                             ...(config.bindingLimits || {}),
-                            [kind]:
-                              e.target.value === ""
-                                ? null
-                                : Math.max(1, Number(e.target.value)),
+                            [kind]: value,
                           },
                         })
                       }
@@ -867,7 +844,8 @@ function SettingsForm() {
               </p>
               <h3>A4 文件打印</h3>
               <p className="muted">
-                A4 纸张固定为 210 × 297 mm。填写打印机无法打印的边缘宽度，文件内容会整体收进留白以内。
+                A4 纸张固定为 210 × 297
+                mm。填写打印机无法打印的边缘宽度，文件内容会整体收进留白以内。
               </p>
               <div className="form-grid">
                 {marginInputs(config.a4Margins, (a4Margins) =>
@@ -883,28 +861,24 @@ function SettingsForm() {
               </p>
               <div className="form-grid">
                 <Field label="纸张宽度（mm）">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.photoWidthMm ?? ""}
-                    onChange={(e) =>
-                      patch({ photoWidthMm: Number(e.target.value) })
-                    }
+                  <NumberInput
+                    min={0.1}
+                    max={500}
+                    step="0.1"
+                    value={config.photoWidthMm}
+                    onValueChange={(value) => patch({ photoWidthMm: value })}
                   />
                 </Field>
                 <Field label="纸张高度（mm）">
-                  <input
-                    type="number"
-                    min="1"
-                    value={config.photoHeightMm ?? ""}
-                    onChange={(e) =>
-                      patch({ photoHeightMm: Number(e.target.value) })
-                    }
+                  <NumberInput
+                    min={0.1}
+                    max={500}
+                    step="0.1"
+                    value={config.photoHeightMm}
+                    onValueChange={(value) => patch({ photoHeightMm: value })}
                   />
                 </Field>
-                {marginInputs(config.margins, (margins) =>
-                  patch({ margins }),
-                )}
+                {marginInputs(config.margins, (margins) => patch({ margins }))}
               </div>
               <Notice>
                 四边初始留白均为 3 mm，可分别调整；保存后仅影响新报价。
@@ -1064,65 +1038,42 @@ function SettingsForm() {
               </p>
               <div className="form-grid">
                 <Field label="待付款自动关闭（分钟）">
-                  <input
-                    type="number"
-                    min="5"
-                    max="10080"
+                  <NumberInput
+                    min={5}
+                    max={10080}
                     placeholder="留空保持当前期限"
-                    value={config.unpaidTimeoutMinutes ?? ""}
-                    onChange={(e) =>
-                      patch({
-                        unpaidTimeoutMinutes:
-                          e.target.value === ""
-                            ? null
-                            : Math.max(5, Number(e.target.value)),
-                      })
+                    value={config.unpaidTimeoutMinutes}
+                    onValueChange={(value) =>
+                      patch({ unpaidTimeoutMinutes: value })
                     }
                   />
                 </Field>
                 <Field label="定位最大时效（秒）">
-                  <input
-                    type="number"
-                    min="10"
-                    max="3600"
-                    value={config.locationMaxAgeSeconds ?? ""}
-                    onChange={(e) =>
-                      patch({
-                        locationMaxAgeSeconds: Math.max(
-                          10,
-                          Number(e.target.value),
-                        ),
-                      })
+                  <NumberInput
+                    min={10}
+                    max={3600}
+                    value={config.locationMaxAgeSeconds}
+                    onValueChange={(value) =>
+                      patch({ locationMaxAgeSeconds: value })
                     }
                   />
                 </Field>
                 <Field label="定位最大误差（米）">
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    value={config.locationMaxAccuracyMeters ?? ""}
-                    onChange={(e) =>
-                      patch({
-                        locationMaxAccuracyMeters: Math.max(
-                          1,
-                          Number(e.target.value),
-                        ),
-                      })
+                  <NumberInput
+                    min={1}
+                    max={1000}
+                    value={config.locationMaxAccuracyMeters}
+                    onValueChange={(value) =>
+                      patch({ locationMaxAccuracyMeters: value })
                     }
                   />
                 </Field>
                 <Field label="提取码长度">
-                  <input
-                    type="number"
-                    min="5"
-                    max="12"
-                    value={config.shortCodeLength ?? ""}
-                    onChange={(e) =>
-                      patch({
-                        shortCodeLength: Math.max(5, Number(e.target.value)),
-                      })
-                    }
+                  <NumberInput
+                    min={5}
+                    max={12}
+                    value={config.shortCodeLength}
+                    onValueChange={(value) => patch({ shortCodeLength: value })}
                   />
                 </Field>
               </div>
@@ -1237,9 +1188,7 @@ function SettingsForm() {
                 ? "暂停立即影响新的对应动作；不取消已存在的打印、配送或账目事实。"
                 : "保存仅提交当前分区，其他分区不会被覆盖。"}
           </Notice>
-          <p>
-            配置分区：{tabs.find(([value]) => value === tab)?.[1]}
-          </p>
+          <p>配置分区：{tabs.find(([value]) => value === tab)?.[1]}</p>
           {saveError && (
             <Notice type="error">
               <span role="alert">{saveError}</span>
@@ -1531,7 +1480,10 @@ export function Exceptions() {
                 <div>
                   <h2>{row.type}</h2>
                   <p>
-                    {formatDisplayTime((row as Record<string, any>).createdAt || row.time)} ·{" "}
+                    {formatDisplayTime(
+                      (row as Record<string, any>).createdAt || row.time,
+                    )}{" "}
+                    ·{" "}
                     <Link
                       className="text-link"
                       to={`${ADMIN}/orders/${row.orderId}`}
@@ -1673,7 +1625,8 @@ export function Trash() {
         description="误删可在 24 小时内恢复，过期后由后台清理。"
       />
       <Notice>
-        订单与配送批次删除后会进入这里，24 小时内可恢复。履约、售后、退款或工资未结清的对象删除前会被拦下；正在被有效订单引用的资产不可清理。
+        订单与配送批次删除后会进入这里，24
+        小时内可恢复。履约、售后、退款或工资未结清的对象删除前会被拦下；正在被有效订单引用的资产不可清理。
       </Notice>
       <Panel>
         <div className="table-scroll">

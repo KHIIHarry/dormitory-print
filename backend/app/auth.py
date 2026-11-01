@@ -8,6 +8,8 @@ every session/reservation change is committed by the request transaction.
 from __future__ import annotations
 
 import importlib
+import ipaddress
+import json
 import os
 import re
 import secrets
@@ -200,6 +202,120 @@ def _set_device(response: Response, request: Request, device_id: str) -> None:
         _set_cookie(response, DEVICE_COOKIE, device_id, timedelta(days=180))
 
 
+# Login device details are a display-only fact about one session. The shared
+# auth_sessions table has no dedicated address/agent column, so the compact
+# client descriptor lives in the existing 160-char device_label column. It is
+# always derived here: the raw User-Agent is never persisted or returned, and a
+# legacy placeholder label parses as "not recorded" instead of a guessed device.
+_CLIENT_LABEL_VERSION = 1
+_CLIENT_LABEL_PREFIX = '{'
+_LEGACY_DEVICE_LABELS = {'', '浏览器'}
+_UNRECORDED_DEVICE = '浏览器信息未记录'
+_USER_AGENT_MAX = 1024
+
+
+def _normalize_ip(value: str | None) -> str | None:
+    """Canonical IPv4/IPv6 text for a single host, or None when it is not an address."""
+    host = (value or '').strip()
+    if not host:
+        return None
+    if host.startswith('[') and host.endswith(']'):
+        host = host[1:-1]
+    # IPv6 zone identifiers are link-local plumbing, not part of the login address.
+    host = host.split('%', 1)[0]
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return str(address)
+
+
+def _client_ip(request: Request | None) -> str | None:
+    """The peer address as resolved by the ASGI server (uvicorn proxy headers).
+
+    Forwarding headers are deliberately not parsed here: the server/proxy trust
+    boundary decides the peer, so a client-supplied X-Forwarded-For cannot
+    overwrite the address shown to the account owner.
+    """
+    client = getattr(request, 'client', None) if request is not None else None
+    return _normalize_ip(getattr(client, 'host', None))
+
+
+def _browser_from_user_agent(user_agent: str | None) -> tuple[str | None, str | None]:
+    """Coarse browser/platform family from a User-Agent, never the raw string."""
+    ua = (user_agent or '')[:_USER_AGENT_MAX].lower()
+    if not ua:
+        return None, None
+    browser: str | None = None
+    if 'micromessenger' in ua:
+        browser = '微信'
+    elif 'wxwork' in ua:
+        browser = '企业微信'
+    elif 'edg/' in ua or 'edga/' in ua or 'edgios/' in ua:
+        browser = 'Edge'
+    elif 'opr/' in ua or 'opera' in ua:
+        browser = 'Opera'
+    elif 'samsungbrowser' in ua:
+        browser = '三星浏览器'
+    elif 'ucbrowser' in ua:
+        browser = 'UC 浏览器'
+    elif 'mqqbrowser' in ua:
+        browser = 'QQ 浏览器'
+    elif 'firefox/' in ua or 'fxios' in ua:
+        browser = 'Firefox'
+    elif 'chrome/' in ua or 'crios/' in ua:
+        browser = 'Chrome'
+    elif 'safari/' in ua:
+        browser = 'Safari'
+    if 'iphone' in ua or 'ipad' in ua or 'ipod' in ua:
+        platform = 'iOS'
+    elif 'android' in ua:
+        platform = 'Android'
+    elif 'cros' in ua:
+        platform = 'ChromeOS'
+    elif 'windows' in ua:
+        platform = 'Windows'
+    elif 'macintosh' in ua or 'mac os x' in ua:
+        platform = 'macOS'
+    elif 'linux' in ua:
+        platform = 'Linux'
+    else:
+        platform = None
+    return browser, platform
+
+
+def _encode_client_label(browser: str | None, platform: str | None,
+                         address: str | None) -> str:
+    if not (browser or platform or address):
+        return ''
+    return json.dumps({'v': _CLIENT_LABEL_VERSION, 'browser': browser,
+                       'platform': platform, 'ip': address},
+                      ensure_ascii=False, separators=(',', ':'))
+
+
+def _decode_client_label(label: str | None) -> dict | None:
+    """Parse our own descriptor; legacy/foreign labels are 'not recorded'."""
+    if not label or not label.startswith(_CLIENT_LABEL_PREFIX):
+        return None
+    try:
+        data = json.loads(label)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get('v') != _CLIENT_LABEL_VERSION:
+        return None
+    browser = data.get('browser') if isinstance(data.get('browser'), str) else None
+    platform = data.get('platform') if isinstance(data.get('platform'), str) else None
+    address = _normalize_ip(data.get('ip')) if isinstance(data.get('ip'), str) else None
+    return {'browser': browser, 'platform': platform, 'ip': address}
+
+
+def _login_client_label(request: Request) -> str:
+    browser, platform = _browser_from_user_agent(request.headers.get('user-agent'))
+    return _encode_client_label(browser, platform, _client_ip(request))
+
+
 def _load_session(db, request: Request, cookie_name: str, kind: str) -> AuthSession | None:
     raw = request.cookies.get(cookie_name)
     if not raw or len(raw) > 512:
@@ -230,6 +346,7 @@ def _issue_account_session(db, response: Response, request: Request, account: Ac
                            replace_session_id: str | None = None) -> AuthSession:
     now = _now()
     device_id = _device_id(request, current)
+    client_label = _login_client_label(request)
     staff = _active_staff_for_account(db, account)
     ttl = STAFF_SESSION_TTL if staff is not None else CUSTOMER_SESSION_TTL
     candidate = None
@@ -249,6 +366,8 @@ def _issue_account_session(db, response: Response, request: Request, account: Ac
         candidate.last_seen_at = now
         candidate.principal_id = account.principal_id
         candidate.session_version = account.session_version
+        # A fresh login is the moment the client descriptor is trustworthy.
+        candidate.device_label = client_label
         session = candidate
     else:
         if _active_session_count(db, 'CUSTOMER', account_id=account.id) >= MAX_DEVICES:
@@ -276,7 +395,7 @@ def _issue_account_session(db, response: Response, request: Request, account: Ac
                 )
         session = AuthSession(kind='CUSTOMER', token_hash=token_hash(raw),
                               principal_id=account.principal_id, account_id=account.id,
-                              device_id=device_id, device_label='浏览器',
+                              device_id=device_id, device_label=client_label,
                               session_version=account.session_version,
                               expires_at=now + ttl, last_seen_at=now)
         db.add(session)
@@ -629,9 +748,25 @@ def _staff_list(db, actor: Actor) -> StaffList:
 
 
 def _session_device(session: AuthSession, current_id: str | None) -> SessionDeviceView:
+    client = _decode_client_label(session.device_label)
+    browser = client['browser'] if client else None
+    platform = client['platform'] if client else None
+    address = client['ip'] if client else None
+    described = ' · '.join(part for part in (browser, platform) if part)
+    label = session.device_label or ''
+    if described:
+        device = described
+    elif (client is None and label and label not in _LEGACY_DEVICE_LABELS
+          and not label.startswith(_CLIENT_LABEL_PREFIX)):
+        device = label
+    else:
+        device = _UNRECORDED_DEVICE
     return SessionDeviceView(
         id=session.id,
-        device=session.device_label or '浏览器',
+        device=device,
+        browser=browser,
+        platform=platform,
+        ip_address=address,
         last_seen_at=session.last_seen_at,
         current=session.id == current_id,
         created_at=session.created_at,

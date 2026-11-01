@@ -130,7 +130,7 @@ services:
       - --no-access-log
       - --proxy-headers
       - --forwarded-allow-ips
-      - "*"
+      - ${DORMPRINT_PROXY_IP:-172.30.0.2}
     environment:
       <<: *app-env
       DORMPRINT_MAIL_ALLOWED_HOSTS: ${DORMPRINT_MAIL_ALLOWED_HOSTS:-}
@@ -294,8 +294,9 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/templates:/etc/nginx/templates:ro
     networks:
-      - edge
-      - internal
+      edge:
+      internal:
+        ipv4_address: ${DORMPRINT_PROXY_IP:-172.30.0.2}
     tmpfs:
       - /tmp:size=64m,mode=1777
     depends_on:
@@ -427,6 +428,9 @@ services:
 networks:
   internal:
     internal: true
+    ipam:
+      config:
+        - subnet: ${DORMPRINT_INTERNAL_SUBNET:-172.30.0.0/24}
   egress:
     driver: bridge
   edge:

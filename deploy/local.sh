@@ -20,6 +20,12 @@ if [[ ! -f "$local_env_file" ]]; then
 fi
 chmod 600 "$local_env_file"
 
+# Keep the local stack off the production private network range so both can
+# run side by side.  The proxy hop must stay inside the subnet and must match
+# the API's --forwarded-allow-ips (compose.yaml interpolates both values).
+export DORMPRINT_INTERNAL_SUBNET="${DORMPRINT_INTERNAL_SUBNET:-172.31.0.0/24}"
+export DORMPRINT_PROXY_IP="${DORMPRINT_PROXY_IP:-${DORMPRINT_INTERNAL_SUBNET%.*}.2}"
+
 compose=(docker compose --project-name dormprint-local
   --env-file "$local_env_file"
   -f "$deploy_dir/compose.yaml" -f "$deploy_dir/compose.local.yaml")

@@ -22,6 +22,7 @@ import {
   type TrashBlocker,
 } from "../lib/trash-blockers";
 import { growthRequest } from "../growth/client";
+import { NumberInput } from "../components/number-input";
 import { campusOfOrder, campusesOfBatch } from "../lib/campus";
 import { CampusFilter, CampusTag } from "./campus-filter";
 import { batchPrimaryAction, canStartBatch } from "../lib/domain";
@@ -1180,6 +1181,15 @@ export function Slots() {
       toast("结束时间必须晚于开始时间");
       return;
     }
+    if (
+      edit.capacity == null ||
+      !Number.isSafeInteger(edit.capacity) ||
+      edit.capacity < 1 ||
+      edit.capacity > 100000
+    ) {
+      toast("预约容量必须是 1 到 100000 之间的整数");
+      return;
+    }
     const id = edit.id || crypto.randomUUID();
     const slot = {
       ...edit,
@@ -1189,7 +1199,7 @@ export function Slots() {
         timeZone: "Asia/Shanghai",
       }).format(new Date(edit.date + "T12:00:00+08:00")),
       enabled: edit.enabled ?? true,
-      capacity: edit.capacity || 30,
+      capacity: edit.capacity,
     } as Slot;
     if (
       await act(
@@ -1411,12 +1421,12 @@ export function Slots() {
             </Field>
           </div>
           <Field label="预约容量（单）">
-            <input
-              type="number"
-              min="1"
-              value={edit.capacity || 30}
-              onChange={(e) =>
-                setEdit({ ...edit, capacity: Number(e.target.value) })
+            <NumberInput
+              min={1}
+              max={100000}
+              value={edit.capacity}
+              onValueChange={(capacity) =>
+                setEdit({ ...edit, capacity: capacity ?? undefined })
               }
             />
           </Field>

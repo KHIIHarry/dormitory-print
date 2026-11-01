@@ -18,6 +18,7 @@ import {
 import { useGrowthResource } from "../../growth/client";
 import { useIdentity } from "../../growth/identity";
 import type { MailConfig, MailTemplate } from "../../growth/types";
+import { NumberInput } from "../../components/number-input";
 import {
   AccessState,
   ConfirmAction,
@@ -33,6 +34,7 @@ import {
   buildTestMailBody,
   localDate,
   mailStatus,
+  type MailDraft,
 } from "./logic";
 type MailTest = {
   status: string;
@@ -52,7 +54,11 @@ function useMailTestPolling(
   const jobId = test?.emailJobId;
   const status = test?.status;
   useEffect(() => {
-    if (!jobId || ["SMTP_ACCEPTED", "FAILED", "EXPIRED", "CANCELLED"].includes(status ?? "")) return;
+    if (
+      !jobId ||
+      ["SMTP_ACCEPTED", "FAILED", "EXPIRED", "CANCELLED"].includes(status ?? "")
+    )
+      return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -88,7 +94,7 @@ function MailSettingsForm() {
   const [mailTask, setMailTask] = useState<
     "test-connection" | "test-send" | null
   >(null);
-  const [draft, setDraft] = useState<MailConfig | null>(null),
+  const [draft, setDraft] = useState<MailDraft | null>(null),
     [secret, setSecret] = useState(""),
     [confirm, setConfirm] = useState<"save" | "clear" | null>(null),
     [testAddress, setTestAddress] = useState(""),
@@ -101,11 +107,13 @@ function MailSettingsForm() {
     if (resource.data && !edited.current) {
       const received = resource.data;
       setDraft((current) =>
-        current && current.version > received.version ? current : { ...received },
+        current && current.version > received.version
+          ? current
+          : { ...received },
       );
     }
   }, [resource.data]);
-  const patch = (value: Partial<MailConfig>) => {
+  const patch = (value: Partial<MailDraft>) => {
     edited.current = true;
     setDraft((d) => (d ? { ...d, ...value } : d));
   };
@@ -176,13 +184,12 @@ function MailSettingsForm() {
                   />
                 </Field>
                 <Field label="端口">
-                  <input
-                    type="number"
+                  <NumberInput
                     required
-                    min="1"
-                    max="65535"
+                    min={1}
+                    max={65535}
                     value={draft.port}
-                    onChange={(e) => patch({ port: Number(e.target.value) })}
+                    onValueChange={(port) => patch({ port })}
                   />
                 </Field>
                 <Field label="连接安全">
@@ -202,13 +209,13 @@ function MailSettingsForm() {
                   </select>
                 </Field>
                 <Field label="连接超时（秒）">
-                  <input
+                  <NumberInput
                     required
-                    type="number"
-                    min="1"
+                    min={1}
+                    max={120}
                     value={draft.timeoutSeconds}
-                    onChange={(e) =>
-                      patch({ timeoutSeconds: Number(e.target.value) })
+                    onValueChange={(timeoutSeconds) =>
+                      patch({ timeoutSeconds })
                     }
                   />
                 </Field>
@@ -348,14 +355,14 @@ function MailSettingsForm() {
                       draft.lastTest?.message ||
                       ""}
                   </p>
-                  {test?.errorClass && (
-                    <p>错误类别：{test.errorClass}</p>
-                  )}
+                  {test?.errorClass && <p>错误类别：{test.errorClass}</p>}
                   {typeof test?.attempts === "number" && test.attempts > 0 && (
                     <p>已尝试 {test.attempts} 次</p>
                   )}
                   {test?.status === "QUEUED" && (
-                    <p>若长时间停留在“已入队”，请确认 Celery worker 正在运行。</p>
+                    <p>
+                      若长时间停留在“已入队”，请确认 Celery worker 正在运行。
+                    </p>
                   )}
                   {test?.emailJobId && (
                     <small>作业编号：{test.emailJobId}</small>

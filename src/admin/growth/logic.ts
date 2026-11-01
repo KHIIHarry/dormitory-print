@@ -1,4 +1,4 @@
-import type { VolumePolicy } from "../../growth/types";
+import type { MailConfig, VolumePolicy } from "../../growth/types";
 export function parseCents(input: string): number {
   if (!/^\d+(?:\.\d{1,2})?$/.test(input.trim()))
     throw new Error("金额请填写非负数字，最多两位小数");
@@ -139,8 +139,26 @@ export function dateInput(value: string | null | undefined) {
 export const isoDate = (value: string) =>
   value ? new Date(value).toISOString() : null;
 
+export type MailDraft = Omit<MailConfig, "port" | "timeoutSeconds"> & {
+  port: number | null;
+  timeoutSeconds: number | null;
+};
+
+function mailInteger(
+  value: number | null,
+  label: string,
+  min: number,
+  max: number,
+) {
+  if (value === null || !Number.isFinite(value))
+    throw new Error(`${label}不能为空`);
+  if (!Number.isSafeInteger(value) || value < min || value > max)
+    throw new Error(`${label}必须是 ${min} 到 ${max} 之间的整数`);
+  return value;
+}
+
 export function buildMailPatch(
-  config: import("../../growth/types").MailConfig,
+  config: MailDraft,
   secret: string,
   reason: string,
   clear = false,
@@ -154,13 +172,26 @@ export function buildMailPatch(
     };
   if (config.security === "NONE" && !config.allowInsecure)
     throw new Error("当前部署未批准无加密 SMTP 连接");
-  const { version, secretConfigured, lastTest, allowInsecure, ...fields } =
-    config;
+  const port = mailInteger(config.port, "SMTP 端口", 1, 65535);
+  const timeoutSeconds = mailInteger(config.timeoutSeconds, "连接超时", 1, 120);
+  const {
+    version,
+    secretConfigured,
+    lastTest,
+    allowInsecure,
+    port: _port,
+    timeoutSeconds: _timeout,
+    ...fields
+  } = config;
   void secretConfigured;
   void lastTest;
   void allowInsecure;
+  void _port;
+  void _timeout;
   return {
     ...fields,
+    port,
+    timeoutSeconds,
     expectedVersion: version,
     reason: reason.trim(),
     ...(secret ? { secret } : {}),

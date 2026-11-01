@@ -290,6 +290,7 @@ export function CustomerAuthForm({
     Array<{
       id: string;
       device: string;
+      ipAddress?: string | null;
       lastSeenAt?: string;
       current?: boolean;
     }> | null
@@ -342,7 +343,15 @@ export function CustomerAuthForm({
     } catch (error) {
       if (error instanceof ApiError && error.code === "DEVICE_LIMIT_REACHED") {
         const details = error.details as
-          | { sessions?: Array<{ id: string; device: string; lastSeenAt?: string; current?: boolean }> }
+          | {
+              sessions?: Array<{
+                id: string;
+                device: string;
+                ipAddress?: string | null;
+                lastSeenAt?: string;
+                current?: boolean;
+              }>;
+            }
           | undefined;
         setDeviceOptions(details?.sessions || []);
         return;
@@ -554,6 +563,7 @@ export function CustomerAuthForm({
                                 ? `最近使用 ${new Date(session.lastSeenAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
                                 : "登录设备"}
                           </small>
+                          <small>登录 IP：{session.ipAddress || "未记录"}</small>
                         </span>
                         <em>下线并登录</em>
                       </button>
@@ -1216,7 +1226,8 @@ function SecurityContent() {
               <div className="account-row" key={session.id}>
                 <LockKeyhole size={20} />
                 <div>
-                  <strong>{session.device}</strong>
+                  <strong>{session.device || "浏览器信息未记录"}</strong>
+                  <small>登录 IP：{session.ipAddress || "未记录"}</small>
                   <small>
                     最近活动：{dateLabel(session.lastSeenAt)}
                     {session.current && " · 当前设备"}
@@ -1228,7 +1239,7 @@ function SecurityContent() {
                   aria-label={
                     session.current
                       ? "退出当前设备"
-                      : `撤销设备会话：${session.device}`
+                      : `撤销设备会话：${session.device}（登录 IP：${session.ipAddress || "未记录"}）`
                   }
                   title={session.current ? "退出当前设备" : "撤销设备会话"}
                   busy={action.busy}
@@ -1251,7 +1262,7 @@ function SecurityContent() {
                 ? "其他设备将退出账号。"
                 : selected.current
                   ? "当前设备将退出账号，需要重新登录。"
-                  : `撤销 ${selected.device} 的账号访问权限？`}
+                  : `撤销 ${selected.device}（登录 IP：${selected.ipAddress || "未记录"}）的账号访问权限？`}
             </p>
             <Feedback action={action} />
             <Button

@@ -1,3 +1,4 @@
+import { NumberInput } from "./number-input";
 import { formatFileSize } from "../lib/display-format";
 import { getIdentityGeneration } from "../growth/client";
 import { MOTION, usePresence } from "./presence";
@@ -432,8 +433,9 @@ export function Field({
   const id = useId();
   const simple =
     isValidElement(children) &&
-    typeof children.type === "string" &&
-    ["input", "select", "textarea"].includes(children.type);
+    (children.type === NumberInput ||
+      (typeof children.type === "string" &&
+        ["input", "select", "textarea"].includes(children.type)));
   const control = simple
     ? cloneElement(children as React.ReactElement<Record<string, unknown>>, {
         id,

@@ -8513,6 +8513,8 @@ export interface components {
         };
         /** SessionDeviceView */
         SessionDeviceView: {
+            /** Browser */
+            browser?: string | null;
             /** Createdat */
             createdAt?: string | null;
             /** Current */
@@ -8523,11 +8525,15 @@ export interface components {
             expiresAt?: string | null;
             /** Id */
             id: string;
+            /** Ipaddress */
+            ipAddress?: string | null;
             /**
              * Lastseenat
              * Format: date-time
              */
             lastSeenAt: string;
+            /** Platform */
+            platform?: string | null;
         };
         /** SessionList */
         SessionList: {

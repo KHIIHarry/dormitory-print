@@ -59,6 +59,7 @@
 - `DORMPRINT_MAIL_ALLOWED_HOSTS`：真实 SMTP 主机白名单；留空时邮件功能诚实显示不可用，不阻塞已有账号和游客业务。
 - `DORMPRINT_INITIAL_ADMIN_USERNAME`：仅用户名，示例 `admin`。**初始密码没有默认值**，由 `init-admin` 交互输入。
 - `DORMPRINT_BIND_ADDRESS` 默认 `127.0.0.1`；在 TLS 终止和防火墙确认前不要改成 `0.0.0.0`。
+- `DORMPRINT_INTERNAL_SUBNET` / `DORMPRINT_PROXY_IP`：私有 Compose 网络子网与 Nginx 固定地址，默认 `172.30.0.0/24` / `172.30.0.2`。API 只信任该地址转发的 `X-Forwarded-For`；两者必须一起修改且代理地址位于子网内，详见 6.3。
 
 ### 2.3 主密钥与指纹
 
@@ -183,7 +184,7 @@ Compose 命令显式使用 `-Q files` / `-Q business`，并设置 `--concurrency
 
 1. 证书链和私钥由部署者提供并自动续期；
 2. `DORMPRINT_PUBLIC_ORIGIN` 必须与外部 HTTPS 源完全一致；
-3. 将 `X-Forwarded-Proto` 设为 `https`（Compose 内的 Nginx 已设置自己的 scheme；若再加一层代理，请保持该头可信）；
+3. 将 `X-Forwarded-Proto` 设为 `https`（Compose 内的 Nginx 已设置自己的 scheme；若再加一层代理，请保持该头可信）。客户端 IP 的信任边界见 6.3，不要把用户可伪造的转发头直接透传给 API；
 4. 外部代理不能绕过 `/api/` 的 no-store，不能缓存私有资产或导出；
 5. 防火墙只开 443（及必要 80 做 ACME 跳转），不要公开 5432/6379/8000/8080。
 
@@ -197,6 +198,17 @@ docker compose -f deploy/compose.yaml -f deploy/compose.tls.yaml \
 ```
 
 该模板监听 443、重定向 80 到 HTTPS、启用 HSTS，并且只发布到回环 `127.0.0.1:8443`。是否由主机/防火墙对外开放仍由部署者决定；未提供证书时不启用此 overlay。示例不包含可用的证书或域名，不能据此声称 TLS 已验收。
+
+### 6.3 客户端 IP 与可信代理边界
+
+登录设备页记录的 IP 来自 API 实际看到的 TCP 对端，而不是客户端可随意提交的头。仓库内的边界是：
+
+1. 容器内 Nginx 对 `/api/` **覆盖**（不追加）`X-Real-IP` 和 `X-Forwarded-For` 为 `$remote_addr`，即它接受的 TCP 对端；客户端自带的 `X-Forwarded-For` 链既不会被保留，也不会到达 API。
+2. API 只信任来自 `DORMPRINT_PROXY_IP` 的转发头。默认 `internal` 网络子网为 `DORMPRINT_INTERNAL_SUBNET=172.30.0.0/24`，`proxy` 固定在 `DORMPRINT_PROXY_IP=172.30.0.2`；两个值必须一起修改，代理地址必须在子网内；修改子网后需重建 `internal` 网络（`docker compose down` 后重新 `up`，会短暂中断）。`api` 不发布端口，只有 `proxy` 发布回环端口。
+3. `deploy/local.sh` 为本地栈导出 `172.31.0.0/24` 与 `172.31.0.2`，与生产默认网段错开；如需在同一主机并行运行两套栈，不要复用同一子网。
+4. 若前面还有一层外部反向代理/负载均衡（主机 Caddy/Nginx、云 LB），容器内 Nginx 看到的 `$remote_addr` 是到它这条 TCP 连接的来源（通常是 Docker 网关或主机地址），因此设备页默认显示该地址，而不是终端用户地址。**不要**让外层代理透传用户可提交的 `X-Forwarded-For`。只有外层代理自己也覆盖/清洗该头、且部署者在**容器内 Nginx** 显式声明可信外层（例如在 `location /api/` 外配置 `set_real_ip_from <外层地址或 CIDR>; real_ip_header X-Forwarded-For; real_ip_recursive on;`）时，容器内 `$remote_addr` 才会被 realip 模块还原为真实客户端并被记录。只能在容器内加入真实可控的代理网段；禁止 `0.0.0.0/0`，也不要信任任意用户提交的头，否则又会变成可伪造。
+5. 仓库默认无法识别部署环境之外的未知代理，也没有为外部代理预置 `set_real_ip_from`。未显式配置上述可信来源时，保持显示最外层 TCP 对端地址是安全选择，不猜测真实用户 IP。
+6. 记录字段上线前的历史会话无法可靠恢复，界面显示“未记录”；新登录才记录浏览器与登录 IP。共享 NAT/公司出口会显示同一个出口 IP，这是网络事实而非伪造。
 
 ## 7. 私有存储、权限与容量告警
 

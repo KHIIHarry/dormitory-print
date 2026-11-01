@@ -14492,6 +14492,18 @@
       "SessionDeviceView": {
         "additionalProperties": false,
         "properties": {
+          "browser": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browser"
+          },
           "createdAt": {
             "anyOf": [
               {
@@ -14528,10 +14540,34 @@
             "title": "Id",
             "type": "string"
           },
+          "ipAddress": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ipaddress"
+          },
           "lastSeenAt": {
             "format": "date-time",
             "title": "Lastseenat",
             "type": "string"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
           }
         },
         "required": [

@@ -368,6 +368,7 @@ export function StaffAccountPage({ courier = false }: { courier?: boolean }) {
                         {device.device}
                         {device.current ? " · 当前设备" : ""}
                       </b>
+                      <small>登录 IP：{device.ipAddress || "未记录"}</small>
                       <small>最近活动：{localDate(device.lastSeenAt)}</small>
                     </div>
                     <button

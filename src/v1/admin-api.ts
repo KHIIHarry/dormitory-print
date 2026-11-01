@@ -44,30 +44,13 @@ const PRICE_KEYS = [
   "side",
 ] as const;
 
-const SERVICE_KEYS = [
-  "serviceEnabled",
-  "maxFiles",
-  "maxMb",
-  "maxOrderMb",
-  "maxPages",
-  "maxCopies",
-  "maxPixels",
-  "maxExpandedPages",
-  "maxFinalMb",
-  "bindingLimits",
-  "formats",
-  "photoEnabled",
-  "photoCalibrated",
+const CONTACT_KEYS = [
+  "wechat",
+  "phone",
+  "qrUrl",
+  "displayName",
+  "guide",
 ] as const;
-
-const CONTACT_KEYS = ["wechat", "phone", "qrUrl", "displayName", "guide"] as const;
-const WORKFLOW_KEYS = [
-  "unpaidTimeoutMinutes",
-  "locationMaxAgeSeconds",
-  "locationMaxAccuracyMeters",
-  "shortCodeLength",
-] as const;
-
 function requiredVersion(version: number): number {
   if (!Number.isSafeInteger(version) || version < 1)
     throw new Error("配置版本无效，请刷新后重试");
@@ -76,7 +59,8 @@ function requiredVersion(version: number): number {
 
 function present(source: Record<string, any>, keys: readonly string[]) {
   const result: Record<string, unknown> = {};
-  for (const key of keys) if (source[key] !== undefined) result[key] = source[key];
+  for (const key of keys)
+    if (source[key] !== undefined) result[key] = source[key];
   return result;
 }
 
@@ -86,6 +70,97 @@ function numberOrNull(value: unknown): number | null {
   if (!Number.isSafeInteger(number) || number < 0)
     throw new Error("价目必须是非负整数分");
   return number;
+}
+
+type NumericRule = {
+  label: string;
+  min: number;
+  max: number;
+  integer?: boolean;
+};
+
+function boundedNumber(
+  value: unknown,
+  { label, min, max, integer = true }: NumericRule,
+): number {
+  if (value === null || value === undefined || value === "")
+    throw new Error(`${label}不能为空`);
+  const number = Number(value);
+  if (!Number.isFinite(number) || (integer && !Number.isSafeInteger(number)))
+    throw new Error(`${label}必须是${integer ? "整数" : "数字"}`);
+  if (number < min || number > max)
+    throw new Error(`${label}必须在 ${min} 到 ${max} 之间`);
+  return number;
+}
+
+const SERVICE_LIMIT_RULES: Record<string, NumericRule> = {
+  maxFiles: { label: "单订单最多文件数", min: 1, max: 100 },
+  maxMb: { label: "单文件大小上限", min: 1, max: 200 },
+  maxOrderMb: { label: "单订单总大小上限", min: 1, max: 2000 },
+  maxPages: { label: "单文件最大页数", min: 1, max: 10000 },
+  maxCopies: { label: "单任务最大份数", min: 1, max: 1000 },
+  maxPixels: { label: "图片最大像素", min: 1, max: 100000000 },
+  maxExpandedPages: { label: "展开后最大页数", min: 1, max: 100000 },
+  maxFinalMb: { label: "最终 PDF 上限", min: 1, max: 2000 },
+};
+
+function bindingLimits(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") throw new Error("装订上限格式无效");
+  const source = value as Record<string, unknown>;
+  const result: Record<string, number | null> = {};
+  for (const key of ["CORNER", "SIDE"] as const) {
+    if (source[key] === undefined) continue;
+    if (source[key] === null || source[key] === "") result[key] = null;
+    else
+      result[key] = boundedNumber(source[key], {
+        label: `${key === "CORNER" ? "左上角单钉" : "左侧双钉"}每册张数上限`,
+        min: 1,
+        max: Number.MAX_SAFE_INTEGER,
+      });
+  }
+  return result;
+}
+
+function margins(value: unknown, label: string): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== "object") throw new Error(`${label}格式无效`);
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(
+    ["top", "bottom", "left", "right"].map((key) => [
+      key,
+      boundedNumber(source[key], {
+        label: `${label}${["上", "下", "左", "右"][["top", "bottom", "left", "right"].indexOf(key)]}`,
+        min: 0,
+        max: 100,
+        integer: false,
+      }),
+    ]),
+  );
+}
+
+function workflowNumber(
+  source: Record<string, unknown>,
+  key: string,
+  rule: NumericRule,
+  optional: true,
+): number | undefined;
+function workflowNumber(
+  source: Record<string, unknown>,
+  key: string,
+  rule: NumericRule,
+  optional?: false,
+): number;
+function workflowNumber(
+  source: Record<string, unknown>,
+  key: string,
+  rule: NumericRule,
+  optional = false,
+): number | undefined {
+  const value = source[key];
+  if ((value === null || value === undefined || value === "") && optional)
+    return undefined;
+  return boundedNumber(value, rule);
 }
 
 function pauses(source: unknown): PauseState {
@@ -112,20 +187,50 @@ export function configSectionPayload(
     const prices = (config.prices || {}) as Record<string, unknown>;
     return {
       expectedVersion,
-      ...Object.fromEntries(PRICE_KEYS.map((key) => [key, numberOrNull(prices[key])])),
+      ...Object.fromEntries(
+        PRICE_KEYS.map((key) => [key, numberOrNull(prices[key])]),
+      ),
     };
   }
   if (section === "services") {
-    return {
+    const payload: Record<string, unknown> = {
       expectedVersion,
-      ...present(config, SERVICE_KEYS),
+      ...present(config, [
+        "serviceEnabled",
+        "formats",
+        "photoEnabled",
+        "photoCalibrated",
+      ]),
     };
+    for (const [key, rule] of Object.entries(SERVICE_LIMIT_RULES)) {
+      if (config[key] !== undefined)
+        payload[key] = boundedNumber(config[key], rule);
+    }
+    if (config.bindingLimits !== undefined)
+      payload.bindingLimits = bindingLimits(config.bindingLimits);
+    return payload;
   }
   if (section === "photo") {
-    return {
-      expectedVersion,
-      ...present(config, ["photoWidthMm", "photoHeightMm", "margins", "a4Margins"]),
-    };
+    const payload: Record<string, unknown> = { expectedVersion };
+    for (const [key, label] of [
+      ["photoWidthMm", "纸张宽度"],
+      ["photoHeightMm", "纸张高度"],
+    ] as const) {
+      if (config[key] !== undefined)
+        payload[key] = boundedNumber(config[key], {
+          label,
+          min: 0.1,
+          max: 500,
+          integer: false,
+        });
+    }
+    for (const [key, label] of [
+      ["margins", "照片留白"],
+      ["a4Margins", "A4 留白"],
+    ] as const) {
+      if (config[key] !== undefined) payload[key] = margins(config[key], label);
+    }
+    return payload;
   }
   if (section === "contact") {
     return {
@@ -140,10 +245,30 @@ export function configSectionPayload(
     };
   }
   if (section === "workflow") {
-    const workflow = present(config, WORKFLOW_KEYS);
-    // The current backend PATCH drops explicit nulls for this section; omitting
-    // a cleared field keeps the existing server value instead of faking a reset.
-    for (const key of WORKFLOW_KEYS) if (workflow[key] === null) delete workflow[key];
+    const workflow: Record<string, number> = {};
+    const unpaidTimeoutMinutes = workflowNumber(
+      config,
+      "unpaidTimeoutMinutes",
+      { label: "待付款自动关闭", min: 5, max: 10080 },
+      true,
+    );
+    if (unpaidTimeoutMinutes !== undefined)
+      workflow.unpaidTimeoutMinutes = unpaidTimeoutMinutes;
+    workflow.locationMaxAgeSeconds = workflowNumber(
+      config,
+      "locationMaxAgeSeconds",
+      { label: "定位最大时效", min: 10, max: 3600 },
+    );
+    workflow.locationMaxAccuracyMeters = workflowNumber(
+      config,
+      "locationMaxAccuracyMeters",
+      { label: "定位最大误差", min: 1, max: 1000 },
+    );
+    workflow.shortCodeLength = workflowNumber(config, "shortCodeLength", {
+      label: "提取码长度",
+      min: 5,
+      max: 12,
+    });
     return {
       expectedVersion,
       ...workflow,
@@ -221,22 +346,38 @@ export type AfterSaleReviewInput = {
   reason: string;
 };
 
-export function afterSaleReviewPayload(item: AfterSaleCase, input: AfterSaleReviewInput) {
+export function afterSaleReviewPayload(
+  item: AfterSaleCase,
+  input: AfterSaleReviewInput,
+) {
   const reason = input.reason.trim();
   if (!reason) throw new Error("请填写审核原因");
   if (input.solution !== item.solution)
     throw new Error("处理方式须与客户已确认的选择一致；变更方式须先由客户确认");
   if (input.decision === "REJECT")
-    return { expectedVersion: item.version, decision: "REJECT" as const, solution: input.solution, reason };
+    return {
+      expectedVersion: item.version,
+      decision: "REJECT" as const,
+      solution: input.solution,
+      reason,
+    };
   if (input.solution === "REPRINT")
-    return { expectedVersion: item.version, decision: "APPROVE" as const, solution: "REPRINT" as const, reason };
+    return {
+      expectedVersion: item.version,
+      decision: "APPROVE" as const,
+      solution: "REPRINT" as const,
+      reason,
+    };
   const suggested = Math.max(0, Number(item.suggestedCents) || 0);
-  const approved = input.approvedCents === undefined ? suggested : Number(input.approvedCents);
-  if (!Number.isSafeInteger(approved) || approved < 0) throw new Error("批准金额必须是非负整数分");
+  const approved =
+    input.approvedCents === undefined ? suggested : Number(input.approvedCents);
+  if (!Number.isSafeInteger(approved) || approved < 0)
+    throw new Error("批准金额必须是非负整数分");
   if (item.responsibility === "CUSTOMER" && approved !== suggested)
     throw new Error("客户自身原因退款按已批准规则全额退回实收，不能自定义金额");
   const basis = (input.adjustmentBasis || "").trim();
-  if (approved !== suggested && !basis) throw new Error("调整系统建议金额必须填写依据");
+  if (approved !== suggested && !basis)
+    throw new Error("调整系统建议金额必须填写依据");
   // The backend requires basis whenever approvedCents is present; omit it when
   // the system suggestion is kept so the review uses the stored suggestion.
   return {
@@ -257,7 +398,10 @@ export type AfterSaleCaseAction = "reprint-ready" | "complete";
  * reprint-ready and complete. It also enforces the real guards (packed order,
  * completed reprint tasks, redelivery proof), so the UI must never pre-set them.
  */
-export function afterSaleActionPayload(item: Pick<AfterSaleCase, "version">, reason: string) {
+export function afterSaleActionPayload(
+  item: Pick<AfterSaleCase, "version">,
+  reason: string,
+) {
   const cleanReason = reason.trim();
   if (!cleanReason) throw new Error("请填写操作原因");
   if (!Number.isSafeInteger(item.version) || item.version < 1)
@@ -373,7 +517,12 @@ export type PackingTaskView = {
     generatedAt: string;
     packingStatus: string;
     items: CheckListItemView[];
-    blockers: { code: string; message: string; fileId?: string | null; taskId?: string | null }[];
+    blockers: {
+      code: string;
+      message: string;
+      fileId?: string | null;
+      taskId?: string | null;
+    }[];
   };
   version: number;
 };
@@ -388,10 +537,14 @@ export function reprintPayload(
 ) {
   const cleanReason = reason.trim();
   if (!cleanReason) throw new Error("请填写补打原因");
-  const ids = Array.from(new Set(sheetIds.map((id) => id.trim()).filter(Boolean)));
+  const ids = Array.from(
+    new Set(sheetIds.map((id) => id.trim()).filter(Boolean)),
+  );
   if (mode === "SHEETS") {
     if (!ids.length) throw new Error("指定纸张补打必须选择实体纸张");
-    const catalog = new Set((task.sheetCatalog || []).map((row) => row.sheetId));
+    const catalog = new Set(
+      (task.sheetCatalog || []).map((row) => row.sheetId),
+    );
     if (catalog.size && ids.some((id) => !catalog.has(id)))
       throw new Error("补打纸张不属于当前打印任务");
   }
@@ -403,7 +556,11 @@ export function reprintPayload(
   };
 }
 
-export function packPayload(packing: PackingTaskView, orderVersion: number, confirmedFileIds: string[]) {
+export function packPayload(
+  packing: PackingTaskView,
+  orderVersion: number,
+  confirmedFileIds: string[],
+) {
   const required = packing.checklist.items.map((item) => item.fileId);
   const sent = new Set(confirmedFileIds);
   if (required.some((fileId) => !sent.has(fileId)))
@@ -460,7 +617,8 @@ export function receiptRefundTotals(
       ? (refundableRaw as number)
       : null;
   const refundedCents =
-    reportedRefunded ?? (reportedRefundable === null ? 0 : Math.max(0, gross - reportedRefundable));
+    reportedRefunded ??
+    (reportedRefundable === null ? 0 : Math.max(0, gross - reportedRefundable));
   const calculated = Math.max(0, gross - refundedCents);
   const refundableCents =
     reportedRefundable === null
@@ -536,7 +694,11 @@ export function slotProposalPayload(
   if (!cleanReason) throw new Error("请填写时段变更原因");
   if (!Number.isSafeInteger(order.version) || order.version < 1)
     throw new Error("订单版本无效，请刷新订单后重试");
-  return { expectedVersion: order.version, slotId: cleanSlotId, reason: cleanReason };
+  return {
+    expectedVersion: order.version,
+    slotId: cleanSlotId,
+    reason: cleanReason,
+  };
 }
 
 /** Actual start can be recorded once; reason is optional in the backend contract. */
@@ -565,10 +727,13 @@ export function exportPayload(
   fields: string[],
   reason: string,
 ) {
-  if (kind !== "ORDERS" && kind !== "FINANCE") throw new Error("仅支持订单或收退款导出");
+  if (kind !== "ORDERS" && kind !== "FINANCE")
+    throw new Error("仅支持订单或收退款导出");
   const cleanReason = reason.trim();
   if (!cleanReason) throw new Error("请填写导出原因");
-  const cleanFields = Array.from(new Set(fields.map((field) => field.trim()).filter(Boolean)));
+  const cleanFields = Array.from(
+    new Set(fields.map((field) => field.trim()).filter(Boolean)),
+  );
   if (!cleanFields.length) throw new Error("请选择导出字段");
   return { kind, filters, fields: cleanFields, reason: cleanReason };
 }
@@ -616,16 +781,66 @@ export const CAPABILITY_CATALOG: {
   description: string;
   enforced: boolean;
 }[] = [
-  { key: "*", label: "完整管理员", description: "包含全部已实现管理能力；仍受最后管理员保护", enforced: true },
-  { key: "config.manage", label: "系统配置", description: "价目、服务、照片、联系、营业、工作流与保留策略", enforced: true },
-  { key: "staff.manage", label: "员工管理", description: "授予客户账号员工权限、改角色、超级管理员与撤销会话", enforced: true },
-  { key: "customer.manage", label: "客户管理", description: "客户检索、冻结、解冻、注销审批与安全邮件", enforced: true },
-  { key: "mail.manage", label: "邮件与模板", description: "SMTP 配置、连接测试与七类模板", enforced: true },
-  { key: "promotion.manage", label: "营销与满量", description: "活动、券、邀请奖励、记录与满量规则", enforced: true },
-  { key: "order.access-link.manage", label: "订单链接", description: "签发、撤销与丢失补发", enforced: true },
-  { key: "orders.manage", label: "订单管理", description: "订单查询、笔记、优先级与运营操作", enforced: true },
-  { key: "orders.view", label: "订单只读", description: "只读查看订单、看板与详情，不含运营操作", enforced: true },
-  { key: "payment.manage", label: "收款与售后", description: "人工收款、时段建议、售后审核与退款登记", enforced: true },
+  {
+    key: "*",
+    label: "完整管理员",
+    description: "包含全部已实现管理能力；仍受最后管理员保护",
+    enforced: true,
+  },
+  {
+    key: "config.manage",
+    label: "系统配置",
+    description: "价目、服务、照片、联系、营业、工作流与保留策略",
+    enforced: true,
+  },
+  {
+    key: "staff.manage",
+    label: "员工管理",
+    description: "授予客户账号员工权限、改角色、超级管理员与撤销会话",
+    enforced: true,
+  },
+  {
+    key: "customer.manage",
+    label: "客户管理",
+    description: "客户检索、冻结、解冻、注销审批与安全邮件",
+    enforced: true,
+  },
+  {
+    key: "mail.manage",
+    label: "邮件与模板",
+    description: "SMTP 配置、连接测试与七类模板",
+    enforced: true,
+  },
+  {
+    key: "promotion.manage",
+    label: "营销与满量",
+    description: "活动、券、邀请奖励、记录与满量规则",
+    enforced: true,
+  },
+  {
+    key: "order.access-link.manage",
+    label: "订单链接",
+    description: "签发、撤销与丢失补发",
+    enforced: true,
+  },
+  {
+    key: "orders.manage",
+    label: "订单管理",
+    description: "订单查询、笔记、优先级与运营操作",
+    enforced: true,
+  },
+  {
+    key: "orders.view",
+    label: "订单只读",
+    description: "只读查看订单、看板与详情，不含运营操作",
+    enforced: true,
+  },
+  {
+    key: "payment.manage",
+    label: "收款与售后",
+    description: "人工收款、时段建议、售后审核与退款登记",
+    enforced: true,
+  },
   {
     key: "production.manage",
     label: "生产管理",
@@ -644,9 +859,24 @@ export const CAPABILITY_CATALOG: {
     description: "配送时段、批次、发车、分配与异常处理",
     enforced: true,
   },
-  { key: "export.manage", label: "受控导出", description: "订单、收退款与营销记录导出及下载", enforced: true },
-  { key: "data.manage", label: "数据清理", description: "回收站、恢复预览、恢复与彻底清理", enforced: true },
-  { key: "audit.view", label: "审计日志", description: "查看后台操作审计记录", enforced: true },
+  {
+    key: "export.manage",
+    label: "受控导出",
+    description: "订单、收退款与营销记录导出及下载",
+    enforced: true,
+  },
+  {
+    key: "data.manage",
+    label: "数据清理",
+    description: "回收站、恢复预览、恢复与彻底清理",
+    enforced: true,
+  },
+  {
+    key: "audit.view",
+    label: "审计日志",
+    description: "查看后台操作审计记录",
+    enforced: true,
+  },
 ];
 
 export type StaffGrantAccount = {
@@ -671,10 +901,7 @@ export type StaffGrantableAccount = {
  * complete email address, but the UI always enforces the minimum length so a
  * short fragment never becomes a broad customer directory query.
  */
-export function staffGrantableAccountsPath(
-  query: string,
-  limit = 20,
-): string {
+export function staffGrantableAccountsPath(query: string, limit = 20): string {
   const term = query.trim();
   if (term.length < 3) throw new Error("搜索关键词至少 3 个字符");
   if (!Number.isInteger(limit) || limit < 1 || limit > 20)
@@ -774,7 +1001,10 @@ export function staffUpdatePayload(input: StaffUpdateInput) {
 export function staffGrantPayload(input: StaffGrantInput) {
   const accountId = input.account.id?.trim();
   if (!accountId) throw new Error("请选择客户账号");
-  if (input.account.verified === false || (input.account.status && input.account.status !== "ACTIVE"))
+  if (
+    input.account.verified === false ||
+    (input.account.status && input.account.status !== "ACTIVE")
+  )
     throw new Error("只能授予已验证且正常使用的客户账号");
   const cleanReason = input.reason.trim();
   if (!cleanReason) throw new Error("请填写授权原因");
@@ -784,14 +1014,19 @@ export function staffGrantPayload(input: StaffGrantInput) {
   if (isSuperAdmin && role !== "ADMIN")
     throw new Error("只有管理员可以成为超级管理员");
   let capabilities = Array.from(
-    new Set((input.capabilities || []).map((item) => item.trim()).filter(Boolean)),
+    new Set(
+      (input.capabilities || []).map((item) => item.trim()).filter(Boolean),
+    ),
   );
   if (role === "COURIER" && capabilities.length)
     throw new Error("配送员不能获得管理能力");
   if (isSuperAdmin) capabilities = ["*"];
-  const known = new Set(CAPABILITY_CATALOG.filter((item) => item.enforced).map((item) => item.key));
+  const known = new Set(
+    CAPABILITY_CATALOG.filter((item) => item.enforced).map((item) => item.key),
+  );
   const unknown = capabilities.filter((item) => !known.has(item));
-  if (unknown.length) throw new Error(`包含后端尚未执行的能力：${unknown.join("、")}`);
+  if (unknown.length)
+    throw new Error(`包含后端尚未执行的能力：${unknown.join("、")}`);
   const discountLevel = input.discountLevel;
   if (
     discountLevel !== undefined &&
@@ -826,13 +1061,22 @@ export function staffCapabilityPayload(
   if (!cleanReason) throw new Error("请填写权限变更原因");
   if (!Number.isSafeInteger(staff.version) || staff.version < 1)
     throw new Error("员工记录缺少版本，请刷新后重试");
-  const cleaned = Array.from(new Set(capabilities.map((item) => item.trim()).filter(Boolean)));
+  const cleaned = Array.from(
+    new Set(capabilities.map((item) => item.trim()).filter(Boolean)),
+  );
   if (staff.role === "COURIER" && cleaned.length)
     throw new Error("配送员不能获得管理能力");
-  const known = new Set(CAPABILITY_CATALOG.filter((item) => item.enforced).map((item) => item.key));
+  const known = new Set(
+    CAPABILITY_CATALOG.filter((item) => item.enforced).map((item) => item.key),
+  );
   const unknown = cleaned.filter((item) => !known.has(item));
-  if (unknown.length) throw new Error(`包含后端尚未执行的能力：${unknown.join("、")}`);
-  return { expectedVersion: staff.version, capabilities: cleaned, reason: cleanReason };
+  if (unknown.length)
+    throw new Error(`包含后端尚未执行的能力：${unknown.join("、")}`);
+  return {
+    expectedVersion: staff.version,
+    capabilities: cleaned,
+    reason: cleanReason,
+  };
 }
 
 /** A data-operations tab is never rendered without its own capability. */
@@ -855,13 +1099,16 @@ export function allowedDataOperationTabs(
 }
 
 /** Read `sections` from GET /admin/config, tolerating older demo payloads. */
-export function sectionVersions(config: AdminConfig | undefined): SectionVersionMap {
+export function sectionVersions(
+  config: AdminConfig | undefined,
+): SectionVersionMap {
   const raw = config?.sections;
   if (!raw || typeof raw !== "object") return {};
   const result: SectionVersionMap = {};
   for (const [key, value] of Object.entries(raw as Record<string, any>)) {
     const version = Number(value?.version);
-    if (Number.isSafeInteger(version) && version >= 1) result[key] = { version };
+    if (Number.isSafeInteger(version) && version >= 1)
+      result[key] = { version };
   }
   return result;
 }
@@ -890,7 +1137,7 @@ export function mergeConfigSection(
   return { ...config, ...next };
 }
 
-/** BatchView keeps orderIds and assignmentIds index-aligned. Never use batch.id as deliveryAssignmentId. */export function assignmentIdForOrder(
+/** BatchView keeps orderIds and assignmentIds index-aligned. Never use batch.id as deliveryAssignmentId. */ export function assignmentIdForOrder(
   batch: { orderIds?: string[]; assignmentIds?: string[] } | null | undefined,
   orderId: string,
 ): string | null {
@@ -904,22 +1151,27 @@ export function assetContentPath(assetId: string): string {
 }
 
 export function printAssetUrl(artifactId: string): string {
-  const base = (import.meta.env?.VITE_API_BASE_URL || "/api/v1").replace(/\/$/, "");
+  const base = (import.meta.env?.VITE_API_BASE_URL || "/api/v1").replace(
+    /\/$/,
+    "",
+  );
   return `${base}/assets/${encodeURIComponent(artifactId)}/content`;
 }
 
 export function afterSaleStatusLabel(status: string): string {
   return (
-    {
-      REQUESTED: "待审核",
-      REVIEW_PENDING: "审核中",
-      REFUND_APPROVED: "已批准待退款",
-      REPRINTING: "重做中",
-      REPRINT_READY: "重做待重新交付",
-      REJECTED: "已拒绝",
-      REFUNDED: "已登记退款",
-      COMPLETED: "已完成",
-      CANCELLED: "已撤回",
-    } as Record<string, string>
-  )[status] || status;
+    (
+      {
+        REQUESTED: "待审核",
+        REVIEW_PENDING: "审核中",
+        REFUND_APPROVED: "已批准待退款",
+        REPRINTING: "重做中",
+        REPRINT_READY: "重做待重新交付",
+        REJECTED: "已拒绝",
+        REFUNDED: "已登记退款",
+        COMPLETED: "已完成",
+        CANCELLED: "已撤回",
+      } as Record<string, string>
+    )[status] || status
+  );
 }

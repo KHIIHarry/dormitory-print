@@ -24,6 +24,7 @@ import {
 } from "../components/ui";
 import { CampusMap } from "../components/campus-map";
 import { useDelayedBusy } from "../components/feedback";
+import { NumberInput } from "../components/number-input";
 import {
   AssetUpload,
   type AssetUploadState,
@@ -648,14 +649,11 @@ export function CampusMapAdmin() {
                   </button>
                 </div>
                 <Field label="排序">
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={10000}
                     value={sortOrder}
-                    onChange={(event) =>
-                      setSortOrder(Number(event.target.value) || 0)
-                    }
+                    onValueChange={(value) => setSortOrder(value ?? 0)}
                   />
                 </Field>
                 <div className="button-row">
@@ -716,26 +714,24 @@ export function CampusMapAdmin() {
                     </Field>
                     <div className="form-grid">
                       <Field label="横向 X">
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={100}
                           step={0.1}
                           value={activeHotspot.x}
-                          onChange={(event) =>
-                            patchHotspot({ x: Number(event.target.value) || 0 })
+                          onValueChange={(value) =>
+                            patchHotspot({ x: value ?? 0 })
                           }
                         />
                       </Field>
                       <Field label="纵向 Y">
-                        <input
-                          type="number"
+                        <NumberInput
                           min={0}
                           max={100}
                           step={0.1}
                           value={activeHotspot.y}
-                          onChange={(event) =>
-                            patchHotspot({ y: Number(event.target.value) || 0 })
+                          onValueChange={(value) =>
+                            patchHotspot({ y: value ?? 0 })
                           }
                         />
                       </Field>
@@ -854,14 +850,11 @@ export function CampusMapAdmin() {
             </button>
           </div>
           <Field label="排序">
-            <input
-              type="number"
+            <NumberInput
               min={0}
               max={10000}
               value={createSort}
-              onChange={(event) =>
-                setCreateSort(Number(event.target.value) || 0)
-              }
+              onValueChange={(value) => setCreateSort(value ?? 0)}
             />
           </Field>
           <div className="button-row">

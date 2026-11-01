@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from app.models import (
@@ -884,3 +885,219 @@ def test_initial_admin_bootstrap_replaces_only_disabled_superadmin(db):
     db.refresh(disabled)
     assert disabled.is_super_admin is False
     assert disabled.enabled is False and disabled.status == 'DISABLED'
+
+
+# ---------------------------------------------------------------------------
+# Login device details: browser family and real peer address for the owner only
+# ---------------------------------------------------------------------------
+
+CHROME_UA = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+)
+SAFARI_UA = (
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
+    '(KHTML, like Gecko) Version/17.6 Safari/605.1.15'
+)
+EDGE_UA = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0'
+)
+FIREFOX_UA = (
+    'Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0'
+)
+WECHAT_IOS_UA = (
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 '
+    '(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003128) '
+    'NetType/WIFI Language/zh_CN'
+)
+WECHAT_ANDROID_UA = (
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Version/4.0 Chrome/122.0.0.0 Mobile Safari/537.36 '
+    'MicroMessenger/8.0.49.2600(0x28003136) WeChat/arm64'
+)
+
+
+def login_from(app, email: str, *, host: str = '203.0.113.9',
+               user_agent: str | None = CHROME_UA, headers: dict | None = None):
+    """A real cookie jar with a distinct peer address, going through the HTTP API."""
+    merged = {'User-Agent': user_agent} if user_agent else {}
+    merged.update(headers or {})
+    client = TestClient(app, headers=merged, client=(host, 51234))
+    boot = client.post('/api/v1/customer/session', json={}, headers={
+        'Origin': 'http://testserver', 'Idempotency-Key': uuid4().hex})
+    assert boot.status_code == 200, boot.text
+    return client, login_customer(client, email)
+
+
+def _session_items(client):
+    response = api(client, '/customer/account/sessions', method='GET')
+    assert response.status_code == 200, response.text
+    return response.json()['data']['items']
+
+
+def test_session_list_shows_browser_and_login_ip_to_the_owner_only(client, db):
+    account = make_account(db)
+    other_account = make_account(db)
+    db.commit()
+
+    owner, owner_login = login_from(client.app, account.email, host='203.0.113.9',
+                                    user_agent=CHROME_UA)
+    assert owner_login.status_code == 200, owner_login.text
+    items = _session_items(owner)
+    assert len(items) == 1
+    item = items[0]
+    assert item['current'] is True
+    assert item['browser'] == 'Chrome'
+    assert item['platform'] == 'Windows'
+    assert item['ipAddress'] == '203.0.113.9'
+    assert item['device'] == 'Chrome · Windows'
+
+    # The account owner can revoke their own session; another account cannot see it.
+    stranger, stranger_login = login_from(client.app, other_account.email, host='198.51.100.7',
+                                          user_agent=SAFARI_UA)
+    assert stranger_login.status_code == 200, stranger_login.text
+    stranger_items = _session_items(stranger)
+    assert len(stranger_items) == 1
+    assert stranger_items[0]['ipAddress'] == '198.51.100.7'
+    assert stranger_items[0]['browser'] == 'Safari'
+    assert stranger_items[0]['id'] != item['id']
+    denied = api(stranger, '/customer/account/sessions/revoke', {'sessionId': item['id']})
+    assert denied.status_code == 404
+
+
+def test_unrecoverable_historical_sessions_show_unrecorded_instead_of_guessing(client, db):
+    account = make_account(db)
+    db.commit()
+    owner, response = login_from(client.app, account.email)
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    session = db.scalar(select(AuthSession).where(
+        AuthSession.kind == 'CUSTOMER', AuthSession.account_id == account.id,
+        AuthSession.revoked_at.is_(None)))
+    assert session is not None
+    session.device_label = '浏览器'  # legacy rows only have the placeholder label
+    db.commit()
+
+    item = _session_items(owner)[0]
+    assert item['browser'] is None
+    assert item['platform'] is None
+    assert item['ipAddress'] is None
+    assert item['device'] == '浏览器信息未记录'
+
+
+def test_corrupt_or_unknown_descriptor_rows_show_unrecorded_without_leaking_raw_label(client, db):
+    account = make_account(db)
+    db.commit()
+    owner, response = login_from(client.app, account.email)
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    session = db.scalar(select(AuthSession).where(
+        AuthSession.kind == 'CUSTOMER', AuthSession.account_id == account.id,
+        AuthSession.revoked_at.is_(None)))
+    assert session is not None
+    # A truncated write or a future descriptor version must degrade to the
+    # placeholder, never to a raw JSON string shown to the account owner.
+    for corrupt in ('{"v":1,"browser":"Chrome"',
+                    '{"v":99,"browser":"Chrome","ip":"203.0.113.9"}'):
+        session.device_label = corrupt
+        db.commit()
+        item = _session_items(owner)[0]
+        assert item['browser'] is None
+        assert item['ipAddress'] is None
+        assert item['device'] == '浏览器信息未记录'
+        assert '{' not in item['device']
+
+
+def test_recorded_login_ip_ignores_client_supplied_forwarding_headers(client, db):
+    account = make_account(db)
+    db.commit()
+    owner, response = login_from(
+        client.app, account.email, host='203.0.113.9',
+        headers={'X-Forwarded-For': '198.51.100.7, 203.0.113.9',
+                 'X-Real-IP': '198.51.100.7', 'Forwarded': 'for=198.51.100.7'})
+    assert response.status_code == 200, response.text
+    assert _session_items(owner)[0]['ipAddress'] == '203.0.113.9'
+
+
+def test_session_list_handles_ipv6_and_ipv4_mapped_addresses(client, db):
+    account = make_account(db)
+    db.commit()
+    ipv6, first = login_from(client.app, account.email, host='2001:db8::7',
+                             user_agent=SAFARI_UA)
+    mapped, second = login_from(client.app, account.email, host='::ffff:198.51.100.4',
+                                user_agent=EDGE_UA)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    items = _session_items(ipv6)
+    assert len(items) == 2
+    addresses = {(item['ipAddress'], item['browser']) for item in items}
+    assert addresses == {('2001:db8::7', 'Safari'), ('198.51.100.4', 'Edge')}
+
+
+def test_browser_detection_covers_wechat_edge_chrome_safari_and_unknown():
+    from app.auth import _browser_from_user_agent
+
+    assert _browser_from_user_agent(WECHAT_IOS_UA) == ('微信', 'iOS')
+    assert _browser_from_user_agent(WECHAT_ANDROID_UA) == ('微信', 'Android')
+    assert _browser_from_user_agent(EDGE_UA) == ('Edge', 'Windows')
+    assert _browser_from_user_agent(CHROME_UA) == ('Chrome', 'Windows')
+    assert _browser_from_user_agent(SAFARI_UA) == ('Safari', 'macOS')
+    assert _browser_from_user_agent(FIREFOX_UA) == ('Firefox', 'Linux')
+    assert _browser_from_user_agent('curl/8.7.1') == (None, None)
+    assert _browser_from_user_agent('') == (None, None)
+    assert _browser_from_user_agent(None) == (None, None)
+
+
+def test_unknown_user_agent_keeps_ip_but_does_not_guess_a_browser(client, db):
+    account = make_account(db)
+    db.commit()
+    owner, response = login_from(client.app, account.email, host='203.0.113.11',
+                                 user_agent='curl/8.7.1')
+    assert response.status_code == 200, response.text
+    item = _session_items(owner)[0]
+    assert item['ipAddress'] == '203.0.113.11'
+    assert item['browser'] is None
+    assert item['device'] == '浏览器信息未记录'
+
+
+def test_device_label_never_persists_the_raw_user_agent(client, db):
+    account = make_account(db)
+    db.commit()
+    _, response = login_from(client.app, account.email, user_agent=CHROME_UA)
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    session = db.scalar(select(AuthSession).where(
+        AuthSession.kind == 'CUSTOMER', AuthSession.account_id == account.id,
+        AuthSession.revoked_at.is_(None)))
+    assert session is not None
+    label = session.device_label or ''
+    assert len(label) <= 160
+    for secret in ('Mozilla', 'AppleWebKit', 'Chrome/131', 'Safari/537'):
+        assert secret not in label
+
+
+def test_relogin_from_the_same_device_refreshes_ip_and_browser(client, db):
+    account = make_account(db)
+    db.commit()
+    first, first_login = login_from(client.app, account.email, host='203.0.113.9',
+                                    user_agent=CHROME_UA)
+    assert first_login.status_code == 200, first_login.text
+    cookies = dict(first.cookies)
+    assert cookies
+
+    moved = TestClient(client.app, headers={'User-Agent': SAFARI_UA},
+                       client=('2001:db8::5', 51234))
+    for name, value in cookies.items():
+        moved.cookies.set(name, value)
+    again = login_customer(moved, account.email)
+    assert again.status_code == 200, again.text
+    items = _session_items(moved)
+    assert len(items) == 1
+    assert items[0]['ipAddress'] == '2001:db8::5'
+    assert items[0]['browser'] == 'Safari'
+    db.expire_all()
+    active = db.scalar(select(func.count()).select_from(AuthSession).where(
+        AuthSession.kind == 'CUSTOMER', AuthSession.account_id == account.id,
+        AuthSession.revoked_at.is_(None), AuthSession.expires_at > utcnow()))
+    assert active == 1
