@@ -85,6 +85,23 @@ class SlotAgreement(DTO):
     confirm:Literal[True]
 
 
+class ArrangementProposal(DTO):
+    expected_version:StrictInt
+    slot_id:str
+    reason:str=Field(min_length=1,max_length=1000)
+
+
+class ArrangementAgreement(DTO):
+    expected_version:StrictInt
+    slot_id:str
+    confirm:Literal[True]
+
+
+class ArrangementRejection(DTO):
+    expected_version:StrictInt
+    reason:str=Field(default='',max_length=1000)
+
+
 class ConfirmPayment(DTO):
     expected_version:StrictInt
     content_revision:StrictInt
@@ -213,6 +230,8 @@ class SettlementView(DTO):
     discount_cents:int
     confirmed_at:str
     confirmed_by:str
+    batch_id:str|None=None
+    batch_name:str|None=None
 
 
 class PositionView(DTO):
@@ -275,6 +294,7 @@ class OrderView(DTO):
     history:list[HistoryView]
     allowed_actions:list[str]
     blockers:list[Blocker]
+    arrangement:dict|None=None
     supplementary:SupplementarySummaryDTO|None=None
 
 
@@ -331,7 +351,8 @@ def _scope_actions(db,order,actor):
         allowed.update(scopes & {'ORDER_CHANGE_LOCATION_PRE_DELIVERY'})
     if not order.settlement_kind:
         allowed.discard('ORDER_AFTER_SALES')
-    if not (order.data or {}).get('slotProposal') or order.status!='PENDING_CONFIRMATION':
+    if (not (order.data or {}).get('slotProposal')
+            or order.status in ('CANCELLED', 'DELIVERED')):
         allowed.discard('ORDER_AGREE_SLOT')
     return sorted(allowed)
 
@@ -393,11 +414,14 @@ def order_view(db,order,actor):
     principal=db.get(Principal,order.principal_id)
     from .supplementary import supplementary_summary
     extra_summary=supplementary_summary(db,order)
+    from .delivery_plan import arrangement_for_order
+    arrangement=arrangement_for_order(db,order)
     return {'id':order.id,'pickupCode':order.pickup_code,'version':order.version,'contentRevision':order.content_revision,
         'status':order.status,'nickname':order.nickname,'phone':order.phone,'locationId':order.location_id,
         'slotId':order.confirmed_slot_id or order.requested_slot_id,'requestedSlotId':order.requested_slot_id,
         'confirmedSlotId':order.confirmed_slot_id,'slotStatus':'CONFIRMED' if order.confirmed_slot_id else 'REQUESTED',
-        'slotProposal':data.get('slotProposal'),'createdAt':order.created_at.isoformat(),'closeAt':order.close_at.isoformat(),
+        'slotProposal':data.get('slotProposal'),'arrangement':arrangement,
+        'createdAt':order.created_at.isoformat(),'closeAt':order.close_at.isoformat(),
         'totalCents':order.total_cents,'refundedCents':order.refunded_cents,'currentQuoteId':order.quote_id,'quote':quote_view(quote),
         'checkoutAccountId':order.checkout_account_id,'checkoutAuthKind':data.get('checkoutAuthKind','REGISTERED' if order.checkout_account_id else 'ANONYMOUS'),
         'ownerAccountId':principal.account_id if owner and principal else None,'ownerPrincipalId':order.principal_id if owner else None,
@@ -471,11 +495,8 @@ def _current_ready(db,actor,payload,order=None):
         raise DomainError('LOCATION_UNAVAILABLE','所选楼栋当前不可用',409)
     if not campus_is_open(db, location):
         raise DomainError('CAMPUS_UNAVAILABLE','所选校区暂未开放选点',409)
-    if not slot.enabled or slot.ends_at<=utcnow():
-        raise DomainError('SLOT_UNAVAILABLE','所选申请时段已关闭，请重新选择',409)
-    cutoff=(slot.data or {}).get('cutoffAt')
-    if cutoff and datetime.fromisoformat(cutoff.replace('Z','+00:00'))<=utcnow():
-        raise DomainError('SLOT_UNAVAILABLE','该时段已过申请截止时间',409)
+    from .delivery_plan import ensure_slot_accepting
+    ensure_slot_accepting(db, slot, utcnow())
     return prep,quote,artifacts,location,slot
 
 
@@ -528,6 +549,13 @@ def require_order_account(db, actor):
     return account
 
 
+def _requested_slot_snapshot(slot):
+    from .delivery_plan import slot_snapshot
+    snapshot=slot_snapshot(slot,public=True)
+    snapshot.pop('selectable',None)
+    return snapshot
+
+
 def submit_order(db,actor,payload):
     require_customer(actor)
     require_order_account(db, actor)
@@ -545,7 +573,7 @@ def submit_order(db,actor,payload):
         close_at=utcnow()+timedelta(minutes=workflow['unpaidTimeoutMinutes']),data={'quote':quote_view(quote),
         'checkoutAuthKind':'REGISTERED' if quote.checkout_account_id else 'ANONYMOUS',
         'locationSnapshot':{'id':location.id,'name':location.name,'mapVersion':location.map_version},
-        'requestedSlotSnapshot':{'id':slot.id,'date':slot.date,'name':slot.name},'history':[]})
+        'requestedSlotSnapshot':_requested_slot_snapshot(slot),'history':[]})
     db.add(order);db.flush()
     from .growth import reserve_coupon
     reserve_coupon(db,order,quote)
@@ -817,10 +845,42 @@ def settle_order(db,actor,order,body):
     proposal=(order.data or {}).get('slotProposal')
     slot_id=proposal['slotId'] if proposal and proposal.get('confirmed') else order.requested_slot_id
     slot=lock(db,DeliverySlot,slot_id)
-    if not slot.enabled or slot.ends_at<=utcnow() or slot.occupied>=slot.capacity:
+    now=utcnow()
+    from .delivery_plan import (SLOT_ERRORS, add_to_auto_batch, campus_for_order,
+                               slot_acceptance, slot_snapshot as plan_slot_snapshot)
+    configured = slot.open_at is not None and slot.cutoff_at is not None
+    if configured:
+        state=slot_acceptance(db,slot,now)
+        if state['status']!='OPEN':
+            if state['status']=='FULL':
+                raise DomainError('SLOT_CAPACITY_REVIEW_REQUIRED','申请时段已满或关闭，请先协调新时段并由客户确认',409,
+                    {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
+            code,message=SLOT_ERRORS[state['status']]
+            raise DomainError(code,message,409,
+                {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
+    elif not slot.enabled or slot.ends_at<=now or slot.occupied>=slot.capacity:
         raise DomainError('SLOT_CAPACITY_REVIEW_REQUIRED','申请时段已满或关闭，请先协调新时段并由客户确认',409,
             {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
     if order.refund_locked:raise DomainError('REFUND_REVIEW_PENDING','退款审核中，不能结算',409)
+    auto_batch=None
+    if configured:
+        campus=campus_for_order(db,order)
+        if campus is None:
+            if receipt:
+                receipt.data={**(receipt.data or {}),'refundRequired':True,'reasonCode':'CAMPUS_CONFIG_MISSING'}
+            raise DomainError('CAMPUS_CONFIG_MISSING','订单缺少校区信息，不能自动归集配送批次',409,
+                {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
+        try:
+            with db.begin_nested():
+                auto_batch,_auto_assignment=add_to_auto_batch(db,actor,order,slot,campus)
+        except Exception as exc:
+            if receipt:
+                receipt.data={**(receipt.data or {}),'refundRequired':True,'reasonCode':'AUTO_BATCH_FAILED'}
+            db.add(BusinessException(order_id=order.id,type='AUTO_BATCH_FAILED',
+                reason='已登记实收但自动归集配送批次失败，待人工核对',blocks_delivery=True))
+            raise DomainError('AUTO_BATCH_FAILED','已登记实收，但自动归集配送批次失败，待人工处理',409,
+                {'receiptId':receipt.id if receipt else None,'slotId':slot.id},
+                commit=bool(receipt)) from exc
     from .growth import settle_coupon
     settle_coupon(db,order)
     slot.occupied+=1;touch(slot)
@@ -829,13 +889,18 @@ def settle_order(db,actor,order,body):
     order.status='PENDING_PRINT'
     quote=db.get(Quote,order.quote_id)
     summary={'settlementKind':body.settlement_kind,'cashReceivedCents':body.received_cents,'discountCents':quote.discount_cents,
-             'confirmedAt':utcnow().isoformat(),'confirmedBy':actor.staff_id}
-    order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':{'id':slot.id,'date':slot.date,'name':slot.name}}
+             'confirmedAt':utcnow().isoformat(),'confirmedBy':actor.staff_id,
+             'batchId':auto_batch.id if auto_batch else None,
+             'batchName':auto_batch.name if auto_batch else None}
+    order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':plan_slot_snapshot(slot,public=False)}
+    order.arrangement_version=max(1,int(order.arrangement_version or 0))
+    order.arrangement_updated_at=utcnow()
     db.add(Payment(order_id=order.id,receipt_id=receipt.id if receipt else None,amount_cents=body.received_cents,kind=body.settlement_kind,staff_id=actor.staff_id,data={'quoteId':quote.id,'discountCents':quote.discount_cents}))
     # Matching the cash does not bypass an unrelated blocker.
     for mismatch in db.scalars(select(BusinessException).where(BusinessException.order_id==order.id,BusinessException.type=='PAYMENT_MISMATCH',BusinessException.status=='OPEN')):
         mismatch.status='RESOLVED';touch(mismatch)
-    add_history(order,'零元结算已人工确认' if body.settlement_kind=='ZERO_PAYABLE' else '线下收款已人工确认','开始安排生产，配送时段已确认')
+    batch_note=f'已归入配送批次「{auto_batch.name}」' if auto_batch else '开始安排生产，配送时段已确认'
+    add_history(order,'零元结算已人工确认' if body.settlement_kind=='ZERO_PAYABLE' else '线下收款已人工确认',batch_note)
     touch(order)
     from .production import refresh_production
     db.flush();refresh_production(db,order)
@@ -843,6 +908,35 @@ def settle_order(db,actor,order,body):
     from .growth import notify_payment_success
     notify_payment_success(db,order)
     return order
+
+
+@router.post('/admin/orders/{order_id}/arrangement-proposals',response_model=Envelope[OrderView])
+def propose_arrangement(order_id:str,body:ArrangementProposal,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
+    require_admin(actor,'delivery.manage');order=lock(db,Order,order_id,body.expected_version)
+    slot=db.get(DeliverySlot,body.slot_id)
+    if slot is None:raise DomainError('SLOT_NOT_FOUND','配送时段不存在',404,{'slotId':body.slot_id})
+    from .delivery_plan import propose_reschedule
+    propose_reschedule(db,actor,order,slot,body.reason)
+    db.flush()
+    return ok(order_view(db,order,actor))
+
+
+@router.post('/orders/{order_id}/arrangement-agreement',response_model=Envelope[OrderView])
+def agree_arrangement(order_id:str,body:ArrangementAgreement,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
+    order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
+    from .delivery_plan import confirm_reschedule
+    confirm_reschedule(db,actor,order,body.slot_id)
+    db.flush()
+    return ok(order_view(db,order,actor))
+
+
+@router.post('/orders/{order_id}/arrangement-rejection',response_model=Envelope[OrderView])
+def reject_arrangement(order_id:str,body:ArrangementRejection,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
+    order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
+    from .delivery_plan import reject_reschedule
+    reject_reschedule(db,actor,order,body.reason)
+    db.flush()
+    return ok(order_view(db,order,actor))
 
 
 @router.post('/admin/orders/{order_id}/confirm-payment',response_model=Envelope[OrderView])

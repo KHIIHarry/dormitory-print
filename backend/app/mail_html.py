@@ -27,6 +27,11 @@ BATCH_NAME = '{{batchName}}'
 DELIVERY_DATE = '{{deliveryDate}}'
 DELIVERY_SLOT = '{{deliverySlot}}'
 DELIVERY_LOCATION = '{{deliveryLocation}}'
+CHANGE_TYPE = '{{changeType}}'
+ORIGINAL_WINDOW = '{{originalWindow}}'
+NEW_WINDOW = '{{newWindow}}'
+CHANGE_REASON = '{{changeReason}}'
+CONFIRMATION_REQUIRED = '{{confirmationRequired}}'
 DELIVERED_AT = '{{deliveredAt}}'
 ORDER_COUNT = '{{orderCount}}'
 DELETION_DEADLINE = '{{deletionDeadline}}'
@@ -366,13 +371,20 @@ def _order_delivered() -> str:
 
 def _delivery_updated() -> str:
     content = (
-        _paragraph(f'订单 {ORDER_CODE} 的配送信息已更新，请以最新安排为准。')
-        + _multi_facts([('配送楼栋', DELIVERY_LOCATION), ('配送时段', DELIVERY_SLOT)])
+        _paragraph(f'订单 {ORDER_CODE} 的配送安排已更新，请以最新安排为准。')
+        + _multi_facts([
+            ('变更类型', CHANGE_TYPE),
+            ('原配送时间', ORIGINAL_WINDOW),
+            ('最新安排', NEW_WINDOW),
+            ('配送楼栋', DELIVERY_LOCATION),
+        ])
+        + _paragraph(f'调整说明：{CHANGE_REASON}')
+        + _paragraph(CONFIRMATION_REQUIRED)
         + _button('查看订单', ORDER_LINK)
         + _fallback(ORDER_LINK)
-        + _note('尚未付款？', '请先完成付款，配送安排才会最终生效。')
+        + _note('需要帮助？', '请通过订单页联系管理员，我们会继续为你协调配送。')
     )
-    return _shell('配送变更', _eyebrow('配送信息'), '配送信息已更新', content,
+    return _shell('配送变更', _eyebrow('配送安排'), '配送安排已更新', content,
                   _ORDER_FOOTER)
 
 

@@ -121,6 +121,39 @@ def slot_window(date: str, start: str, end: str) -> tuple[datetime, datetime]:
     return first, last
 
 
+def _local_instant(value: datetime, label: str) -> datetime:
+    """Accept an aware instant or a Shanghai wall-clock datetime-local value."""
+    if not isinstance(value, datetime):
+        raise ValueError(f'{label} 必须为日期时间')
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=SHANGHAI).astimezone(timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def slot_acceptance_window(
+    date: str,
+    start: str,
+    end: str,
+    open_at: datetime | None,
+    cutoff_at: datetime | None,
+) -> tuple[datetime, datetime, datetime, datetime]:
+    """Resolve the promised window plus the [open, cutoff) acceptance window.
+
+    The ordering window always ends strictly before the promised delivery
+    window, guaranteeing a positive prep gap without hard-coding a duration.
+    """
+    starts_at, ends_at = slot_window(date, start, end)
+    if open_at is None or cutoff_at is None:
+        raise ValueError('请填写开放下单时间与截单时间')
+    opens = _local_instant(open_at, '开放下单时间')
+    cutoff = _local_instant(cutoff_at, '截单时间')
+    if cutoff <= opens:
+        raise ValueError('截单时间必须晚于开放下单时间')
+    if cutoff >= starts_at:
+        raise ValueError('截单时间必须早于预计配送开始时间')
+    return opens, cutoff, starts_at, ends_at
+
+
 def slot_weekday(date: str) -> str:
     return WEEKDAYS[_parse_business_date(date).weekday()]
 
@@ -302,6 +335,8 @@ class SlotInput(DTO):
     name: str = Field(min_length=1, max_length=120)
     start: str
     end: str
+    open_at: datetime | None = None
+    cutoff_at: datetime | None = None
     capacity: int = Field(ge=1, le=100000)
     enabled: bool = True
     reason: str | None = Field(default=None, max_length=2000)
@@ -315,10 +350,20 @@ class SlotInput(DTO):
     @model_validator(mode='after')
     def _valid_window(self):
         slot_window(self.date, self.start, self.end)
+        if self.open_at is not None or self.cutoff_at is not None:
+            slot_acceptance_window(
+                self.date, self.start, self.end, self.open_at, self.cutoff_at)
         return self
 
     def window(self) -> tuple[datetime, datetime]:
         return slot_window(self.date, self.start, self.end)
+
+    def acceptance(self) -> tuple[datetime, datetime] | None:
+        if self.open_at is None or self.cutoff_at is None:
+            return None
+        opens, cutoff, _, _ = slot_acceptance_window(
+            self.date, self.start, self.end, self.open_at, self.cutoff_at)
+        return opens, cutoff
 
 
 class SlotUpdate(DTO):
@@ -329,6 +374,8 @@ class SlotUpdate(DTO):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     start: str | None = None
     end: str | None = None
+    open_at: datetime | None = None
+    cutoff_at: datetime | None = None
     capacity: int | None = Field(default=None, ge=1, le=100000)
     enabled: bool | None = None
     reason: str | None = Field(default=None, max_length=2000)
@@ -336,13 +383,27 @@ class SlotUpdate(DTO):
     @model_validator(mode='after')
     def _valid_supplied_window(self):
         if self.date is not None and self.start is not None and self.end is not None:
-            slot_window(self.date, self.start, self.end)
+            if self.open_at is not None or self.cutoff_at is not None:
+                slot_acceptance_window(
+                    self.date, self.start, self.end, self.open_at, self.cutoff_at)
+            else:
+                slot_window(self.date, self.start, self.end)
         return self
 
     def window(self) -> tuple[datetime, datetime] | None:
         if self.date is None or self.start is None or self.end is None:
             return None
         return slot_window(self.date, self.start, self.end)
+
+
+class SlotSealPreview(DTO):
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class SlotSealCommit(DTO):
+    expected_version: int | None = Field(default=None, ge=1)
+    plan_id: str | None = Field(default=None, max_length=64)
+    reason: str = Field(min_length=1, max_length=300)
 
 
 class MapHotspotInput(DTO):
@@ -574,17 +635,44 @@ class SlotView(DTO):
     end: str
     starts_at: datetime
     ends_at: datetime
+    open_at: datetime | None = None
+    cutoff_at: datetime | None = None
     capacity: int
     occupied: int
     remaining: int
     enabled: bool
     selectable: bool
+    acceptance_status: str = 'OPEN'
+    blockers: list[BlockerView] = Field(default_factory=list)
+    pending_application_count: int = 0
+    batch_count: int = 0
+    sealed_at: datetime | None = None
+    sealed_by_name: str | None = None
+    seal_reason: str = ''
     archived: bool = False
     version: int
 
 
 class SlotListView(DTO):
     items: list[SlotView]
+
+
+class SlotSealPlanView(DTO):
+    plan_id: str
+    action: str
+    slot: SlotView
+    blockers: list[BlockerView]
+    impact: dict
+    expires_at: datetime
+
+
+class SlotSealResultView(DTO):
+    slot: SlotView
+    plan_id: str | None = None
+    sealed_at: datetime
+    sealed_by_name: str | None = None
+    seal_reason: str
+    batch_count: int = 0
 
 
 class BatchView(DTO):
@@ -596,6 +684,19 @@ class BatchView(DTO):
     ends_at: datetime
     slot_id: str | None = None
     slot_name: str | None = None
+    campus_id: str | None = None
+    campus_name: str | None = None
+    group_id: str | None = None
+    source: str = 'MANUAL'
+    is_regular: bool = False
+    sealed_at: datetime | None = None
+    sealed_by_name: str | None = None
+    seal_reason: str = ''
+    paid_count: int = 0
+    prepared_count: int = 0
+    unprepared_count: int = 0
+    unassigned_count: int = 0
+    allowed_actions: list[str] = Field(default_factory=list)
     courier_id: str | None = None
     courier_name: str | None = None
     status: str
@@ -698,6 +799,7 @@ class DeliveryOrderView(DTO):
     proof: ProofView | None = None
     location_exception_approval: LocationExceptionApprovalView | None = None
     delivery_status: str | None = None
+    arrangement: dict | None = None
     # Management-only fields; omitted for COURIER by response_model_exclude_none.
     content_revision: int | None = None
     current_quote_id: str | None = None

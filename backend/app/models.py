@@ -234,8 +234,13 @@ class DeliverySlot(Entity, Base):
     capacity: Mapped[int] = mapped_column(Integer)
     occupied: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cutoff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sealed_by: Mapped[str | None] = mapped_column(String(64))
+    seal_reason: Mapped[str | None] = mapped_column(String(300))
     data: Mapped[dict] = mapped_column(J, default=dict)
-    __table_args__ = (CheckConstraint('capacity > 0 AND occupied >= 0 AND occupied <= capacity'), CheckConstraint('ends_at > starts_at'),)
+    __table_args__ = (CheckConstraint('capacity > 0 AND occupied >= 0 AND occupied <= capacity'), CheckConstraint('ends_at > starts_at'), CheckConstraint('open_at IS NULL OR cutoff_at IS NULL OR open_at < cutoff_at'),)
 
 
 class Order(Entity, Base):
@@ -262,6 +267,8 @@ class Order(Entity, Base):
     refund_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     address_review: Mapped[bool] = mapped_column(Boolean, default=False)
     packing_status: Mapped[str] = mapped_column(String(24), default='BLOCKED')
+    arrangement_version: Mapped[int] = mapped_column(Integer, default=0)
+    arrangement_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     close_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     purge_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -357,6 +364,22 @@ class ReceiptAdjustment(Entity, Base):
     __table_args__ = (CheckConstraint('amount_cents > 0'),)
 
 
+class DeliveryGroup(Entity, Base):
+    """One automatic collection scope per (slot, real campus).
+
+    Explicit split batches and after-sales redelivery batches may coexist under
+    the same group; only the auto-created regular batch is unique per group.
+    """
+    __tablename__ = 'delivery_groups'
+    slot_id: Mapped[str] = mapped_column(ForeignKey('delivery_slots.id'), index=True)
+    campus_id: Mapped[str] = mapped_column(ForeignKey('campuses.id'), index=True)
+    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sealed_by: Mapped[str | None] = mapped_column(String(64))
+    seal_reason: Mapped[str | None] = mapped_column(String(300))
+    data: Mapped[dict] = mapped_column(J, default=dict)
+    __table_args__ = (UniqueConstraint('slot_id', 'campus_id', name='uq_delivery_group_slot_campus'),)
+
+
 class DeliveryBatch(Entity, Base):
     __tablename__ = 'delivery_batches'
     name: Mapped[str] = mapped_column(String(120))
@@ -365,9 +388,22 @@ class DeliveryBatch(Entity, Base):
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(24), default='PLANNED')
     reason: Mapped[str] = mapped_column(Text, default='')
+    slot_id: Mapped[str | None] = mapped_column(ForeignKey('delivery_slots.id'), index=True)
+    campus_id: Mapped[str | None] = mapped_column(ForeignKey('campuses.id'), index=True)
+    group_id: Mapped[str | None] = mapped_column(ForeignKey('delivery_groups.id'), index=True)
+    source: Mapped[str] = mapped_column(String(20), default='MANUAL')
+    is_regular: Mapped[bool] = mapped_column(Boolean, default=False)
+    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sealed_by: Mapped[str | None] = mapped_column(String(64))
+    seal_reason: Mapped[str | None] = mapped_column(String(300))
     data: Mapped[dict] = mapped_column(J, default=dict)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    __table_args__ = (CheckConstraint('ends_at > starts_at'),)
+    __table_args__ = (
+        CheckConstraint('ends_at > starts_at'),
+        Index('uq_regular_batch_per_group', 'group_id', unique=True,
+              postgresql_where=text('is_regular = true AND deleted_at IS NULL'),
+              sqlite_where=text('is_regular = 1 AND deleted_at IS NULL')),
+    )
 
 
 class DeliveryAssignment(Entity, Base):
@@ -391,6 +427,46 @@ class DeliveryProof(Entity, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     data: Mapped[dict] = mapped_column(J, default=dict)
     __table_args__ = (Index('uq_current_delivery_proof','assignment_id',unique=True,postgresql_where=text('active = true'),sqlite_where=text('active = 1')),)
+
+
+class DeliveryChange(Entity, Base):
+    """Durable public-facing delivery arrangement change/event history.
+
+    ``original``/``proposed`` hold versioned public snapshots (date, window,
+    slot name, batch name).  Internal notes are never exposed by public DTOs.
+    """
+    __tablename__ = 'delivery_changes'
+    order_id: Mapped[str] = mapped_column(ForeignKey('orders.id'), index=True)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey('delivery_batches.id'), index=True)
+    slot_id: Mapped[str | None] = mapped_column(ForeignKey('delivery_slots.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(24), default='APPLIED')
+    confirmation_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    original: Mapped[dict] = mapped_column(J, default=dict)
+    proposed: Mapped[dict] = mapped_column(J, default=dict)
+    reason: Mapped[str] = mapped_column(String(300), default='')
+    internal_note: Mapped[str] = mapped_column(String(500), default='')
+    actor_id: Mapped[str | None] = mapped_column(String(64))
+    plan_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    data: Mapped[dict] = mapped_column(J, default=dict)
+    __table_args__ = (
+        Index('ix_delivery_changes_order_created', 'order_id', 'created_at'),
+    )
+
+
+class DeliveryNotice(Entity, Base):
+    """Durable notification intent for one recipient and delivery change."""
+    __tablename__ = 'delivery_notices'
+    order_id: Mapped[str] = mapped_column(ForeignKey('orders.id'), index=True)
+    change_id: Mapped[str | None] = mapped_column(ForeignKey('delivery_changes.id'), index=True)
+    kind: Mapped[str] = mapped_column(String(40), default='DELIVERY_UPDATED')
+    recipient: Mapped[str | None] = mapped_column(String(320))
+    status: Mapped[str] = mapped_column(String(24), default='PENDING')
+    dedupe_key: Mapped[str] = mapped_column(String(200), unique=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(String(300), default='')
+    email_job_id: Mapped[str | None] = mapped_column(String(64))
+    data: Mapped[dict] = mapped_column(J, default=dict)
 
 
 class BusinessException(Entity, Base):

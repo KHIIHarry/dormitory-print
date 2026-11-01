@@ -1139,6 +1139,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/orders/{order_id}/arrangement-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Propose Arrangement */
+        post: operations["propose_arrangement_api_v1_admin_orders__order_id__arrangement_proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/orders/{order_id}/confirm-payment": {
         parameters: {
             query?: never;
@@ -1729,6 +1746,40 @@ export interface paths {
         head?: never;
         /** Admin Slot Update */
         patch: operations["admin_slot_update_api_v1_admin_slots__slot_id__patch"];
+        trace?: never;
+    };
+    "/admin/slots/{slot_id}/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Slot Seal */
+        post: operations["admin_slot_seal_api_v1_admin_slots__slot_id__seal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/slots/{slot_id}/seal/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Slot Seal Preview */
+        post: operations["admin_slot_seal_preview_api_v1_admin_slots__slot_id__seal_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/admin/staff": {
@@ -3081,6 +3132,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/orders/{order_id}/arrangement-agreement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Agree Arrangement */
+        post: operations["agree_arrangement_api_v1_orders__order_id__arrangement_agreement_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/orders/{order_id}/arrangement-rejection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Arrangement */
+        post: operations["reject_arrangement_api_v1_orders__order_id__arrangement_rejection_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/orders/{order_id}/cancel": {
         parameters: {
             query?: never;
@@ -3720,6 +3805,37 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ArrangementAgreement */
+        ArrangementAgreement: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Slotid */
+            slotId: string;
+        };
+        /** ArrangementProposal */
+        ArrangementProposal: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
+            reason: string;
+            /** Slotid */
+            slotId: string;
+        };
+        /** ArrangementRejection */
+        ArrangementRejection: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
         /** AssetList */
         AssetList: {
             /** Items */
@@ -4021,8 +4137,14 @@ export interface components {
         };
         /** BatchView */
         BatchView: {
+            /** Allowedactions */
+            allowedActions?: string[];
             /** Assignmentids */
             assignmentIds: string[];
+            /** Campusid */
+            campusId?: string | null;
+            /** Campusname */
+            campusName?: string | null;
             /** Courierid */
             courierId?: string | null;
             /** Couriername */
@@ -4039,20 +4161,51 @@ export interface components {
              * Format: date-time
              */
             endsAt: string;
+            /** Groupid */
+            groupId?: string | null;
             /** Id */
             id: string;
+            /**
+             * Isregular
+             * @default false
+             */
+            isRegular: boolean;
             /** Name */
             name: string;
             /** Orderids */
             orderIds: string[];
+            /**
+             * Paidcount
+             * @default 0
+             */
+            paidCount: number;
+            /**
+             * Preparedcount
+             * @default 0
+             */
+            preparedCount: number;
             /** Publishedat */
             publishedAt?: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Sealreason
+             * @default
+             */
+            sealReason: string;
+            /** Sealedat */
+            sealedAt?: string | null;
+            /** Sealedbyname */
+            sealedByName?: string | null;
             /** Slotid */
             slotId?: string | null;
             /** Slotname */
             slotName?: string | null;
+            /**
+             * Source
+             * @default MANUAL
+             */
+            source: string;
             /**
              * Startsat
              * Format: date-time
@@ -4062,6 +4215,16 @@ export interface components {
             status: string;
             /** Time */
             time: string;
+            /**
+             * Unassignedcount
+             * @default 0
+             */
+            unassignedCount: number;
+            /**
+             * Unpreparedcount
+             * @default 0
+             */
+            unpreparedCount: number;
             /**
              * Updatedat
              * Format: date-time
@@ -5256,6 +5419,10 @@ export interface components {
             addressReview: boolean;
             /** Allowedactions */
             allowedActions?: string[];
+            /** Arrangement */
+            arrangement?: {
+                [key: string]: unknown;
+            } | null;
             assignment?: components["schemas"]["DeliveryAssignmentView"] | null;
             /** Batchid */
             batchId?: string | null;
@@ -5977,6 +6144,18 @@ export interface components {
         /** Envelope[SlotListView] */
         Envelope_SlotListView_: {
             data: components["schemas"]["SlotListView"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[SlotSealPlanView] */
+        Envelope_SlotSealPlanView_: {
+            data: components["schemas"]["SlotSealPlanView"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[SlotSealResultView] */
+        Envelope_SlotSealResultView_: {
+            data: components["schemas"]["SlotSealResultView"];
             /** Requestid */
             requestId: string;
         };
@@ -6978,6 +7157,10 @@ export interface components {
             addressReview: boolean;
             /** Allowedactions */
             allowedActions: string[];
+            /** Arrangement */
+            arrangement?: {
+                [key: string]: unknown;
+            } | null;
             /** Batchid */
             batchId?: string | null;
             /** Blockers */
@@ -8608,6 +8791,10 @@ export interface components {
         };
         /** SettlementView */
         SettlementView: {
+            /** Batchid */
+            batchId?: string | null;
+            /** Batchname */
+            batchName?: string | null;
             /** Cashreceivedcents */
             cashReceivedCents: number;
             /** Confirmedat */
@@ -8663,6 +8850,8 @@ export interface components {
         SlotInput: {
             /** Capacity */
             capacity: number;
+            /** Cutoffat */
+            cutoffAt?: string | null;
             /** Date */
             date: string;
             /**
@@ -8676,6 +8865,8 @@ export interface components {
             id?: string | null;
             /** Name */
             name: string;
+            /** Openat */
+            openAt?: string | null;
             /** Reason */
             reason?: string | null;
             /** Start */
@@ -8697,10 +8888,65 @@ export interface components {
             /** Slotid */
             slotId: string;
         };
+        /** SlotSealCommit */
+        SlotSealCommit: {
+            /** Expectedversion */
+            expectedVersion?: number | null;
+            /** Planid */
+            planId?: string | null;
+            /** Reason */
+            reason: string;
+        };
+        /** SlotSealPlanView */
+        SlotSealPlanView: {
+            /** Action */
+            action: string;
+            /** Blockers */
+            blockers: components["schemas"]["BlockerView"][];
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /** Impact */
+            impact: {
+                [key: string]: unknown;
+            };
+            /** Planid */
+            planId: string;
+            slot: components["schemas"]["SlotView"];
+        };
+        /** SlotSealPreview */
+        SlotSealPreview: {
+            /** Expectedversion */
+            expectedVersion?: number | null;
+        };
+        /** SlotSealResultView */
+        SlotSealResultView: {
+            /**
+             * Batchcount
+             * @default 0
+             */
+            batchCount: number;
+            /** Planid */
+            planId?: string | null;
+            /** Sealreason */
+            sealReason: string;
+            /**
+             * Sealedat
+             * Format: date-time
+             */
+            sealedAt: string;
+            /** Sealedbyname */
+            sealedByName?: string | null;
+            slot: components["schemas"]["SlotView"];
+        };
         /** SlotUpdate */
         SlotUpdate: {
             /** Capacity */
             capacity?: number | null;
+            /** Cutoffat */
+            cutoffAt?: string | null;
             /** Date */
             date?: string | null;
             /** Enabled */
@@ -8713,6 +8959,8 @@ export interface components {
             id?: string | null;
             /** Name */
             name?: string | null;
+            /** Openat */
+            openAt?: string | null;
             /** Reason */
             reason?: string | null;
             /** Start */
@@ -8723,12 +8971,26 @@ export interface components {
         /** SlotView */
         SlotView: {
             /**
+             * Acceptancestatus
+             * @default OPEN
+             */
+            acceptanceStatus: string;
+            /**
              * Archived
              * @default false
              */
             archived: boolean;
+            /**
+             * Batchcount
+             * @default 0
+             */
+            batchCount: number;
+            /** Blockers */
+            blockers?: components["schemas"]["BlockerView"][];
             /** Capacity */
             capacity: number;
+            /** Cutoffat */
+            cutoffAt?: string | null;
             /** Date */
             date: string;
             /** Enabled */
@@ -8746,8 +9008,24 @@ export interface components {
             name: string;
             /** Occupied */
             occupied: number;
+            /** Openat */
+            openAt?: string | null;
+            /**
+             * Pendingapplicationcount
+             * @default 0
+             */
+            pendingApplicationCount: number;
             /** Remaining */
             remaining: number;
+            /**
+             * Sealreason
+             * @default
+             */
+            sealReason: string;
+            /** Sealedat */
+            sealedAt?: string | null;
+            /** Sealedbyname */
+            sealedByName?: string | null;
             /** Selectable */
             selectable: boolean;
             /** Start */
@@ -13782,6 +14060,66 @@ export interface operations {
             };
         };
     };
+    propose_arrangement_api_v1_admin_orders__order_id__arrangement_proposals_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArrangementProposal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     confirm_payment_api_v1_admin_orders__order_id__confirm_payment_post: {
         parameters: {
             query?: never;
@@ -15779,6 +16117,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_SlotView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_slot_seal_api_v1_admin_slots__slot_id__seal_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                slot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SlotSealCommit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_SlotSealResultView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_slot_seal_preview_api_v1_admin_slots__slot_id__seal_preview_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                slot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SlotSealPreview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_SlotSealPlanView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -20030,6 +20488,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_CaseView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    agree_arrangement_api_v1_orders__order_id__arrangement_agreement_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArrangementAgreement"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reject_arrangement_api_v1_orders__order_id__arrangement_rejection_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArrangementRejection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */

@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import test_v1_integration as base
-from auth_helpers import make_account, make_admin, login_customer
+from auth_helpers import configure_slot, ensure_test_campus, make_account, make_admin, login_customer
 from app.models import (
     Account,
     Asset,
@@ -98,12 +98,13 @@ def _grant(api, admin_client, db, account, *, role='ADMIN',
 
 def _location_slot(db, *, capacity=5):
     now = utcnow()
-    location = Location(name=f'{BENEFITS}-{uuid4().hex[:6]}', x=0.4, y=0.6)
-    slot = DeliverySlot(
+    location = Location(name=f'{BENEFITS}-{uuid4().hex[:6]}', x=0.4, y=0.6,
+                        campus_id=ensure_test_campus(db).id)
+    slot = configure_slot(DeliverySlot(
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='扩展验收时段', starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1), capacity=capacity,
-    )
+    ))
     db.add_all([location, slot])
     db.commit()
     return location, slot
@@ -197,7 +198,7 @@ def _deliver_one(api, admin_client, db, order, courier_client,
     """Packed order -> batch -> one real proof; returns the delivered view."""
     batch = base.create_batch(api, admin_client, courier_staff,
                               f'N/F 单件批次 {uuid4().hex[:6]}')
-    base.add_order_to_batch(api, admin_client, batch, order['id'],
+    base.add_order_to_batch(api, admin_client, db, batch, order['id'],
                             f'{key}-add')
     base.publish_and_start(api, admin_client, db, batch['id'], key)
     assignment = base.active_assignment(db, order['id'])
@@ -384,7 +385,7 @@ def test_default_percent_payroll_and_one_shared_proof_for_two_orders(
                               f'N/F 批量批次 {uuid4().hex[:6]}')
     for index, order in enumerate(orders):
         added = base.add_order_to_batch(
-            api, admin_client, batch, order['id'], f'batch-add-{index}')
+            api, admin_client, db, batch, order['id'], f'batch-add-{index}')
         batch = added['batches'][0]
     base.publish_and_start(api, admin_client, db, batch['id'], 'batch')
 

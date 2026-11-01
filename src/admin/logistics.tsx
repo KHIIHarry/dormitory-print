@@ -98,7 +98,6 @@ function useCourierCatalog() {
 
 export function Batches() {
   const { data } = useStore();
-  const [create, setCreate] = useState(false);
   const [status, setStatus] = useState("");
   const [campus, setCampus] = useState("");
   const batchCampuses = (batch: Batch) =>
@@ -114,10 +113,10 @@ export function Batches() {
         title="配送调度"
         description="先规划，再核对；资料全部装袋后，才开始配送。"
         action={
-          <Button onClick={() => setCreate(true)}>
-            <Plus size={17} />
-            新建配送批次
-          </Button>
+          <Link className="text-button" to={`${ADMIN}/slots`}>
+            <Clock size={16} />
+            管理配送时段
+          </Link>
         }
       />
       <div className="production-stats">
@@ -182,7 +181,8 @@ export function Batches() {
       <div className="batch-grid">
         {visibleBatches
           .map((b) => {
-            const ready = b.orderIds.filter(
+            const extra = b as Batch & Record<string, any>;
+            const ready = extra.preparedCount ?? b.orderIds.filter(
               (id) =>
                 data.orders.find((o) => o.id === id)?.packingStatus ===
                 "PACKED",
@@ -198,6 +198,8 @@ export function Batches() {
                     <Truck size={24} />
                   </span>
                   <Badge status={b.status} />
+                  {extra.isRegular && <span className="badge">自动归集</span>}
+                  {extra.sealedAt && <span className="badge">已封批</span>}
                 </div>
                 <h2>{b.name}</h2>
                 <div className="batch-campus">
@@ -205,6 +207,8 @@ export function Batches() {
                     batchCampuses(b).map((item) => (
                       <CampusTag key={item.id} campus={item} />
                     ))
+                  ) : extra.campusName ? (
+                    <span>{extra.campusName}</span>
                   ) : (
                     <span className="muted">校区待定</span>
                   )}
@@ -220,7 +224,7 @@ export function Batches() {
                   <Users size={15} />
                   {(b as Batch & { courierName?: string }).courierName ||
                     data.staff.find((s) => s.id === b.courierId)?.name ||
-                    "尚未分配配送员"}
+                    "未分配配送员（发布前指派）"}
                 </p>
                 <div className="batch-count">
                   <div>
@@ -229,8 +233,14 @@ export function Batches() {
                   </div>
                   <div>
                     <strong>{ready}</strong>
-                    <span>可实际配送</span>
+                    <span>准备完成</span>
                   </div>
+                  {typeof extra.unpreparedCount === "number" && (
+                    <div>
+                      <strong>{extra.unpreparedCount}</strong>
+                      <span>仍待准备</span>
+                    </div>
+                  )}
                   <ArrowRight size={19} />
                 </div>
               </Link>
@@ -244,12 +254,11 @@ export function Batches() {
             text={
               data.batches.length
                 ? "切换校区或清除筛选查看其他批次。"
-                : "选择订单与配送时间，创建第一个配送计划。"
+                : "订单确认收款后会自动生成配送批次；特殊拆分或补送可从批次详情处理。"
             }
           />
         </Panel>
       )}
-      {create && <BatchForm onClose={() => setCreate(false)} />}
     </>
   );
 }
@@ -728,6 +737,12 @@ export function BatchDetail() {
       />
       <div className="batch-detail-summary">
         <Badge status={batch.status} />
+        {(batch as Record<string, any>).isRegular && (
+          <span className="badge">自动归集</span>
+        )}
+        {(batch as Record<string, any>).sealedAt && (
+          <span className="badge">已封批</span>
+        )}
         {batchCampusList.map((item) => (
           <CampusTag key={item.id} campus={item} />
         ))}
@@ -747,7 +762,24 @@ export function BatchDetail() {
             }
           </b>
         </span>
+        {(batch as Record<string, any>).campusName && (
+          <span>{(batch as Record<string, any>).campusName}</span>
+        )}
       </div>
+      {(batch as Record<string, any>).isRegular &&
+        batch.status === "PLANNED" &&
+        !(batch as Record<string, any>).sealedAt && (
+          <Notice>
+            该批次由确认收款自动归集，接单截止前名单仍会更新；发布前需先结束接单并封批。
+          </Notice>
+        )}
+      {batch.status === "PLANNED" &&
+        !(batch as Record<string, any>).sealedAt &&
+        !!(batch as Record<string, any>).slotId && (
+          <Notice>
+            接单截止或提前封批后才能发布批次；封批会冻结名单，不再自动加入新订单。
+          </Notice>
+        )}
       {mixedCampus && (
         <Notice type="error">
           批次包含多个校区的订单，跨校区无法出发。请先使用“拆分批次”按校区拆开，再安排配送。
@@ -763,9 +795,10 @@ export function BatchDetail() {
         action={
           <Button
             variant="secondary"
-            disabled={["DELIVERING", "COMPLETED", "CANCELLED"].includes(
-              batch.status,
-            )}
+            disabled={
+              ["DELIVERING", "COMPLETED", "CANCELLED"].includes(batch.status) ||
+              !!(batch as Record<string, any>).sealedAt
+            }
             onClick={() => begin("ADD")}
           >
             <Plus size={15} />
@@ -1150,13 +1183,68 @@ export function BatchDetail() {
     </>
   );
 }
+const SLOT_STATUS_LABELS: Record<string, string> = {
+  OPEN: "接单中",
+  NOT_OPEN: "未到开放",
+  CUTOFF: "已截单",
+  SEALED: "提前封批",
+  FULL: "已满",
+  DISABLED: "人工停用",
+  CONFIG_MISSING: "待补接单规则",
+  ARCHIVED: "已归档",
+  SERVICE_CLOSED: "服务暂停",
+};
+
+function toShanghaiInput(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })
+    .format(date)
+    .replace(" ", "T");
+}
+
+function localInputLabel(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
 export function Slots() {
   const { data, act, toast, pendingActions } = useStore();
-  const [edit, setEdit] = useState<Partial<Slot> | null>(null);
+  const [edit, setEdit] = useState<(Partial<Slot> & Record<string, any>) | null>(null);
   const [slots, setSlots] = useState<Slot[]>(data.slots);
   const [slotError, setSlotError] = useState("");
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [removeSlot, setRemoveSlot] = useState<Slot | null>(null);
   const [removeReason, setRemoveReason] = useState("");
+  const [sealSlot, setSealSlot] = useState<Slot | null>(null);
+  const [sealPreview, setSealPreview] = useState<any>(null);
+  const [sealReason, setSealReason] = useState("");
+  const [sealBusy, setSealBusy] = useState(false);
+  const [sealError, setSealError] = useState("");
+
+  const reload = async () => {
+    if (DEMO) return;
+    const result = await growthRequest<{ items: Slot[] }>("/admin/slots");
+    setSlots(result.items || []);
+  };
   useEffect(() => setSlots(data.slots), [data.slots]);
   useEffect(() => {
     if (DEMO) return;
@@ -1172,22 +1260,62 @@ export function Slots() {
       active = false;
     };
   }, []);
-  const save = async () => {
-    if (!edit?.date || !edit.name?.trim() || !edit.start || !edit.end) {
-      toast("请完整填写日期、名称与开始结束时间");
+
+  const openEditor = (slot?: Slot) => {
+    setFormErrors({});
+    if (!slot) {
+      setEdit({ enabled: true, capacity: 30 });
       return;
     }
-    if (edit.start >= edit.end) {
-      toast("结束时间必须晚于开始时间");
-      return;
+    setEdit({
+      ...slot,
+      openAt: toShanghaiInput((slot as any).openAt),
+      cutoffAt: toShanghaiInput((slot as any).cutoffAt),
+    });
+  };
+
+  const save = async () => {
+    if (!edit) return;
+    const errors: Record<string, string> = {};
+    if (!edit.date) errors.date = "请选择配送日期";
+    if (!edit.name?.trim()) errors.name = "请填写时段名称";
+    if (!edit.start) errors.start = "请选择预计配送开始时间";
+    if (!edit.end) errors.end = "请选择预计配送结束时间";
+    if (edit.start && edit.end && edit.start >= edit.end)
+      errors.end = "预计配送结束时间必须晚于开始时间";
+    if (!edit.openAt) errors.openAt = "请选择开放下单时间";
+    if (!edit.cutoffAt) errors.cutoffAt = "请选择截单时间";
+    if (edit.date && edit.start && edit.openAt) {
+      const open = new Date(edit.openAt);
+      const start = new Date(`${edit.date}T${edit.start}:00+08:00`);
+      if (Number.isFinite(open.getTime()) && Number.isFinite(start.getTime()) && open >= start)
+        errors.openAt = "开放下单时间必须早于预计配送开始时间";
+    }
+    if (edit.cutoffAt) {
+      const cutoff = new Date(edit.cutoffAt);
+      const open = edit.openAt ? new Date(edit.openAt) : null;
+      const start = edit.date && edit.start
+        ? new Date(`${edit.date}T${edit.start}:00+08:00`)
+        : null;
+      if (open && Number.isFinite(cutoff.getTime()) && Number.isFinite(open.getTime()) && cutoff <= open)
+        errors.cutoffAt = "截单时间必须晚于开放下单时间";
+      if (start && Number.isFinite(cutoff.getTime()) && Number.isFinite(start.getTime()) && cutoff >= start)
+        errors.cutoffAt = "截单时间必须早于预计配送开始时间";
     }
     if (
       edit.capacity == null ||
       !Number.isSafeInteger(edit.capacity) ||
       edit.capacity < 1 ||
       edit.capacity > 100000
-    ) {
-      toast("预约容量必须是 1 到 100000 之间的整数");
+    )
+      errors.capacity = "预约容量必须是 1 到 100000 之间的整数";
+    else if (edit.capacity < Number((edit as any).occupied || 0))
+      errors.capacity = "容量不能小于已占用数量";
+    setFormErrors(errors);
+    const first = Object.keys(errors)[0];
+    if (first) {
+      const target = document.querySelector(`[data-slot-field="${first}"]`);
+      (target as HTMLElement | null)?.focus();
       return;
     }
     const id = edit.id || crypto.randomUUID();
@@ -1201,45 +1329,98 @@ export function Slots() {
       enabled: edit.enabled ?? true,
       capacity: edit.capacity,
     } as Slot;
+    const payload: Record<string, unknown> = {
+      date: edit.date,
+      name: edit.name,
+      start: edit.start,
+      end: edit.end,
+      openAt: edit.openAt,
+      cutoffAt: edit.cutoffAt,
+      capacity: edit.capacity,
+      enabled: edit.enabled ?? true,
+      reason: (edit as any).reason || "",
+    };
+    if (edit.id) payload.expectedVersion = (edit as any).version;
     if (
       await act(
         edit.id ? `/admin/slots/${id}` : "/admin/slots",
-        {
-          ...slot,
-          ...(edit.id
-            ? { expectedVersion: (edit as Record<string, any>).version }
-            : {}),
-        },
-        (s) => ({
-          ...s,
+        payload,
+        (state) => ({
+          ...state,
           slots: edit.id
-            ? s.slots.map((x) => (x.id === id ? slot : x))
-            : [...s.slots, slot],
+            ? state.slots.map((x) => (x.id === id ? slot : x))
+            : [...state.slots, slot],
         }),
         edit.id ? "PATCH" : "POST",
       )
     ) {
       setEdit(null);
       toast("配送时段已保存");
-      if (!DEMO) {
-        const result = await growthRequest<{ items: Slot[] }>("/admin/slots");
-        setSlots(result.items || []);
-      }
+      if (!DEMO) await reload();
     }
   };
+
+  const openSeal = async (slot: Slot) => {
+    setSealSlot(slot);
+    setSealPreview(null);
+    setSealReason("");
+    setSealError("");
+    setSealBusy(true);
+    try {
+      const preview = await growthRequest(
+        `/admin/slots/${slot.id}/seal/preview`,
+        { method: "POST", body: { expectedVersion: (slot as any).version } },
+      );
+      setSealPreview(preview);
+    } catch (error) {
+      setSealError((error as Error).message);
+    } finally {
+      setSealBusy(false);
+    }
+  };
+
+  const commitSeal = async () => {
+    if (!sealSlot || !sealPreview) return;
+    if (!sealReason.trim()) {
+      setSealError("请填写封批原因");
+      return;
+    }
+    setSealBusy(true);
+    setSealError("");
+    try {
+      await growthRequest(`/admin/slots/${sealSlot.id}/seal`, {
+        method: "POST",
+        body: {
+          expectedVersion: (sealPreview.slot as any)?.version ?? (sealSlot as any).version,
+          planId: sealPreview.planId,
+          reason: sealReason.trim(),
+        },
+      });
+      toast("已结束接单并封批，名单已冻结");
+      setSealSlot(null);
+      await reload();
+    } catch (error) {
+      setSealError((error as Error).message);
+    } finally {
+      setSealBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeading
         title="配送时段"
-        description="按具体日期开放预约，不会自动生成虚构的可选时段。"
+        description="按具体日期开放预约；开放与截单时间决定申请资格，提前封批会冻结名单。"
         action={
-          <Button onClick={() => setEdit({ enabled: true, capacity: 30 })}>
+          <Button onClick={() => openEditor()}>
             <Plus size={17} />
             新建时段
           </Button>
         }
       />
-      <Notice>关闭时段将停止新预约，不会删除已有订单的预约记录。</Notice>
+      <Notice>
+        截单由服务器时间即时生效，不依赖定时任务；停止新预约不会取消已有配送。
+      </Notice>
       {slotError && (
         <Notice type="error">
           <span role="alert">{slotError}</span>
@@ -1250,98 +1431,79 @@ export function Slots() {
           <table>
             <thead>
               <tr>
-                <th>日期</th>
-                <th>时段名称</th>
-                <th>配送时间</th>
-                <th>容量 / 已占用</th>
-                <th>开放状态</th>
+                <th>日期 / 名称</th>
+                <th>预计配送</th>
+                <th>接单窗口</th>
+                <th>容量 / 已占 / 剩余</th>
+                <th>接单状态</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {slots.map((s) => (
-                <tr key={s.id}>
-                  <td>
-                    {s.date}
-                    <small>{s.weekday}</small>
-                  </td>
-                  <td>{s.name}</td>
-                  <td className="numeric">
-                    {s.start} – {s.end}
-                  </td>
-                  <td>
-                    {s.capacity} 单
-                    <small>
-                      已占 {(s as Record<string, any>).occupied ?? 0} · 剩余{" "}
-                      {(s as Record<string, any>).remaining ?? s.capacity}
-                      {(s as Record<string, any>).selectable === false &&
-                        " · 不可选"}
-                    </small>
-                  </td>
-                  <td>
-                    <button
-                      className={`toggle ${s.enabled ? "on" : ""}`}
-                      aria-label={`${s.enabled ? "关闭" : "开放"}${s.name}`}
-                      onClick={async () => {
-                        const ok = await act(
-                          `/admin/slots/${s.id}`,
-                          {
-                            enabled: !s.enabled,
-                            expectedVersion: (s as Record<string, any>).version,
-                          },
-                          (d) => ({
-                            ...d,
-                            slots: d.slots.map((x) =>
-                              x.id === s.id ? { ...x, enabled: !x.enabled } : x,
-                            ),
-                          }),
-                          "PATCH",
-                        );
-                        if (!ok) return;
-                        if (DEMO)
-                          setSlots((current) =>
-                            current.map((x) =>
-                              x.id === s.id ? { ...x, enabled: !x.enabled } : x,
-                            ),
-                          );
-                        else {
-                          const result = await growthRequest<{ items: Slot[] }>(
-                            "/admin/slots",
-                          );
-                          setSlots(result.items || []);
-                        }
-                      }}
-                    >
-                      <i />
-                    </button>
-                  </td>
-                  <td>
-                    <div className="button-row">
-                      <button
-                        className="text-button"
-                        onClick={() => setEdit(s)}
-                      >
-                        编辑时段
-                      </button>
-                      <button
-                        className="text-button"
-                        onClick={() => {
-                          setRemoveSlot(s);
-                          setRemoveReason("");
-                        }}
-                      >
-                        移除时段
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {slots.map((s: any) => {
+                const state = s.acceptanceStatus || (s.sealedAt ? "SEALED" : s.enabled ? "OPEN" : "DISABLED");
+                return (
+                  <tr key={s.id}>
+                    <td>
+                      {s.date}
+                      <small>{s.weekday} · {s.name}</small>
+                    </td>
+                    <td className="numeric">
+                      {s.start} – {s.end}
+                    </td>
+                    <td className="numeric">
+                      {localInputLabel(s.openAt)} 开放
+                      <small>{localInputLabel(s.cutoffAt)} 截单</small>
+                    </td>
+                    <td>
+                      {s.capacity} 单
+                      <small>
+                        已占 {s.occupied ?? 0} · 剩余 {s.remaining ?? s.capacity}
+                      </small>
+                    </td>
+                    <td>
+                      <span className={`status ${state === "OPEN" ? "green" : ""}`}>
+                        {SLOT_STATUS_LABELS[state] || state}
+                      </span>
+                      <small>
+                        {s.batchCount ?? 0} 个批次
+                        {s.pendingApplicationCount
+                          ? ` · ${s.pendingApplicationCount} 份待确认申请`
+                          : ""}
+                      </small>
+                      {s.sealReason && <small>原因：{s.sealReason}</small>}
+                    </td>
+                    <td>
+                      <div className="button-row">
+                        <button className="text-button" onClick={() => openEditor(s)}>
+                          编辑
+                        </button>
+                        {!s.sealedAt && (
+                          <button className="text-button" onClick={() => void openSeal(s)}>
+                            提前封批
+                          </button>
+                        )}
+                        <button
+                          className="text-button"
+                          onClick={() => {
+                            setRemoveSlot(s);
+                            setRemoveReason("");
+                          }}
+                        >
+                          移除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
         {!slots.length && <Empty title="尚未配置配送时段" />}
       </Panel>
       {!DEMO && <SlotProposals slots={slots} />}
+      {!DEMO && <PaidArrangementProposals slots={slots} />}
       {removeSlot && (
         <Modal title="移除配送时段" onClose={() => setRemoveSlot(null)}>
           <Notice>
@@ -1366,16 +1528,12 @@ export function Slots() {
                 },
                 (current) => ({
                   ...current,
-                  slots: current.slots.filter(
-                    (item) => item.id !== selected.id,
-                  ),
+                  slots: current.slots.filter((item) => item.id !== selected.id),
                 }),
                 "DELETE",
               );
               if (!ok) return;
-              setSlots((current) =>
-                current.filter((item) => item.id !== selected.id),
-              );
+              setSlots((current) => current.filter((item) => item.id !== selected.id));
               setRemoveSlot(null);
               toast("配送时段已移除，历史记录保留");
             }}
@@ -1384,43 +1542,119 @@ export function Slots() {
           </Button>
         </Modal>
       )}
+      {sealSlot && (
+        <Modal title="提前封批" onClose={() => setSealSlot(null)}>
+          <Notice>
+            封批会立即结束「{sealSlot.date} · {sealSlot.name}」的新申请，冻结所有校区名单；
+            不可撤销，需要继续接单请新建时段。
+          </Notice>
+          {sealError && <Notice type="error">{sealError}</Notice>}
+          {!sealPreview && sealBusy && <p>正在检查影响范围…</p>}
+          {sealPreview && (
+            <>
+              {sealPreview.blockers?.length ? (
+                <Notice type="error">
+                  {sealPreview.blockers.map((b: any) => b.message || b.code).join("；")}
+                </Notice>
+              ) : (
+                <div className="form-hint">
+                  将影响 {sealPreview.impact?.pendingApplications ?? 0} 份待确认申请，
+                  涉及 {sealPreview.impact?.batchCount ?? 0} 个批次。
+                  {sealPreview.impact?.campuses?.map((c: any) => (
+                    <div key={c.campusId}>
+                      {c.campusName}：{c.pendingApplications} 份待确认申请，
+                      {c.batchCount} 个批次
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Field label="封批原因（必填）">
+                <textarea
+                  value={sealReason}
+                  onChange={(event) => setSealReason(event.target.value)}
+                  placeholder="例如：配送运力已满，提前结束接单"
+                />
+              </Field>
+              <Button
+                busy={sealBusy}
+                disabled={!!sealPreview.blockers?.length}
+                onClick={commitSeal}
+              >
+                结束接单并封批
+              </Button>
+            </>
+          )}
+        </Modal>
+      )}
       {edit && (
         <Modal
           title={edit.id ? "编辑配送时段" : "新建配送时段"}
           onClose={() => setEdit(null)}
         >
           <div className="slot-editor-form">
-          <Field label="配送日期">
+          {((edit as any).occupied > 0 || (edit as any).batchCount > 0) && (
+            <Notice>
+              该时段已有订单或批次。修改预计配送时间会影响现有预约，需要调整配送安排；
+              截单后不能通过普通编辑延长接单。
+            </Notice>
+          )}
+          <Field label="配送日期" error={formErrors.date}>
             <input
+              data-slot-field="date"
               type="date"
               value={edit.date || ""}
               onChange={(e) => setEdit({ ...edit, date: e.target.value })}
             />
           </Field>
-          <Field label="时段名称">
+          <Field label="时段名称" error={formErrors.name}>
             <input
+              data-slot-field="name"
               value={edit.name || ""}
               onChange={(e) => setEdit({ ...edit, name: e.target.value })}
               placeholder="例如 晚间配送"
             />
           </Field>
           <div className="form-grid">
-            <Field label="开始时间">
+            <Field label="预计配送开始" error={formErrors.start}>
               <input
+                data-slot-field="start"
                 type="time"
                 value={edit.start || ""}
                 onChange={(e) => setEdit({ ...edit, start: e.target.value })}
               />
             </Field>
-            <Field label="结束时间">
+            <Field label="预计配送结束" error={formErrors.end}>
               <input
+                data-slot-field="end"
                 type="time"
                 value={edit.end || ""}
                 onChange={(e) => setEdit({ ...edit, end: e.target.value })}
               />
             </Field>
           </div>
-          <Field label="预约容量（单）">
+          <div className="form-grid">
+            <Field label="开放下单时间" error={formErrors.openAt} hint="按北京时间填写，可跨天">
+              <input
+                data-slot-field="openAt"
+                type="datetime-local"
+                value={edit.openAt || ""}
+                onChange={(e) => setEdit({ ...edit, openAt: e.target.value })}
+              />
+            </Field>
+            <Field label="截单时间" error={formErrors.cutoffAt} hint="截单后立即停止新申请与自动归批">
+              <input
+                data-slot-field="cutoffAt"
+                type="datetime-local"
+                value={edit.cutoffAt || ""}
+                onChange={(e) => setEdit({ ...edit, cutoffAt: e.target.value })}
+              />
+            </Field>
+          </div>
+          <Field
+            label="预约容量（单）"
+            error={formErrors.capacity}
+            hint="同一时段各校区共享总容量；拆分批次不会重复占用"
+          >
             <NumberInput
               min={1}
               max={100000}
@@ -1430,6 +1664,14 @@ export function Slots() {
               }
             />
           </Field>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={edit.enabled ?? true}
+              onChange={(e) => setEdit({ ...edit, enabled: e.target.checked })}
+            />
+            人工开启接单（关闭只停止新申请，不取消已有配送）
+          </label>
           <Button
             busy={
               pendingActions[
@@ -1444,6 +1686,159 @@ export function Slots() {
         </Modal>
       )}
     </>
+  );
+}
+
+function PaidArrangementProposals({ slots }: { slots: Slot[] }) {
+  const [orders, setOrders] = useState<AdminOrderView[]>([]);
+  const [target, setTarget] = useState<AdminOrderView | null>(null);
+  const [slotId, setSlotId] = useState("");
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try {
+      const result = await growthRequest<{ items: AdminOrderView[] }>(
+        "/admin/orders?limit=100",
+      );
+      setOrders(
+        (result.items || []).filter(
+          (order) =>
+            !!order.confirmedSlotId &&
+            !["DELIVERED", "CANCELLED"].includes(order.status),
+        ),
+      );
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  const available = slots.filter(
+    (slot) =>
+      slot.enabled &&
+      slot.sealedAt == null &&
+      slot.acceptanceStatus !== "SEALED" &&
+      Number((slot as Record<string, any>).remaining ?? slot.capacity) > 0,
+  );
+  const submit = async () => {
+    if (!target) return;
+    if (!slotId.trim()) {
+      setError("请选择要建议的新时段");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("请填写调整原因");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await growthRequest(
+        `/admin/orders/${encodeURIComponent(target.id)}/arrangement-proposals`,
+        {
+          method: "POST",
+          body: {
+            expectedVersion: target.version,
+            slotId: slotId.trim(),
+            reason: reason.trim(),
+          },
+        },
+      );
+      setTarget(null);
+      await load();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!orders.length) return null;
+  return (
+    <Panel title="已结算订单的配送安排">
+      <p className="muted">
+        已结算订单改到其他时段需要客户在订单页明确接受；预览与实际生效分离，
+        不会重复扣款或重新报价。
+      </p>
+      {error && <Notice type="error">{error}</Notice>}
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>取件码</th>
+              <th>状态</th>
+              <th>当前确认时段</th>
+              <th>待确认提案</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((order) => {
+              const confirmed = slots.find((s) => s.id === order.confirmedSlotId);
+              const pending = order.arrangement?.pendingProposal;
+              return (
+                <tr key={order.id}>
+                  <td>{order.pickupCode || order.id.slice(0, 8)}</td>
+                  <td>{order.status}</td>
+                  <td>
+                    {confirmed
+                      ? `${confirmed.date} ${confirmed.name} ${confirmed.start}–${confirmed.end}`
+                      : order.confirmedSlotId}
+                  </td>
+                  <td>
+                    {pending
+                      ? `${pending.proposed?.date || ""} ${pending.proposed?.name || ""} 待客户确认`
+                      : "—"}
+                  </td>
+                  <td>
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setTarget(order);
+                        setSlotId("");
+                        setReason("");
+                        setError("");
+                      }}
+                    >
+                      调整配送安排
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {target && (
+        <Modal title="调整配送安排" onClose={() => setTarget(null)}>
+          <Notice>
+            订单 {target.pickupCode || target.id.slice(0, 8)} 已结算。选择其他时段后，
+            客户需在订单页确认；接受前原安排仍然有效。
+          </Notice>
+          <Field label="新的配送时段">
+            <select value={slotId} onChange={(e) => setSlotId(e.target.value)}>
+              <option value="">请选择时段</option>
+              {available.map((slot) => (
+                <option key={slot.id} value={slot.id}>
+                  {slot.date} · {slot.name} · {slot.start}–{slot.end}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="调整原因（会展示给客户）">
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="例如：原时段运力不足，建议调整到次日中午"
+            />
+          </Field>
+          <Button busy={busy} onClick={submit}>
+            提交待客户确认的安排
+          </Button>
+        </Modal>
+      )}
+    </Panel>
   );
 }
 

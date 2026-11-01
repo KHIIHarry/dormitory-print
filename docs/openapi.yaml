@@ -770,6 +770,77 @@
         "title": "ApplyPolicyInput",
         "type": "object"
       },
+      "ArrangementAgreement": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "slotId": {
+            "title": "Slotid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "slotId",
+          "confirm"
+        ],
+        "title": "ArrangementAgreement",
+        "type": "object"
+      },
+      "ArrangementProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "slotId": {
+            "title": "Slotid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "slotId",
+          "reason"
+        ],
+        "title": "ArrangementProposal",
+        "type": "object"
+      },
+      "ArrangementRejection": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion"
+        ],
+        "title": "ArrangementRejection",
+        "type": "object"
+      },
       "AssetList": {
         "additionalProperties": false,
         "properties": {
@@ -1764,12 +1835,41 @@
       "BatchView": {
         "additionalProperties": false,
         "properties": {
+          "allowedActions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowedactions",
+            "type": "array"
+          },
           "assignmentIds": {
             "items": {
               "type": "string"
             },
             "title": "Assignmentids",
             "type": "array"
+          },
+          "campusId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
+          "campusName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusname"
           },
           "courierId": {
             "anyOf": [
@@ -1807,9 +1907,25 @@
             "title": "Endsat",
             "type": "string"
           },
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groupid"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "isRegular": {
+            "default": false,
+            "title": "Isregular",
+            "type": "boolean"
           },
           "name": {
             "title": "Name",
@@ -1821,6 +1937,16 @@
             },
             "title": "Orderids",
             "type": "array"
+          },
+          "paidCount": {
+            "default": 0,
+            "title": "Paidcount",
+            "type": "integer"
+          },
+          "preparedCount": {
+            "default": 0,
+            "title": "Preparedcount",
+            "type": "integer"
           },
           "publishedAt": {
             "anyOf": [
@@ -1837,6 +1963,34 @@
           "reason": {
             "title": "Reason",
             "type": "string"
+          },
+          "sealReason": {
+            "default": "",
+            "title": "Sealreason",
+            "type": "string"
+          },
+          "sealedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedat"
+          },
+          "sealedByName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedbyname"
           },
           "slotId": {
             "anyOf": [
@@ -1860,6 +2014,11 @@
             ],
             "title": "Slotname"
           },
+          "source": {
+            "default": "MANUAL",
+            "title": "Source",
+            "type": "string"
+          },
           "startsAt": {
             "format": "date-time",
             "title": "Startsat",
@@ -1872,6 +2031,16 @@
           "time": {
             "title": "Time",
             "type": "string"
+          },
+          "unassignedCount": {
+            "default": 0,
+            "title": "Unassignedcount",
+            "type": "integer"
+          },
+          "unpreparedCount": {
+            "default": 0,
+            "title": "Unpreparedcount",
+            "type": "integer"
           },
           "updatedAt": {
             "format": "date-time",
@@ -5151,6 +5320,18 @@
             "title": "Allowedactions",
             "type": "array"
           },
+          "arrangement": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrangement"
+          },
           "assignment": {
             "anyOf": [
               {
@@ -7439,6 +7620,42 @@
           "requestId"
         ],
         "title": "Envelope[SlotListView]",
+        "type": "object"
+      },
+      "Envelope_SlotSealPlanView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SlotSealPlanView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[SlotSealPlanView]",
+        "type": "object"
+      },
+      "Envelope_SlotSealResultView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SlotSealResultView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[SlotSealResultView]",
         "type": "object"
       },
       "Envelope_SlotView_": {
@@ -10134,6 +10351,18 @@
             },
             "title": "Allowedactions",
             "type": "array"
+          },
+          "arrangement": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrangement"
           },
           "batchId": {
             "anyOf": [
@@ -14781,6 +15010,28 @@
       "SettlementView": {
         "additionalProperties": false,
         "properties": {
+          "batchId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batchid"
+          },
+          "batchName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batchname"
+          },
           "cashReceivedCents": {
             "title": "Cashreceivedcents",
             "type": "integer"
@@ -14922,6 +15173,18 @@
             "title": "Capacity",
             "type": "integer"
           },
+          "cutoffAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoffat"
+          },
           "date": {
             "title": "Date",
             "type": "string"
@@ -14951,6 +15214,18 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "openAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openat"
           },
           "reason": {
             "anyOf": [
@@ -15033,6 +15308,159 @@
         "title": "SlotProposal",
         "type": "object"
       },
+      "SlotSealCommit": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedversion"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
+          },
+          "reason": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SlotSealCommit",
+        "type": "object"
+      },
+      "SlotSealPlanView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/BlockerView"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "impact": {
+            "additionalProperties": true,
+            "title": "Impact",
+            "type": "object"
+          },
+          "planId": {
+            "title": "Planid",
+            "type": "string"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/SlotView"
+          }
+        },
+        "required": [
+          "planId",
+          "action",
+          "slot",
+          "blockers",
+          "impact",
+          "expiresAt"
+        ],
+        "title": "SlotSealPlanView",
+        "type": "object"
+      },
+      "SlotSealPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedversion"
+          }
+        },
+        "title": "SlotSealPreview",
+        "type": "object"
+      },
+      "SlotSealResultView": {
+        "additionalProperties": false,
+        "properties": {
+          "batchCount": {
+            "default": 0,
+            "title": "Batchcount",
+            "type": "integer"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
+          },
+          "sealReason": {
+            "title": "Sealreason",
+            "type": "string"
+          },
+          "sealedAt": {
+            "format": "date-time",
+            "title": "Sealedat",
+            "type": "string"
+          },
+          "sealedByName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedbyname"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/SlotView"
+          }
+        },
+        "required": [
+          "slot",
+          "sealedAt",
+          "sealReason"
+        ],
+        "title": "SlotSealResultView",
+        "type": "object"
+      },
       "SlotUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -15048,6 +15476,18 @@
               }
             ],
             "title": "Capacity"
+          },
+          "cutoffAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoffat"
           },
           "date": {
             "anyOf": [
@@ -15118,6 +15558,18 @@
             ],
             "title": "Name"
           },
+          "openAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openat"
+          },
           "reason": {
             "anyOf": [
               {
@@ -15159,14 +15611,43 @@
       "SlotView": {
         "additionalProperties": false,
         "properties": {
+          "acceptanceStatus": {
+            "default": "OPEN",
+            "title": "Acceptancestatus",
+            "type": "string"
+          },
           "archived": {
             "default": false,
             "title": "Archived",
             "type": "boolean"
           },
+          "batchCount": {
+            "default": 0,
+            "title": "Batchcount",
+            "type": "integer"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/BlockerView"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "capacity": {
             "title": "Capacity",
             "type": "integer"
+          },
+          "cutoffAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoffat"
           },
           "date": {
             "title": "Date",
@@ -15197,9 +15678,54 @@
             "title": "Occupied",
             "type": "integer"
           },
+          "openAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openat"
+          },
+          "pendingApplicationCount": {
+            "default": 0,
+            "title": "Pendingapplicationcount",
+            "type": "integer"
+          },
           "remaining": {
             "title": "Remaining",
             "type": "integer"
+          },
+          "sealReason": {
+            "default": "",
+            "title": "Sealreason",
+            "type": "string"
+          },
+          "sealedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedat"
+          },
+          "sealedByName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedbyname"
           },
           "selectable": {
             "title": "Selectable",
@@ -24530,6 +25056,103 @@
         "summary": "Admin Create"
       }
     },
+    "/admin/orders/{order_id}/arrangement-proposals": {
+      "post": {
+        "operationId": "propose_arrangement_api_v1_admin_orders__order_id__arrangement_proposals_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArrangementProposal"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrderView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Propose Arrangement"
+      }
+    },
     "/admin/orders/{order_id}/confirm-payment": {
       "post": {
         "operationId": "confirm_payment_api_v1_admin_orders__order_id__confirm_payment_post",
@@ -27755,6 +28378,200 @@
           }
         },
         "summary": "Admin Slot Update"
+      }
+    },
+    "/admin/slots/{slot_id}/seal": {
+      "post": {
+        "operationId": "admin_slot_seal_api_v1_admin_slots__slot_id__seal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlotSealCommit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SlotSealResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Slot Seal"
+      }
+    },
+    "/admin/slots/{slot_id}/seal/preview": {
+      "post": {
+        "operationId": "admin_slot_seal_preview_api_v1_admin_slots__slot_id__seal_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SlotSealPreview"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SlotSealPlanView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Slot Seal Preview"
       }
     },
     "/admin/staff": {
@@ -34012,6 +34829,200 @@
           }
         },
         "summary": "Withdraw Case"
+      }
+    },
+    "/orders/{order_id}/arrangement-agreement": {
+      "post": {
+        "operationId": "agree_arrangement_api_v1_orders__order_id__arrangement_agreement_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArrangementAgreement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrderView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Agree Arrangement"
+      }
+    },
+    "/orders/{order_id}/arrangement-rejection": {
+      "post": {
+        "operationId": "reject_arrangement_api_v1_orders__order_id__arrangement_rejection_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArrangementRejection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrderView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reject Arrangement"
       }
     },
     "/orders/{order_id}/cancel": {

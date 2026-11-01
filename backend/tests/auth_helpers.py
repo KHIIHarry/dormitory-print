@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.models import (
+    Campus,
     Account,
     DeliverySlot,
     Location,
@@ -147,13 +148,39 @@ def login_staff(client: TestClient, username: str, password: str = PASSWORD):
     return api(client, '/auth/login', {'username': username, 'password': password})
 
 
+def ensure_test_campus(db):
+    from sqlalchemy import select
+
+    campus = db.scalar(select(Campus).where(Campus.name == '测试校区'))
+    if campus is None:
+        campus = Campus(name='测试校区', theme_color='#C67C4E', selection_enabled=True, sort_order=1)
+        db.add(campus)
+        db.flush()
+    return campus
+
+
+def configure_slot(slot, *, open_minutes: int = 60, cutoff_minutes: int = 60):
+    """Give a directly constructed slot a valid [open, cutoff) ordering window."""
+    now = utcnow()
+    open_at = now - timedelta(minutes=open_minutes)
+    cutoff_at = now + timedelta(minutes=cutoff_minutes)
+    if cutoff_at >= slot.starts_at:
+        cutoff_at = slot.starts_at - timedelta(minutes=1)
+        open_at = min(open_at, cutoff_at - timedelta(minutes=1))
+    slot.open_at = open_at
+    slot.cutoff_at = cutoff_at
+    return slot
+
+
 def make_order(db, principal_id: str, status: str = 'PENDING_CONFIRMATION', total_cents: int = 1200):
-    location = Location(name='一号楼', type='DORMITORY', x=0.4, y=0.5, enabled=True, map_version=1)
+    location = Location(name='一号楼', type='DORMITORY', x=0.4, y=0.5, enabled=True,
+                        map_version=1, campus_id=ensure_test_campus(db).id)
     db.add(location)
     db.flush()
     starts = utcnow() + timedelta(hours=2)
-    slot = DeliverySlot(date=starts.date().isoformat(), name='下午', starts_at=starts,
-                        ends_at=starts + timedelta(hours=2), capacity=20)
+    slot = configure_slot(DeliverySlot(
+        date=starts.date().isoformat(), name='下午', starts_at=starts,
+        ends_at=starts + timedelta(hours=2), capacity=20))
     db.add(slot)
     db.flush()
     preparation = Preparation(principal_id=principal_id, status='READY', input={}, data={},

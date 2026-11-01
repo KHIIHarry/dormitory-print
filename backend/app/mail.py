@@ -79,6 +79,11 @@ VARIABLE_DESCRIPTIONS = {
     'batchName': '配送批次名称',
     'deliveryDate': '配送日期',
     'deliverySlot': '配送时段',
+    'changeType': '配送变更类型',
+    'originalWindow': '原配送日期与时间',
+    'newWindow': '最新配送日期与时间，或“待重新安排”',
+    'changeReason': '对客户可见的调整原因',
+    'confirmationRequired': '是否需要客户确认',
     'deliveryLocation': '配送楼栋或地点',
     'deliveredAt': '签收时间',
     'orderCount': '本批订单数量',
@@ -148,15 +153,19 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     'DELIVERY_UPDATED': {
         'name': '配送信息变更',
-        'subject': '{{brandName}}｜订单 {{orderCode}} 配送信息已更新',
+        'subject': '{{brandName}}｜订单 {{orderCode}} 配送安排已更新',
         'textBody': (
-            '您好！{{brandName}} 订单 {{orderCode}} 的配送信息已更新。\n'
-            '配送楼栋：{{deliveryLocation}}\n配送时段：{{deliverySlot}}\n'
-            '查看订单：{{orderLink}}'
+            '您好！{{brandName}} 订单 {{orderCode}} 的配送安排已更新。\n'
+            '变更类型：{{changeType}}\n原配送时间：{{originalWindow}}\n'
+            '最新安排：{{newWindow}}\n调整说明：{{changeReason}}\n'
+            '{{confirmationRequired}}\n配送楼栋：{{deliveryLocation}}\n'
+            '配送时段：{{deliverySlot}}\n查看订单：{{orderLink}}'
         ),
         'htmlBody': template_html('DELIVERY_UPDATED'),
         'variables': ['brandName', 'orderCode', 'deliveryLocation',
-                      'deliverySlot', 'orderLink'],
+                      'deliverySlot', 'orderLink', 'changeType',
+                      'originalWindow', 'newWindow', 'changeReason',
+                      'confirmationRequired'],
         'critical': False,
         'enabled': True,
     },
@@ -260,6 +269,11 @@ SAMPLE_VARIABLES = {
     'deliverySlot': '19:00–20:00',
     'deliveryLocation': '示例公寓 3 栋',
     'deliveredAt': '2026-10-31 20:12',
+    'changeType': '配送时间调整',
+    'originalWindow': '2026-10-31 19:00 – 20:00',
+    'newWindow': '2026-11-01 12:00 – 13:00',
+    'changeReason': '原时段运力调整，请以最新安排为准。',
+    'confirmationRequired': '无需再次确认，请以最新安排为准。',
     'orderCount': '6',
     'deletionDeadline': '2026-11-14',
     'rewardText': '示例奖励：一张优惠券（以真实活动规则为准）',
@@ -993,9 +1007,23 @@ def process_email_job(db, job_id: str) -> None:
     data['history'] = history[-20:]
     job.data = data
     touch(job)
+    _sync_delivery_notice(job, 'ACCEPTED')
     session = object_session(job)
     if session is not None:
         session.flush()
+
+
+def _sync_delivery_notice(job, status: str) -> None:
+    from .models import DeliveryNotice
+    notice = object_session(job).scalar(
+        select(DeliveryNotice).where(DeliveryNotice.email_job_id == job.id)) \
+        if object_session(job) is not None else None
+    if notice is None:
+        return
+    notice.status = status
+    notice.attempts = job.attempts
+    notice.last_error = (job.data or {}).get('lastErrorClass') or ''
+    touch(notice)
 
 
 def _fail_or_retry(job: EmailJob, now, error_class: str) -> None:
@@ -1015,6 +1043,7 @@ def _fail_or_retry(job: EmailJob, now, error_class: str) -> None:
     data['history'] = history[-20:]
     job.data = data
     touch(job)
+    _sync_delivery_notice(job, 'FAILED' if job.status == 'FAILED' else 'UNKNOWN')
     session = object_session(job)
     if session is not None:
         session.flush()

@@ -17,6 +17,14 @@ from app.delivery_schemas import (
 )
 
 
+def enable_services(db):
+    from app.config import get_config
+    for section in ('services', 'announcement'):
+        config = get_config(db, section)
+        config.data = {**config.data, 'serviceEnabled': True}
+    db.commit()
+
+
 def test_batch_window_accepts_frontend_date_and_time_range_in_shanghai():
     starts_at, ends_at = batch_window('2026-10-31', '19:00 – 20:30')
     assert starts_at == datetime(2026, 10, 31, 11, 0, tzinfo=timezone.utc)
@@ -345,6 +353,8 @@ def create_slot(api, client, *, offset_hours=48, capacity=4, name='测试时段'
     response = api(client, '/admin/slots', {
         'date': to_shanghai_date(starts_at), 'name': name,
         'start': to_shanghai_hhmm(starts_at), 'end': to_shanghai_hhmm(ends_at),
+        'openAt': (utcnow() - timedelta(hours=2)).isoformat(),
+        'cutoffAt': (utcnow() - timedelta(minutes=5)).isoformat(),
         'capacity': capacity, 'enabled': True, 'reason': '测试时段'})
     assert response.status_code == 200, response.text
     return response.json()['data']
@@ -689,7 +699,7 @@ def test_transfer_split_merge_reschedule_cancel_and_soft_delete(db, api, client,
         DeliveryAssignment.active.is_(True)))
     assert active.batch_id == batch_b.id
 
-    # Reschedule postpones and requires republish.
+    # Same-day ETA update keeps the batch state; it is not a whole-batch postpone.
     current_b = api(client, f'/admin/batches/{batch_b.id}', None, method='GET').json()['data']
     reschedule = api(client, '/admin/batch-operations/preview', {
         'action': 'RESCHEDULE', 'orderIds': [], 'sourceBatchIds': [batch_b.id],
@@ -702,7 +712,7 @@ def test_transfer_split_merge_reschedule_cancel_and_soft_delete(db, api, client,
     api(client, '/admin/batch-operations/commit',
         {'planId': reschedule.json()['data']['planId']})
     db.expire_all()
-    assert db.get(DeliveryBatch, batch_b.id).status == 'POSTPONED'
+    assert db.get(DeliveryBatch, batch_b.id).status == 'PLANNED'
 
     # Cancel releases the active assignment without deleting the order.
     cancel = api(client, '/admin/batch-operations/preview', {
@@ -739,12 +749,15 @@ def test_slots_do_not_consume_capacity_and_maps_require_migration(
         db, api, client, act_as, staff_factory):
     staff = act_as(staff_factory(role='ADMIN'))
     order = make_ready_order(db)
+    enable_services(db)
     # A concrete future daytime window is stable even when tests run near midnight.
     starts_at = (utcnow() + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
     slot_response = api(client, '/admin/slots', {
         'date': to_shanghai_date(starts_at), 'name': '测试时段',
         'start': to_shanghai_window(starts_at, starts_at + timedelta(hours=1)).split(' – ')[0],
         'end': to_shanghai_window(starts_at, starts_at + timedelta(hours=1)).split(' – ')[1],
+        'openAt': (utcnow() - timedelta(hours=1)).isoformat(),
+        'cutoffAt': min(utcnow() + timedelta(hours=1), starts_at - timedelta(minutes=1)).isoformat(),
         'capacity': 1, 'enabled': True, 'reason': ''})
     assert slot_response.status_code == 200, slot_response.text
     slot = slot_response.json()['data']
@@ -859,8 +872,8 @@ def test_postponed_batch_can_be_republished_and_started_outside_window(
     batch = create_batch_fixed(api, client, courier, starts_at)
     add_orders(api, client, batch, [order.id])
 
-    # Rescheduling moves the batch to POSTPONED; republish remains valid even
-    # though both estimated windows are already in the past.
+    # A same-day ETA update keeps the batch planned; republish remains valid
+    # even though both estimated windows are already in the past.
     reschedule = api(client, '/admin/batch-operations/preview', {
         'action': 'RESCHEDULE',
         'orderIds': [],
@@ -878,7 +891,7 @@ def test_postponed_batch_can_be_republished_and_started_outside_window(
                     {'planId': reschedule.json()['data']['planId']})
     assert committed.status_code == 200, committed.text
     db.expire_all()
-    assert db.get(DeliveryBatch, batch['id']).status == 'POSTPONED'
+    assert db.get(DeliveryBatch, batch['id']).status == 'PLANNED'
 
     republished = publish_batch(api, client, batch['id'])
     assert republished['status'] == 'PUBLISHED'

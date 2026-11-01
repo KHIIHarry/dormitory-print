@@ -675,6 +675,13 @@ export type AdminOrderView = {
   slotId?: string | null;
   requestedSlotId?: string | null;
   confirmedSlotId?: string | null;
+  arrangement?: {
+    status?: string;
+    pendingProposal?: {
+      changeId: string;
+      proposed?: { slotId?: string; date?: string; name?: string };
+    } | null;
+  } | null;
 };
 
 /**

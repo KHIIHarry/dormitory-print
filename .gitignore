@@ -35,3 +35,6 @@ deploy/.env
 /docs/qa/
 /output/
 /.superpowers/
+
+# Playwright browsers downloaded into the workspace (test:e2e:install).
+/.playwright-browsers/

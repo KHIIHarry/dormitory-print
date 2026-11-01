@@ -27,6 +27,7 @@ import pytest
 pymupdf = pytest.importorskip('pymupdf')
 PIL = pytest.importorskip('PIL')
 
+from auth_helpers import configure_slot, ensure_test_campus  # noqa: E402
 from app import jobs  # noqa: E402
 from app.core import token_hash, utcnow  # noqa: E402
 from app.models import (  # noqa: E402
@@ -300,12 +301,13 @@ def submit_body(pipeline):
 def prepare_order(client, api, db, client_factory, *, key_prefix):
     seed_config(db)
     now = utcnow()
-    location = Location(name='验收宿舍楼', x=0.4, y=0.6)
-    slot = DeliverySlot(
+    campus = ensure_test_campus(db)
+    location = Location(name='验收宿舍楼', x=0.4, y=0.6, campus_id=campus.id)
+    slot = configure_slot(DeliverySlot(
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='验收时段', starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1), capacity=2,
-    )
+    ))
     db.add_all([location, slot])
     db.commit()
 
@@ -390,7 +392,20 @@ def create_batch(api, admin_client, courier, name):
     return response.json()['data']
 
 
-def add_order_to_batch(api, admin_client, batch, order_id, key):
+def add_order_to_batch(api, admin_client, db, batch, order_id, key):
+    # Settlement now creates the automatic batch/assignment. A manual batch is
+    # an explicit re-delivery/split path, so release the auto assignment first.
+    from sqlalchemy import select
+    from app.models import DeliveryAssignment, utcnow
+    for assignment in db.scalars(select(DeliveryAssignment).where(
+            DeliveryAssignment.order_id == order_id,
+            DeliveryAssignment.active.is_(True))):
+        assignment.active = False
+        assignment.status = 'CANCELLED'
+        assignment.data = {**(assignment.data or {}),
+                           'releasedAt': utcnow().isoformat(),
+                           'releaseReason': 'test manual batch re-delivery'}
+    db.commit()
     preview = api(admin_client, '/admin/batch-operations/preview', {
         'action': 'ADD',
         'orderIds': [order_id],
@@ -753,7 +768,7 @@ def test_v1_paid_fulfilment_delivery_and_merchant_rework_redelivery(
     courier_client = staff_client(client_factory, db, courier)
 
     batch = create_batch(api, admin_client, courier, 'V1 首轮配送')
-    add_order_to_batch(api, admin_client, batch, order['id'], key='v1-flow-first')
+    add_order_to_batch(api, admin_client, db, batch, order['id'], key='v1-flow-first')
     publish_and_start(api, admin_client, db, batch['id'], key='v1-flow-first')
 
     db.expire_all()
@@ -857,7 +872,7 @@ def test_v1_paid_fulfilment_delivery_and_merchant_rework_redelivery(
 
     # A new batch and a new assignment are required; the first proof stays.
     second_batch = create_batch(api, admin_client, courier, 'V1 重做配送')
-    add_order_to_batch(api, admin_client, second_batch, order['id'], key='v1-flow-second')
+    add_order_to_batch(api, admin_client, db, second_batch, order['id'], key='v1-flow-second')
     publish_and_start(api, admin_client, db, second_batch['id'], key='v1-flow-second')
     second_assignment = active_assignment(db, order['id'])
     assert second_assignment is not None

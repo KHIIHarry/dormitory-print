@@ -23,11 +23,16 @@ test("document order reaches contact page without clearing the order", async ({
   await page
     .getByRole("button", { name: "我已确认最终打印格式", exact: true })
     .click();
-  await page.getByLabel("微信昵称 *", { exact: true }).fill("端到端验收同学");
-  await page.getByLabel("手机号码 *", { exact: true }).fill("13800138000");
-  await page
-    .getByLabel("订单备注（选填）", { exact: true })
-    .fill("第一份资料请单独整理\n方便分开领取");
+  const nickname = page.getByLabel("微信昵称 *", { exact: true });
+  await nickname.click();
+  await nickname.pressSequentially("端到端验收同学", { delay: 10 });
+  const phone = page.getByLabel("手机号码 *", { exact: true });
+  await phone.click();
+  await phone.pressSequentially("13800138000", { delay: 10 });
+  const note = page.getByLabel("订单备注（选填）", { exact: true });
+  await note.click();
+  await note.pressSequentially("第一份资料请单独整理\n方便分开领取", { delay: 10 });
+  await page.getByRole("button", { name: "东校区", exact: true }).click();
   await page
     .getByRole("button", { name: "知行苑 1 栋", exact: true })
     .last()

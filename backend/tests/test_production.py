@@ -293,6 +293,7 @@ import types  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 from app.core import Actor, DomainError  # noqa: E402
+from auth_helpers import configure_slot, ensure_test_campus  # noqa: E402
 from app.models import (  # noqa: E402
     AfterSale,
     Artifact,
@@ -1450,14 +1451,14 @@ def _seed_checkout(db):
     db.add(quote)
     db.flush()
     preparation.quote_id = quote.id
-    location = Location(name='一号楼', x=0.5, y=0.5)
-    slot = DeliverySlot(
+    location = Location(name='一号楼', x=0.5, y=0.5, campus_id=ensure_test_campus(db).id)
+    slot = configure_slot(DeliverySlot(
         date='2030-01-01',
         name='晚间',
         starts_at=utcnow() + timedelta(days=1),
         ends_at=utcnow() + timedelta(days=1, hours=1),
         capacity=1,
-    )
+    ))
     db.add_all([location, slot])
     db.flush()
     body = {
@@ -2018,14 +2019,14 @@ def _commerce_real(db, tmp_path, *, pages=3, copies=1, sides='SINGLE', binding='
     workflow.data = {**workflow.data, 'unpaidTimeoutMinutes': 60}
     prices = get_config(db, 'prices')
     prices.data = {**prices.data, 'bwSingle': 10, 'bwDuplex': 12}
-    location = Location(name='二号楼', x=0.4, y=0.6)
-    slot = DeliverySlot(
+    location = Location(name='二号楼', x=0.4, y=0.6, campus_id=ensure_test_campus(db).id)
+    slot = configure_slot(DeliverySlot(
         date='2030-02-02',
         name='午后',
         starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1),
         capacity=2,
-    )
+    ))
     db.add_all([location, slot])
     db.flush()
     source_asset = Asset(

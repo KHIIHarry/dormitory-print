@@ -3,6 +3,7 @@ import pytest
 
 from app.models import (Artifact,Asset,ConfigSection,DeliverySlot,Location,Preparation,Principal,Quote,utcnow)
 from app.core import Actor,DomainError
+from auth_helpers import configure_slot
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def ready_preparation(db):
     db.add(quote);db.flush()
     prep.quote_id=quote.id
     location=Location(name='一号楼',x=.5,y=.5)
-    slot=DeliverySlot(date='2030-01-01',name='晚间',starts_at=utcnow()+timedelta(days=1),ends_at=utcnow()+timedelta(days=1,hours=1),capacity=1)
+    slot=configure_slot(DeliverySlot(date='2030-01-01',name='晚间',starts_at=utcnow()+timedelta(days=1),ends_at=utcnow()+timedelta(days=1,hours=1),capacity=1))
     db.add_all([location,slot]);db.flush()
     body={'preparationId':prep.id,'quoteId':quote.id,'previewAcks':[{'artifactId':artifact.id,'sha256':artifact.sha256}],
           'contact':{'wechatNickname':'测试用户','phone':'13800000000'},'locationId':location.id,'slotId':slot.id,'customerNote':'备注'}

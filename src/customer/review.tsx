@@ -758,8 +758,8 @@ function ReviewContent() {
       toast("当前已暂停接单，请稍后重试");
       return;
     }
-    if (!data.slots.some((s) => s.id === slot && s.enabled)) {
-      toast("原预约时段已关闭，请重新选择开放时段");
+    if (!data.slots.some((s) => s.id === slot && s.enabled && s.selectable !== false)) {
+      toast("原预约时段已截单、封批或关闭，请重新选择可预约时段");
       return;
     }
     if (original && original.status !== "PENDING_CONFIRMATION") {
@@ -1352,7 +1352,7 @@ function ReviewContent() {
           <Panel title="选择预约配送时段">
             <div data-checkout-field="slot" tabIndex={-1} className="slot-choices">
               {data.slots
-                .filter((s) => s.enabled)
+                .filter((s) => s.enabled && s.selectable !== false)
                 .map((s) => (
                   <button
                     className={slot === s.id ? "selected" : ""}
@@ -1366,13 +1366,27 @@ function ReviewContent() {
                     <small>
                       {s.start} – {s.end}
                     </small>
+                    {s.cutoffAt && (
+                      <small>
+                        截单{" "}
+                        {new Intl.DateTimeFormat("zh-CN", {
+                          timeZone: "Asia/Shanghai",
+                          month: "2-digit",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hourCycle: "h23",
+                        }).format(new Date(s.cutoffAt))}
+                      </small>
+                    )}
                     {slot === s.id && <CheckCircle2 size={18} />}
                   </button>
                 ))}
             </div>
-            {!data.slots.some((s) => s.enabled) && (
+            {!data.slots.some((s) => s.enabled && s.selectable !== false) && (
               <Notice>
-                暂无可用配送时段，可保留当前工作进度，待管理员开放时段后再下单。
+                当前暂无可预约配送时段，可保留当前工作进度与已上传文件，
+                待管理员开放或调整时段后再下单。
               </Notice>
             )}
             {fields.slot && <p className="field-error">{fields.slot}</p>}

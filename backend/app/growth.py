@@ -30,8 +30,9 @@ from .settings import get_settings
 from .benefits import current_staff_candidate
 from .models import (
     Account, BusinessException, Campaign, ConfigSection, Coupon,
-    DeliveryAssignment, DeliveryBatch, DeliverySlot, Location, Order,
-    Preparation, PromotionEvent, Quote, Referral, Refund, Staff, utcnow,
+    DeliveryAssignment, DeliveryBatch, DeliveryChange, DeliveryNotice,
+    DeliverySlot, Location, Order, Preparation, PromotionEvent, Quote,
+    Referral, Refund, Staff, utcnow,
 )
 
 router = APIRouter()
@@ -2026,19 +2027,108 @@ def notify_order_delivered(db, order, delivered_at=None):
                   f'order-email:ORDER_DELIVERED:{order.id}:{order.version}')
 
 
+_CHANGE_TYPE_LABELS = {
+    'ETA_UPDATED': '配送时间调整',
+    'RESCHEDULE_PROPOSED': '配送时段调整（待确认）',
+    'RESCHEDULE_CONFIRMED': '配送时段调整（已确认）',
+    'ADDRESS_REVIEW': '配送地址调整',
+}
+
+
+def _arrangement_windows(change) -> tuple[str, str]:
+    original = (change.original or {}) if change is not None else {}
+    proposed = (change.proposed or {}) if change is not None else {}
+    old = ' '.join(item for item in (original.get('date'), original.get('name')) if item)
+    if original.get('startsAt'):
+        old = _window_label(original['startsAt'], original.get('endsAt')) or old
+    new = ' '.join(item for item in (proposed.get('date'), proposed.get('name')) if item)
+    if proposed.get('startsAt'):
+        new = _window_label(proposed['startsAt'], proposed.get('endsAt')) or new
+    return old or '待补充', new or '待重新安排'
+
+
+def _window_label(starts_at, ends_at) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    zone = ZoneInfo('Asia/Shanghai')
+    try:
+        start = datetime.fromisoformat(starts_at).astimezone(zone)
+        end = datetime.fromisoformat(ends_at).astimezone(zone) if ends_at else None
+    except (TypeError, ValueError):
+        return ''
+    if end is None:
+        return start.strftime('%Y-%m-%d %H:%M')
+    if start.date() == end.date():
+        return f"{start.strftime('%Y-%m-%d')} {start.strftime('%H:%M')} – {end.strftime('%H:%M')}"
+    return (f"{start.strftime('%Y-%m-%d %H:%M')} – "
+            f"{end.strftime('%Y-%m-%d %H:%M')}")
+
+
 def notify_delivery_updated(db, order):
     account = _active_customer(db, order)
     if account is None:
         return None
+    slot_label = _order_slot_label(db, order)
     variables = {
         'brandName': _mail_brand(db),
         'orderCode': str(getattr(order, 'pickup_code', '') or ''),
         'deliveryLocation': _order_location_label(db, order),
-        'deliverySlot': _order_slot_label(db, order),
+        'deliverySlot': slot_label,
         'orderLink': _order_link(order),
+        'changeType': '配送地址调整',
+        'originalWindow': slot_label or '待补充',
+        'newWindow': slot_label or '待重新安排',
+        'changeReason': '配送地址已更新，请核对最新安排。',
+        'confirmationRequired': '无需确认，请以最新安排为准。',
     }
     return _queue(db, 'DELIVERY_UPDATED', account.email, variables,
                   f'order-email:DELIVERY_UPDATED:{order.id}:{order.version}')
+
+
+def notify_delivery_change(db, order, change):
+    """Persist one durable notice intent and enqueue at most one mail per change."""
+    account = _active_customer(db, order)
+    recipient = (account.email if account is not None else '') or ''
+    dedupe = f'delivery-notice:{change.id}:{order.id}:DELIVERY_UPDATED'
+    notice = db.scalar(select(DeliveryNotice).where(DeliveryNotice.dedupe_key == dedupe))
+    if notice is None:
+        notice = DeliveryNotice(order_id=order.id, change_id=change.id,
+                                kind='DELIVERY_UPDATED', recipient=recipient[:320],
+                                status='PENDING', dedupe_key=dedupe, data={})
+        db.add(notice)
+        db.flush()
+    if not recipient:
+        notice.status = 'NO_EMAIL'
+        notice.last_error = '订单账号没有已验证邮箱'
+        db.flush()
+        return notice
+    original_window, new_window = _arrangement_windows(change)
+    if change.kind == 'RESCHEDULE_PROPOSED':
+        confirmation = '需要确认：请打开订单页，明确接受或拒绝新的配送安排。'
+    else:
+        confirmation = '无需再次确认，请以最新安排为准。'
+    variables = {
+        'brandName': _mail_brand(db),
+        'orderCode': str(getattr(order, 'pickup_code', '') or ''),
+        'deliveryLocation': _order_location_label(db, order),
+        'deliverySlot': new_window,
+        'orderLink': _order_link(order),
+        'changeType': _CHANGE_TYPE_LABELS.get(change.kind, '配送安排调整'),
+        'originalWindow': original_window,
+        'newWindow': new_window,
+        'changeReason': change.reason or '配送安排已更新，请核对。',
+        'confirmationRequired': confirmation,
+    }
+    job = _queue(db, 'DELIVERY_UPDATED', recipient, variables,
+                 f'order-email:DELIVERY_UPDATED:{order.id}:{change.id}')
+    if job is None:
+        notice.status = 'PENDING'
+        notice.last_error = '邮件暂未进入发送队列'
+    else:
+        notice.status = 'PENDING'
+        notice.email_job_id = job.id
+    db.flush()
+    return notice
 
 
 def notify_courier_dispatch(db, batch):

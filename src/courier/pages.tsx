@@ -108,6 +108,12 @@ export function CourierHome() {
         >
           <div className="courier-batch-heading">
             <Badge status={b.status} />
+            {(b as Record<string, any>).isRegular && (
+              <span className="badge">自动归集</span>
+            )}
+            {(b as Record<string, any>).sealedAt && (
+              <span className="badge">名单已冻结</span>
+            )}
             <ChevronRight size={20} />
           </div>
           <h2>{b.name}</h2>
@@ -203,7 +209,9 @@ export function CourierBatch() {
             ? "批次已发布，确认后整批开始配送；开始后才能提交交付。"
             : batch.status === "POSTPONED"
               ? "批次已延期，请等待管理员重新发布配送计划。"
-              : "此批次仍在计划中，待管理员发布后才能开始配送。"}
+              : (batch as Record<string, any>).sealedAt
+                ? "名单已封批但尚未发布，请等待管理员发布配送计划。"
+                : "名单仍在随确认收款更新，封批并发布后才能开始配送。"}
       </Notice>
       {role === "ADMIN" && !adminCapable ? (
         <Notice>

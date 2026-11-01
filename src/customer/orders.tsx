@@ -36,6 +36,7 @@ import {
   Truck,
 } from "lucide-react";
 import { DEMO, useStore } from "../lib/store";
+import { growthRequest } from "../growth/client";
 import { money, now } from "../lib/api";
 import {
   Badge,
@@ -379,6 +380,7 @@ export function OrderDetail() {
   const [pdf, setPdf] = useState<PrintFile | null>(null);
   const [edit, setEdit] = useState(false);
   const [cancel, setCancel] = useState(false);
+  const [arrangementBusy, setArrangementBusy] = useState(false);
   const [building, setBuilding] = useState("");
   const [reason, setReason] = useState("");
   const nav = useNavigate();
@@ -561,6 +563,61 @@ export function OrderDetail() {
               </div>
             ))}
           </Panel>
+          <ArrangementPanel
+            order={order}
+            busy={arrangementBusy}
+            onAccept={async (slotId) => {
+              if (DEMO) {
+                toast("演示模式：已接受新的配送安排");
+                return;
+              }
+              setArrangementBusy(true);
+              try {
+                await growthRequest(
+                  `/orders/${encodeURIComponent(order.id)}/arrangement-agreement`,
+                  {
+                    method: "POST",
+                    body: {
+                      expectedVersion: order.version,
+                      slotId,
+                      confirm: true,
+                    },
+                  },
+                );
+                toast("已确认新的配送安排");
+                await refresh();
+              } catch (error) {
+                toast((error as Error).message);
+              } finally {
+                setArrangementBusy(false);
+              }
+            }}
+            onReject={async () => {
+              if (DEMO) {
+                toast("演示模式：已拒绝新的配送安排");
+                return;
+              }
+              setArrangementBusy(true);
+              try {
+                await growthRequest(
+                  `/orders/${encodeURIComponent(order.id)}/arrangement-rejection`,
+                  {
+                    method: "POST",
+                    body: {
+                      expectedVersion: order.version,
+                      reason: "客户暂不接受新的配送时间",
+                    },
+                  },
+                );
+                toast("已保留原配送安排，管理员会继续协调");
+                await refresh();
+              } catch (error) {
+                toast((error as Error).message);
+              } finally {
+                setArrangementBusy(false);
+              }
+            }}
+          />
           <Panel title="配送与联系信息">
             <dl className="detail-dl">
               <div>
@@ -596,13 +653,13 @@ export function OrderDetail() {
                 </dd>
               </div>
               <div>
-                <dt>最新配送安排</dt>
+                <dt>当前配送批次</dt>
                 <dd>
                   {order.addressReview
                     ? "楼栋已修改，待管理员复核"
                     : batch
                       ? `${batch.date} ${batch.name} ${batch.time}`
-                      : "待管理员安排"}
+                      : "待分配批次"}
                 </dd>
               </div>
               <div>
@@ -830,5 +887,96 @@ export function OrderDetail() {
         </Modal>
       )}
     </main>
+  );
+}
+
+
+const ARRANGEMENT_LABELS: Record<string, string> = {
+  REQUESTED: "已提交申请，等待确认收款",
+  CONFIRMED: "配送时段已确认",
+  CONFIRMED_WAITING_ASSIGNMENT: "配送时段已确认，待安排配送员",
+  ASSIGNED_NOT_DISPATCHED: "已安排，等待出发",
+  READY_TO_DEPART: "已准备，等待出发",
+  DELIVERING: "配送中",
+  WAITING_CUSTOMER: "等待你确认新的配送安排",
+  CANCELLED: "订单已取消",
+  DELIVERED: "已送达",
+};
+
+function arrangementWindow(snapshot: any) {
+  if (!snapshot) return "";
+  const date = snapshot.date || "";
+  const name = snapshot.name || "";
+  const start = snapshot.startsAt ? formatDisplayTime(snapshot.startsAt) : snapshot.start || "";
+  const end = snapshot.endsAt ? formatDisplayTime(snapshot.endsAt) : snapshot.end || "";
+  return [date, name, start && end ? `${start} – ${end}` : start]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function ArrangementPanel({
+  order,
+  busy,
+  onAccept,
+  onReject,
+}: {
+  order: Order;
+  busy: boolean;
+  onAccept: (slotId: string) => Promise<void>;
+  onReject: () => Promise<void>;
+}) {
+  const arrangement = (order as any).arrangement;
+  if (!arrangement) return null;
+  const pending = arrangement.pendingProposal;
+  const pendingSlot = pending?.proposed || {};
+  const effective = arrangement.effective || arrangement.confirmed;
+  return (
+    <Panel title="最新配送安排">
+      <dl className="detail-dl">
+        <div>
+          <dt>当前状态</dt>
+          <dd>{ARRANGEMENT_LABELS[arrangement.status] || arrangement.status}</dd>
+        </div>
+        <div>
+          <dt>当前安排</dt>
+          <dd>{arrangementWindow(effective) || "待管理员安排"}</dd>
+        </div>
+        <div>
+          <dt>原申请时段</dt>
+          <dd>{arrangementWindow(arrangement.originalRequest) || "暂无"}</dd>
+        </div>
+        {arrangement.reason && (
+          <div>
+            <dt>调整说明</dt>
+            <dd>{arrangement.reason}</dd>
+          </div>
+        )}
+        {arrangement.updatedAt && (
+          <div>
+            <dt>更新时间</dt>
+            <dd>{formatDisplayTime(arrangement.updatedAt)}</dd>
+          </div>
+        )}
+      </dl>
+      {pending && (
+        <>
+          <Notice>
+            管理员建议调整到 {arrangementWindow(pendingSlot)}。接受后才会更新确认时段；
+            拒绝不会自动取消原安排，管理员会继续与你协调。
+          </Notice>
+          <div className="button-row">
+            <Button
+              busy={busy}
+              onClick={() => void onAccept(pendingSlot.slotId)}
+            >
+              接受新安排
+            </Button>
+            <Button variant="secondary" busy={busy} onClick={() => void onReject()}>
+              保持原安排
+            </Button>
+          </div>
+        </>
+      )}
+    </Panel>
   );
 }

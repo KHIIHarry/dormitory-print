@@ -150,6 +150,17 @@ export type Slot = {
   end: string;
   enabled: boolean;
   capacity: number;
+  openAt?: string | null;
+  cutoffAt?: string | null;
+  sealedAt?: string | null;
+  acceptanceStatus?: string;
+  selectable?: boolean;
+  occupied?: number;
+  remaining?: number;
+  batchCount?: number;
+  pendingApplicationCount?: number;
+  blockers?: { code: string; message: string }[];
+  version?: number;
 };
 export type Batch = {
   id: string;

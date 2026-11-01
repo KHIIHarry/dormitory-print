@@ -5,6 +5,7 @@ import threading
 import pytest
 
 from app.core import Actor, DomainError
+from auth_helpers import configure_slot
 from app.models import (
     Artifact,
     Asset,
@@ -86,10 +87,10 @@ def submission_fixture(db):
     db.flush()
     prep.quote_id = quote.id
     location = Location(name='并发测试楼', x=0.5, y=0.5)
-    slot = DeliverySlot(
+    slot = configure_slot(DeliverySlot(
         date=(utcnow() + timedelta(days=2)).date().isoformat(), name='并发时段',
         starts_at=utcnow() + timedelta(days=2),
-        ends_at=utcnow() + timedelta(days=2, hours=1), capacity=1)
+        ends_at=utcnow() + timedelta(days=2, hours=1), capacity=1))
     db.add_all([location, slot])
     db.flush()
     body = {
@@ -224,10 +225,10 @@ def test_slot_archive_waits_for_concurrent_revision_of_new_slot(
     assert revision_source is not None
     original_version = revision_source.version
 
-    new_slot = DeliverySlot(
+    new_slot = configure_slot(DeliverySlot(
         date=(utcnow() + timedelta(days=3)).date().isoformat(), name='修订新时段',
         starts_at=utcnow() + timedelta(days=3),
-        ends_at=utcnow() + timedelta(days=3, hours=1), capacity=1)
+        ends_at=utcnow() + timedelta(days=3, hours=1), capacity=1))
     db.add(new_slot)
     db.commit()
     db.refresh(new_slot)
