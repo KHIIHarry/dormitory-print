@@ -33,6 +33,12 @@ import {
   Steps,
 } from "../components/ui";
 import { isSpreadsheetUpload } from "../v1/upload-client";
+import {
+  isSinglePageSegment,
+  pageSelectionLabel,
+  updatePrintSegment,
+} from "../lib/print-settings";
+import { SkipPagesPicker } from "./skip-pages-picker";
 export function BindingCard({
   type,
   label,
@@ -98,6 +104,7 @@ function SegmentEditor({
   remove?: () => void;
   advanced: boolean;
 }) {
+  const singlePage = isSinglePageSegment(segment, total);
   return (
     <div className="segment-editor">
       {advanced && (
@@ -136,7 +143,10 @@ function SegmentEditor({
             </button>
           </div>
         </Field>
-        <Field label="打印面数">
+        <Field
+          label="打印面数"
+          hint={singlePage ? "此分段只有 1 页，仅支持单面打印。" : undefined}
+        >
           <div className="segmented-control">
             <button
               className={segment.sides === "SINGLE" ? "selected" : ""}
@@ -146,6 +156,7 @@ function SegmentEditor({
             </button>
             <button
               className={segment.sides === "DUPLEX" ? "selected" : ""}
+              disabled={singlePage}
               onClick={() => update({ sides: "DUPLEX", flip: "LONG_EDGE" })}
             >
               双面
@@ -198,6 +209,7 @@ export function SettingsPage() {
   const { draft, setDraft, data } = useStore();
   const [active, setActive] = useState(draft[0]?.id);
   const [advanced, setAdvanced] = useState(false);
+  const [skipPickerFileId, setSkipPickerFileId] = useState<string | null>(null);
   const nav = useNavigate();
   if (!draft.length || draft.some((f) => f.imagePrintMedium === "PENDING"))
     return <Navigate to="/u/new" replace />;
@@ -206,16 +218,20 @@ export function SettingsPage() {
     setDraft((s) =>
       s.map((f) =>
         f.id === file.id
-          ? { ...f, ...p, artifactId: undefined, sha256: undefined }
+          ? {
+              ...f,
+              ...p,
+              artifactId: undefined,
+              sha256: undefined,
+              finalArtifacts: undefined,
+            }
           : f,
       ),
     );
   const errors = [...fileErrors(file), ...pricingErrors(file, data.config)];
   const total = draft.reduce((sum, f) => sum + filePrice(f, data.config), 0);
   const updateSegment = (id: string, p: Partial<Segment>) =>
-    patch({
-      segments: file.segments.map((s) => (s.id === id ? { ...s, ...p } : s)),
-    });
+    patch(updatePrintSegment(file, id, p));
   return (
     <main className="flow-page">
       <Link to="/u/new" className="back-link">
@@ -233,7 +249,10 @@ export function SettingsPage() {
           {draft.map((f) => (
             <button
               className={`file-tab ${file.id === f.id ? "active" : ""}`}
-              onClick={() => setActive(f.id)}
+              onClick={() => {
+                setActive(f.id);
+                setSkipPickerFileId(null);
+              }}
               key={f.id}
             >
               <FileIcon file={f} />
@@ -294,8 +313,9 @@ export function SettingsPage() {
               <>
                 {isSpreadsheetUpload({ name: file.name }) && (
                   <Notice>
-                    Excel 已按上传时设置的打印区域、方向与缩放转换为服务端 PDF（本文件{" "}
-                    {file.pages} 页）。请在下一步最终 PDF 中逐页核对分页；如需修改打印区域，请返回上传重新选择该文件并使用新的打印区域上传。
+                    Excel 已按上传时设置的打印区域、方向与缩放转换为服务端
+                    PDF（本文件 {file.pages} 页）。请在下一步最终 PDF
+                    中逐页核对分页；如需修改打印区域，请返回上传重新选择该文件并使用新的打印区域上传。
                   </Notice>
                 )}
                 <div className="mode-row">
@@ -365,21 +385,32 @@ export function SettingsPage() {
                     </Button>
                     <Field
                       label="明确跳过的页码"
-                      hint="没有打印的页面必须在此明确列出，不会自动补打。"
+                      hint="每页都需分配到打印分段或明确跳过。已分配的页面不可勾选；修改分段时会取消重叠页面的跳过选择。"
                     >
-                      <input
-                        placeholder="例如 5,8（可留空）"
-                        value={file.excludedPages.join(",")}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          patch({
-                            excludedPages: value
-                              ? value.split(/[,，]/).map(Number)
-                              : [],
-                          });
+                      <Button
+                        variant="secondary"
+                        className="skip-pages-trigger"
+                        onClick={() => setSkipPickerFileId(file.id)}
+                      >
+                        选择跳过打印页
+                      </Button>
+                    </Field>
+                    {file.excludedPages.length > 0 && (
+                      <p className="form-hint" role="status">
+                        已选择跳过：{pageSelectionLabel(file.excludedPages)} 页
+                      </p>
+                    )}
+                    {skipPickerFileId === file.id && (
+                      <SkipPagesPicker
+                        key={file.id}
+                        file={file}
+                        onClose={() => setSkipPickerFileId(null)}
+                        onConfirm={(pages) => {
+                          patch({ excludedPages: pages });
+                          setSkipPickerFileId(null);
                         }}
                       />
-                    </Field>
+                    )}
                   </>
                 )}
                 <div className="allocation-summary">

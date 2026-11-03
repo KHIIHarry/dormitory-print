@@ -611,6 +611,36 @@ def test_preparation_generates_real_artifacts_quote_and_requote(client, db):
     assert len(list(db.scalars(sql_select(Quote).where(Quote.preparation_id == prep_id)))) == 2
 
 
+@pytest.mark.parametrize('page_number,color,copies', [(1, 'BW', 1), (5, 'COLOR', 3)])
+def test_single_page_segment_uses_single_sided_artifact_and_price(client, db, page_number, color, copies):
+    seed_config(db)
+    guest(client)
+    asset_id = upload(client, make_pdf(7), 'seven.pdf').json()['data']['assetId']
+    process_asset(db, asset_id)
+    body = preparation_payload(asset_id, 7, segments=[{
+        'clientSegmentId': 'single-page',
+        'ranges': [{'from': page_number, 'to': page_number}],
+        'colorMode': color, 'sides': 'DUPLEX', 'flip': 'LONG_EDGE', 'copies': copies,
+    }], excluded=[page for page in range(1, 8) if page != page_number])
+    created = json_write(client, '/api/v1/preparations', body)
+    assert created.status_code == 200, created.text
+    prep_id = created.json()['data']['id']
+    process_preparation(db, prep_id)
+    view = json_write(client, f'/api/v1/preparations/{prep_id}', None, method='GET').json()['data']
+    assert view['status'] == 'READY', view
+    artifact = view['artifacts'][0]
+    assert artifact['sides'] == 'SINGLE'
+    assert artifact['flip'] == 'NONE'
+    assert (artifact['pages'], artifact['sheets'], artifact['blankBacks']) == (copies, copies, 0)
+    price = PRICES['bwSingle' if color == 'BW' else 'colorSingle']
+    assert view['quote']['subtotalCents'] == copies * price
+    content = client.get(artifact['url'])
+    assert content.status_code == 200
+    with pymupdf.open(stream=content.content, filetype='pdf') as document:
+        assert document.page_count == copies
+        assert all(f'Integration page {page_number}' in page.get_text() for page in document)
+
+
 def test_photo_preparation_uses_calibrated_millimetres_and_exif(client, db):
     from PIL import Image
 

@@ -1866,13 +1866,14 @@ def _expand_ranges(segments, pages: int) -> tuple[list[list[int]], list[dict]]:
         if pages_in_segment != sorted(pages_in_segment):
             raise DomainError('PAGE_ORDER_INVALID', '分段页码必须按升序填写', 422)
         expanded.append(pages_in_segment)
+        single_page = len(pages_in_segment) == 1
         payload_segments.append(
             {
                 'clientSegmentId': segment.client_segment_id,
                 'ranges': ranges,
                 'colorMode': segment.color_mode,
-                'sides': segment.sides,
-                'flip': segment.flip,
+                'sides': 'SINGLE' if single_page else segment.sides,
+                'flip': 'NONE' if single_page else segment.flip,
                 'copies': segment.copies,
             }
         )

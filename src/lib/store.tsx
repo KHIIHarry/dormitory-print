@@ -23,6 +23,7 @@ import { getIdentityGeneration } from "../growth/client";
 import { useLocation } from "react-router-dom";
 import { DEMO, ADMIN, mutation, request, now } from "./api";
 import { trashBlockers } from "./trash-blockers";
+import { normalizePrintFile } from "./print-settings";
 import type { DataState, Config, PrintFile, Role, Order, Campus } from "./types";
 const emptyConfig: Config = {
   serviceEnabled: false,
@@ -111,7 +112,16 @@ export function Provider({ children }: { children: ReactNode }) {
   );
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [data, setData] = useState(initial);
-  const [draft, setDraft] = useState<PrintFile[]>([]);
+  const [draft, setDraftState] = useState<PrintFile[]>([]);
+  const setDraft: Store["setDraft"] = useCallback((action) => {
+    setDraftState((current) => {
+      const next = typeof action === "function" ? action(current) : action;
+      const normalized = next.map(normalizePrintFile);
+      return normalized.every((file, index) => file === next[index])
+        ? next
+        : normalized;
+    });
+  }, []);
   const identity = useIdentity();
   const role = identity.staff?.role || null;
   const setRole: React.Dispatch<React.SetStateAction<Role | null>> = (

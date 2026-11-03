@@ -1,0 +1,87 @@
+.skip-pages-picker {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.skip-pages-help,
+.skip-pages-selection {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.skip-pages-tools,
+.skip-pages-actions,
+.skip-pages-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.skip-pages-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: min(42dvh, 400px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.skip-page-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.skip-page-option:has(:checked) {
+  background: var(--cream);
+  border-color: var(--primary);
+}
+.skip-page-option:has(:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.skip-page-option input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+}
+.skip-page-option span {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.skip-page-option strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.skip-page-option small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.skip-page-option.allocated {
+  background: #f4f2ef;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.skip-pages-pagination {
+  justify-content: space-between;
+  font-size: 13px;
+}
+.skip-pages-selection {
+  max-height: 80px;
+  overflow-y: auto;
+}
+.skip-pages-actions {
+  justify-content: flex-end;
+}
+.skip-pages-trigger {
+  align-self: flex-start;
+}
