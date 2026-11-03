@@ -2531,8 +2531,12 @@ input[type="date"],
   margin: 14px 0 8px;
 }
 .slot-choices > button > small {
+  display: block;
   font-size: 12px;
   color: #af9886;
+}
+.slot-choices > button > small + small {
+  margin-top: 4px;
 }
 .slot-choices > button.selected {
   border-color: var(--primary);
@@ -5353,7 +5357,8 @@ td > .numeric {
     grid-template-areas:
       "date check"
       "name check"
-      "time check";
+      "time check"
+      "cutoff check";
     align-items: center;
     gap: 4px 12px;
     min-height: 0;
@@ -5369,6 +5374,10 @@ td > .numeric {
   }
   .slot-choices > button > small {
     grid-area: time;
+  }
+  .slot-choices > button > small + small {
+    grid-area: cutoff;
+    margin-top: 0;
   }
   .slot-choices > button > svg {
     grid-area: check;
