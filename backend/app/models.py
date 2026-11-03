@@ -500,13 +500,14 @@ class AfterSale(Entity, Base):
     suggested_cents: Mapped[int] = mapped_column(Integer, default=0)
     approved_cents: Mapped[int | None] = mapped_column(Integer)
     adjustment_basis: Mapped[str] = mapped_column(Text, default='')
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     data: Mapped[dict] = mapped_column(J, default=dict)
 
 
 class Refund(Entity, Base):
     __tablename__ = 'refund_records'
     order_id: Mapped[str] = mapped_column(ForeignKey('orders.id'), index=True)
-    after_sale_id: Mapped[str] = mapped_column(ForeignKey('after_sales.id'), unique=True)
+    after_sale_id: Mapped[str | None] = mapped_column(ForeignKey('after_sales.id'), unique=True)
     amount_cents: Mapped[int] = mapped_column(Integer)
     staff_id: Mapped[str] = mapped_column(ForeignKey('staff.id'))
     reason: Mapped[str] = mapped_column(Text)

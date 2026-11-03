@@ -7,6 +7,16 @@ import {
 } from "../src/lib/trash-blockers";
 
 describe("trash blockers", () => {
+  it("labels unfinished after-sale cases returned by the trash guard", () => {
+    const error = new ApiError("TRASH_BLOCKED", "不能删除", 409, {
+      blockers: ["AFTER_SALE_ACTIVE:as-1", "REFUND_REVIEW_PENDING"],
+    });
+    expect(trashBlockers(error)).toEqual([
+      { code: "AFTER_SALE_ACTIVE", label: "售后仍在处理中，请先结束售后处理" },
+      { code: "REFUND_REVIEW_PENDING", label: "退款仍待审核" },
+    ]);
+  });
+
   it("turns TRASH_BLOCKED codes into readable reasons without duplicates", () => {
     const error = new ApiError(
       "TRASH_BLOCKED",

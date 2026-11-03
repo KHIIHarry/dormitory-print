@@ -65,6 +65,7 @@ DETACH_COLUMNS = {
     "promotion_events": {"order_id"},
     "coupon_grants": {"reserved_order_id", "used_order_id"},
     "referrals": {"qualified_order_id"},
+    "refund_records": {"after_sale_id"},
 }
 
 # Child-before-parent delete order. Grouping by table (rather than emitting
@@ -481,9 +482,20 @@ def _grouped_detaches(plans: list[dict]) -> dict[str, dict[str, list[str]]]:
     return grouped
 
 
+def _replay_schema_updates(detaches: dict) -> list[str]:
+    # A pre-d2e4f6a8b010 snapshot still requires every refund to reference a
+    # case. Apply this one known compatibility change before a newer journal
+    # detaches a purged case, keeping the refund and its order totals intact.
+    if detaches.get('refund_records', {}).get('after_sale_id'):
+        return ['ALTER TABLE refund_records ALTER COLUMN after_sale_id DROP NOT NULL;']
+    return []
+
+
 def print_replay(plans: list[dict], authorities: list[dict]) -> None:
     detaches = _grouped_detaches(plans)
     grouped = _grouped_rows(plans)
+    for statement in _replay_schema_updates(detaches):
+        print(statement)
     for table in DELETE_ORDER:
         for column in sorted(detaches.get(table, {})):
             for identifier in detaches[table][column]:
@@ -514,6 +526,7 @@ def execute_replay(
     detaches = _grouped_detaches(plans)
     grouped = _grouped_rows(plans)
     statements: list[str] = ["BEGIN;"]
+    statements.extend(_replay_schema_updates(detaches))
     statements.append(
         "CREATE TABLE IF NOT EXISTS _dormprint_restore_authority ("
         "kind text NOT NULL, id text NOT NULL, facts jsonb NOT NULL, "

@@ -15,6 +15,8 @@ const BLOCKER_LABELS: Record<string, string> = {
   ACTIVE_ORDER: "订单状态尚未终结",
   REFUND_REVIEW_PENDING: "退款仍待审核",
   ACTIVE_AFTER_SALE: "售后仍在处理中",
+  AFTER_SALE_ACTIVE: "售后仍在处理中，请先结束售后处理",
+  REFUND_REFERENCE: "仍有关联退款记录，请先核对退款账目",
   OPEN_BUSINESS_EXCEPTION: "存在未关闭的业务异常",
   WAGE_UNSETTLED: "配送工资未发放（补录策略后还需记录发放）",
   SUPPLEMENTARY_ACTIVE: "补收款尚未结清",

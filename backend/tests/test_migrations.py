@@ -32,6 +32,9 @@ def test_upgrade_existing_staff_and_reverse_new_feature_schema():
             assert tuple(row)==(None,False,None)  # No guessed account binding or automatic superadmin promotion.
         assert 'wage_entries' in inspect(db).get_table_names()
         assert 'supplementary_charges' in inspect(db).get_table_names()
+        assert 'deleted_at' in {column['name'] for column in inspect(db).get_columns('after_sales')}
+        assert next(column for column in inspect(db).get_columns('refund_records')
+                    if column['name'] == 'after_sale_id')['nullable'] is True
         migrate(['check'])
         migrate(['downgrade','43091261e090'])
         assert 'wage_entries' not in inspect(db).get_table_names()

@@ -129,6 +129,7 @@ def _pending_attempts(db,order):
 
 def _unlock(db,order):
     order.refund_locked=bool(db.scalar(select(AfterSale.id).where(AfterSale.order_id==order.id,
+        AfterSale.deleted_at.is_(None),
         AfterSale.status.in_(['REQUESTED','REVIEW_PENDING','REFUND_APPROVED']),AfterSale.solution=='REFUND').limit(1)))
     touch(order)
 
@@ -142,7 +143,8 @@ def create_case(db,actor,order,body,admin=False):
         raise DomainError('NOT_FOUND','订单不可访问',404)
     if body.responsibility=='CUSTOMER' and (order.actual_started_at or body.solution!='REFUND'):
         raise DomainError('PRODUCTION_ALREADY_STARTED','实际打印开始后不支持客户自身原因退款；新增内容请新下单',409)
-    if db.scalar(select(AfterSale.id).where(AfterSale.order_id==order.id,AfterSale.status.in_(OPEN_STATUSES))):
+    if db.scalar(select(AfterSale.id).where(AfterSale.order_id==order.id,
+            AfterSale.deleted_at.is_(None),AfterSale.status.in_(OPEN_STATUSES))):
         raise DomainError('AFTER_SALE_ALREADY_OPEN','已有未结束售后，请先处理当前申请',409)
     if order.cash_received_cents>0 and order.refunded_cents>=order.cash_received_cents:
         raise DomainError('ALREADY_FULLY_REFUNDED','该单已全额退款',409)
@@ -176,13 +178,14 @@ def admin_create(order_id:str,body:CaseInput,db=Depends(get_db),actor:Actor=Depe
 @router.get('/orders/{order_id}/after-sales',response_model=Envelope[CaseList])
 def customer_list(order_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=db.get(Order,order_id);authorize_order(db,actor,order)
-    return ok({'items':[case_view(row) for row in db.scalars(select(AfterSale).where(AfterSale.order_id==order.id).order_by(AfterSale.created_at.desc()))],'nextCursor':None})
+    return ok({'items':[case_view(row) for row in db.scalars(select(AfterSale).where(
+        AfterSale.order_id==order.id,AfterSale.deleted_at.is_(None)).order_by(AfterSale.created_at.desc()))],'nextCursor':None})
 
 
 @router.get('/admin/after-sales',response_model=Envelope[CaseList])
 def admin_list(status:str|None=None,limit:int=Query(default=50,ge=1,le=100),db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'payment.manage')
-    query=select(AfterSale)
+    query=select(AfterSale).where(AfterSale.deleted_at.is_(None))
     if status:query=query.where(AfterSale.status==status)
     return ok({'items':[case_view(row,True) for row in db.scalars(query.order_by(AfterSale.created_at.desc()).limit(limit))],'nextCursor':None})
 
@@ -190,7 +193,7 @@ def admin_list(status:str|None=None,limit:int=Query(default=50,ge=1,le=100),db=D
 @router.get('/after-sales/{case_id}',response_model=Envelope[CaseView])
 def get_case(case_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     case=db.get(AfterSale,case_id)
-    if not case:raise DomainError('NOT_FOUND','售后申请不存在',404)
+    _require_live_case(case)
     authorize_order(db,actor,db.get(Order,case.order_id))
     return ok(case_view(case,False))
 
@@ -201,7 +204,7 @@ def admin_get_case(case_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)
     if '*' not in actor.capabilities and not actor.capabilities.intersection({'payment.manage','production.manage'}):
         raise DomainError('FORBIDDEN','账号未获售后查看权限',403)
     case=db.get(AfterSale,case_id)
-    if not case:raise DomainError('NOT_FOUND','售后申请不存在',404)
+    _require_live_case(case)
     return ok(case_view(case,True))
 
 
@@ -209,6 +212,7 @@ def admin_get_case(case_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)
 def change_choice(order_id:str,case_id:str,body:ChoiceInput,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id);authorize_order(db,actor,order,'ORDER_AFTER_SALES')
     case=lock(db,AfterSale,case_id,body.expected_version)
+    _require_live_case(case)
     if case.order_id!=order.id or case.status not in ('REQUESTED','REVIEW_PENDING'):
         raise DomainError('INVALID_TRANSITION','当前售后不能更改处理选择',409)
     if case.responsibility=='CUSTOMER' and body.solution!='REFUND':
@@ -218,6 +222,11 @@ def change_choice(order_id:str,case_id:str,body:ChoiceInput,db=Depends(get_db),a
     return ok(case_view(case))
 
 
+def _require_live_case(case):
+    if case is None or case.deleted_at is not None:
+        raise DomainError('NOT_FOUND','售后申请不存在',404)
+
+
 def _lock_case_order(db,case_id,expected_version=None):
     # Match customer mutations: parent order first, then the case. Reading only
     # the FK before locking avoids holding a case lock while waiting for Order.
@@ -225,6 +234,9 @@ def _lock_case_order(db,case_id,expected_version=None):
     if order_id is None:raise DomainError('NOT_FOUND','售后申请不存在',404)
     order=lock(db,Order,order_id)
     case=lock(db,AfterSale,case_id,expected_version)
+    _require_live_case(case)
+    if order.deleted_at is not None:
+        raise DomainError('NOT_FOUND','订单不可访问',404)
     return case,order
 
 
@@ -248,6 +260,7 @@ def preview_refund(case_id:str,body:PreviewInput,db=Depends(get_db),actor:Actor=
 
 def review_case(db,actor,case,body):
     require_admin(actor,'payment.manage')
+    _require_live_case(case)
     order=lock(db,Order,case.order_id)
     if case.status not in ('REQUESTED','REVIEW_PENDING'):
         raise DomainError('INVALID_TRANSITION','该售后已审核，请核实已有结果',409)
@@ -308,6 +321,7 @@ def review(case_id:str,body:ReviewInput,db=Depends(get_db),actor:Actor=Depends(a
 
 def record_refund(db,actor,case,body):
     require_admin(actor,'payment.manage');order=lock(db,Order,case.order_id)
+    _require_live_case(case)
     if case.status!='REFUND_APPROVED' or body.amount_cents!=case.approved_cents:
         raise DomainError('REFUND_APPROVAL_MISMATCH','实际退款须与本次批准金额一致',409)
     if order.refunded_cents+body.amount_cents>order.cash_received_cents:
@@ -384,6 +398,7 @@ def complete_case(case_id:str,body:CaseAction,db=Depends(get_db),actor:Actor=Dep
 @router.post('/orders/{order_id}/after-sales/{case_id}/withdraw',response_model=Envelope[CaseView])
 def withdraw_case(order_id:str,case_id:str,body:CaseAction,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id);authorize_order(db,actor,order,'ORDER_AFTER_SALES');case=lock(db,AfterSale,case_id,body.expected_version)
+    _require_live_case(case)
     if case.order_id!=order.id or case.status not in ('REQUESTED','REVIEW_PENDING'):
         raise DomainError('INVALID_TRANSITION','该申请当前不能撤回',409)
     case.status='CANCELLED';touch(case);db.flush();_unlock(db,order)

@@ -947,8 +947,10 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
             raise DomainError('SLOT_SEALED', '时段已封批，不能再调整配送或接单时间', 409,
                               {'slotId': slot.id})
         live_orders = db.scalar(select(func.count(Order.id)).where(
-            (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id))) or 0
-        live_batches = sum(1 for batch in db.scalars(select(DeliveryBatch))
+            (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id),
+            Order.deleted_at.is_(None))) or 0
+        live_batches = sum(1 for batch in db.scalars(select(DeliveryBatch).where(
+            DeliveryBatch.deleted_at.is_(None)))
             if _batch_slot_id(batch) == slot.id)
         filling_rules = (not window_changed and acceptance_changed
                          and (slot.open_at is None or slot.cutoff_at is None)

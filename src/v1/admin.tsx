@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Download,
   ExternalLink,
@@ -51,6 +51,7 @@ import {
 } from "./admin-api";
 import "./admin.css";
 import "../admin/growth.css";
+import { AfterSaleDeleteButton, AfterSaleTrashModal } from "./after-sale-trash";
 
 function useAdminOnly() {
   const session = useGrowthResource<StaffSession>("/auth/me");
@@ -151,6 +152,10 @@ const AFTER_SALE_STATUSES = [
 
 export function AdminAfterSalesPage() {
   const access = useAdminOnly();
+  const canDelete =
+    access.allowed &&
+    (access.capabilities.includes("*") || access.capabilities.includes("data.manage"));
+  const [deleteTarget, setDeleteTarget] = useState<AfterSaleCase | null>(null);
   const [params, setParams] = useSearchParams();
   const tab: "cases" | "receipts" =
     params.get("tab") === "receipts" ? "receipts" : "cases";
@@ -287,9 +292,14 @@ export function AdminAfterSalesPage() {
                       {new Date(item.createdAt).toLocaleString("zh-CN")}
                     </td>
                     <td data-label="操作">
-                      <Link className="text-link" to={`${ADMIN}/after-sales/${item.id}`}>
-                        查看与审核
-                      </Link>
+                      <div className="button-row">
+                        <Link className="text-link" to={`${ADMIN}/after-sales/${item.id}`}>
+                          查看与审核
+                        </Link>
+                        {canDelete && (
+                          <AfterSaleDeleteButton item={item} onClick={() => setDeleteTarget(item)} />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -315,6 +325,14 @@ export function AdminAfterSalesPage() {
         </>
       )}
       {tab === "receipts" && <UnmatchedReceipts orderId={orderFilter} />}
+      {canDelete && deleteTarget && (
+        <AfterSaleTrashModal
+          item={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => { setDeleteTarget(null); list.reload(); }}
+          onReload={() => { setDeleteTarget(null); list.reload(); }}
+        />
+      )}
     </div>
   );
 }
@@ -702,7 +720,12 @@ function CreateAfterSale({
 
 export function AdminAfterSaleDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const access = useAdminOnly();
+  const canDelete =
+    access.allowed &&
+    (access.capabilities.includes("*") || access.capabilities.includes("data.manage"));
+  const [deleting, setDeleting] = useState(false);
   const canProduction =
     access.capabilities.includes("*") ||
     access.capabilities.includes("production.manage");
@@ -793,6 +816,7 @@ export function AdminAfterSaleDetail() {
       <PageHeading
         title={`售后案件 · ${item.orderCode || item.orderId}`}
         description={`${sourceLabel(item.source)} · ${responsibilityLabel(item.responsibility)} · ${solutionLabel(item.solution)}`}
+        action={canDelete ? <AfterSaleDeleteButton item={item} onClick={() => setDeleting(true)} /> : undefined}
       />
       <AccessState access={access} />
       <ResourceState
@@ -959,6 +983,14 @@ export function AdminAfterSaleDetail() {
             setReview(false);
             reload();
           }}
+        />
+      )}
+      {canDelete && deleting && (
+        <AfterSaleTrashModal
+          item={item}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => navigate(`${ADMIN}/after-sales`, { replace: true })}
+          onReload={() => { setDeleting(false); reload(); }}
         />
       )}
       {refund && (

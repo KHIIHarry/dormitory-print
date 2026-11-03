@@ -259,6 +259,7 @@ def _active_after_sales(db, order_ids) -> list[AfterSale]:
         return []
     return list(db.scalars(select(AfterSale).where(
         AfterSale.order_id.in_(order_ids),
+        AfterSale.deleted_at.is_(None),
         AfterSale.status.notin_(TERMINAL_AFTER_SALE_STATUSES))))
 
 
@@ -505,14 +506,14 @@ def _delete_blockers(db, target_type: str, target) -> list[str]:
     elif target_type == 'RECEIPT_ADJUSTMENT':
         blockers.append('RECEIPT_REFERENCE')
     elif target_type == 'REFUND':
-        sale = db.get(AfterSale, target.after_sale_id)
+        sale = db.get(AfterSale, target.after_sale_id) if target.after_sale_id else None
         if sale is not None and sale.status not in TERMINAL_AFTER_SALE_STATUSES:
             blockers.append('AFTER_SALE_ACTIVE')
     elif target_type == 'AFTER_SALE':
+        if target.deleted_at is not None:
+            return ['ALREADY_DELETED']
         if target.status not in TERMINAL_AFTER_SALE_STATUSES:
             blockers.append('AFTER_SALE_ACTIVE')
-        if db.scalar(select(Refund.id).where(Refund.after_sale_id == target.id).limit(1)):
-            blockers.append('REFUND_REFERENCE')
     elif target_type == 'COUPON':
         if db.scalar(select(PromotionEvent.id).where(
                 PromotionEvent.coupon_id == target.id).limit(1)):
@@ -553,7 +554,7 @@ def _soft_delete(db, target_type: str, target, now: datetime) -> None:
         target.deleted_at = now
         target.purge_at = now + timedelta(hours=_trash_hours(db))
         touch(target)
-    elif target_type in ('BATCH', 'ASSET', 'ACCOUNT'):
+    elif target_type in ('BATCH', 'ASSET', 'ACCOUNT', 'AFTER_SALE'):
         target.deleted_at = now
         touch(target)
 
@@ -658,6 +659,11 @@ def move_to_trash(db, actor: Actor, target_type: str, target, reason: str,
 def create_trash(payload: TrashCreateInput, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'data.manage')
     target_type = _canonical_target(payload.target_type)
+    if target_type == 'AFTER_SALE':
+        # Same order-before-case mutex as review and refund registration.
+        order_id = db.scalar(select(AfterSale.order_id).where(AfterSale.id == payload.target_id))
+        if order_id is not None:
+            lock(db, Order, order_id)
     target = lock(db, TARGETS[target_type], payload.target_id, payload.expected_version)
     entry = move_to_trash(db, actor, target_type, target, payload.reason)
     return ok(_entry_view(entry))
@@ -686,9 +692,15 @@ def _restore_blockers(db, entry: TrashEntry) -> list[TrashConflict]:
     if target is None:
         blockers.append(TrashConflict(code='TARGET_MISSING', message='对象已不在数据库中存在'))
         return blockers
-    if target_type in ('ORDER', 'BATCH', 'ASSET', 'ACCOUNT'):
+    if target_type in ('ORDER', 'BATCH', 'ASSET', 'ACCOUNT', 'AFTER_SALE'):
         if getattr(target, 'deleted_at', None) is None:
             blockers.append(TrashConflict(code='TARGET_NOT_TRASHED', message='对象状态已变化，请刷新'))
+    if target_type == 'AFTER_SALE':
+        order = db.get(Order, target.order_id)
+        if order is None:
+            blockers.append(TrashConflict(code='PARENT_ORDER_MISSING', message='关联订单已永久清理，不能恢复售后'))
+        elif order.deleted_at is not None:
+            blockers.append(TrashConflict(code='PARENT_ORDER_TRASHED', message='关联订单在回收站中，请先恢复订单，再恢复售后'))
     if target_type == 'ASSET':
         try:
             path = storage_path(target.storage_key)
@@ -726,6 +738,15 @@ def restore_trash(entry_id: str, payload: TrashActionInput, db=Depends(get_db),
     if _aware(entry.purge_at) <= _now():
         raise DomainError('TRASH_EXPIRED', '回收站保留期已结束，不能恢复', 410,
                           {'trashId': entry.id})
+    if _canonical_target(entry.target_type) == 'AFTER_SALE':
+        order_id = db.scalar(select(AfterSale.order_id).where(AfterSale.id == entry.target_id))
+        if order_id is not None:
+            # Serialize with order purge and case mutations before rechecking.
+            # Missing rows become a restore conflict instead of a stale UPDATE.
+            db.scalar(select(Order).where(Order.id == order_id).with_for_update()
+                      .execution_options(populate_existing=True))
+            db.scalar(select(AfterSale).where(AfterSale.id == entry.target_id).with_for_update()
+                      .execution_options(populate_existing=True))
     blockers = _restore_blockers(db, entry)
     if blockers:
         raise DomainError('RESTORE_CONFLICT', '恢复存在冲突，请先处理', 409,
@@ -735,7 +756,7 @@ def restore_trash(entry_id: str, payload: TrashActionInput, db=Depends(get_db),
     target = db.get(TARGETS[target_type], entry.target_id)
     if target is None:
         raise DomainError('TARGET_MISSING', '对象已不存在，不能恢复', 404)
-    if target_type in ('ORDER', 'BATCH', 'ASSET', 'ACCOUNT'):
+    if target_type in ('ORDER', 'BATCH', 'ASSET', 'ACCOUNT', 'AFTER_SALE'):
         target.deleted_at = None
         if target_type == 'ORDER':
             target.purge_at = None
@@ -1789,6 +1810,10 @@ def _delete_simple_target(db, entry: TrashEntry, target_type: str, target, plan:
     elif target_type == 'REFUND':
         db.delete(target)
     elif target_type == 'AFTER_SALE':
+        # Refunds remain independent financial facts belonging to the order.
+        # Detach only the optional case link; purge_guard journals it for replay.
+        db.execute(update(Refund).where(Refund.after_sale_id == target.id)
+                   .values(after_sale_id=None))
         db.delete(target)
     elif target_type == 'COUPON':
         db.delete(target)
@@ -1821,6 +1846,7 @@ def _delete_simple_target(db, entry: TrashEntry, target_type: str, target, plan:
 def _purge_recheck(db, target_type: str, target) -> None:
     blockers: list[str] = []
     if target_type == 'ORDER':
+        lock(db, Order, target.id)
         blockers = _order_active_blockers(db, target)
     elif target_type == 'BATCH':
         assignment_ids = list(db.scalars(select(DeliveryAssignment.id).where(
@@ -1850,10 +1876,12 @@ def _purge_recheck(db, target_type: str, target) -> None:
         if db.scalar(select(Payment.id).where(Payment.receipt_id == target.id).limit(1)):
             blockers.append('PAYMENT_REFERENCE')
     elif target_type == 'AFTER_SALE':
-        if db.scalar(select(Refund.id).where(Refund.after_sale_id == target.id).limit(1)):
-            blockers.append('REFUND_REFERENCE')
+        lock(db, Order, target.order_id)
+        lock(db, AfterSale, target.id)
+        if target.status not in TERMINAL_AFTER_SALE_STATUSES:
+            blockers.append('AFTER_SALE_ACTIVE')
     elif target_type == 'REFUND':
-        sale = db.get(AfterSale, target.after_sale_id)
+        sale = db.get(AfterSale, target.after_sale_id) if target.after_sale_id else None
         if sale is not None and sale.status not in TERMINAL_AFTER_SALE_STATUSES:
             blockers.append('AFTER_SALE_ACTIVE')
     elif target_type == 'PREPARATION':
