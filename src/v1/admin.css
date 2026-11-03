@@ -91,6 +91,40 @@
   font-size: 0.95rem;
 }
 @media (max-width: 720px) {
+  .v1-admin .v1-cases-table,
+  .v1-admin .v1-cases-table tbody,
+  .v1-admin .v1-cases-table tr {
+    display: block;
+    width: 100%;
+  }
+  .v1-admin .v1-cases-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .v1-admin .v1-cases-table tr {
+    padding: 8px 0 16px;
+    border-bottom: 1px solid var(--line, #e5ded8);
+  }
+  .v1-admin .v1-cases-table tr:last-child { border-bottom: 0; padding-bottom: 0; }
+  .v1-admin .v1-cases-table td {
+    display: grid;
+    grid-template-columns: minmax(80px, 100px) minmax(0, 1fr);
+    gap: 3px 12px;
+    border: 0;
+    padding: 7px 0;
+    overflow-wrap: anywhere;
+  }
+  .v1-admin .v1-cases-table td::before {
+    content: attr(data-label);
+    color: #82766b;
+    font-size: 12px;
+  }
+  .v1-admin .v1-cases-table td small { grid-column: 2; margin-top: 0; }
+  .v1-admin .v1-cases-table td > .soft-tag { justify-self: start; }
+  .v1-admin .v1-cases-table .text-link { display: inline-flex; min-height: 44px; align-items: center; }
   .v1-admin .v1-two-col,
   .v1-admin .v1-facts,
   .v1-admin .v1-permission-grid {

@@ -50,6 +50,7 @@ import {
   type StaffCapabilityRow,
 } from "./admin-api";
 import "./admin.css";
+import "../admin/growth.css";
 
 function useAdminOnly() {
   const session = useGrowthResource<StaffSession>("/auth/me");
@@ -247,7 +248,7 @@ export function AdminAfterSalesPage() {
       {items.length > 0 && (
         <Panel>
           <div className="growth-table-wrap">
-            <table>
+            <table className="v1-cases-table">
               <thead>
                 <tr>
                   <th>订单 / 来源</th>
@@ -261,17 +262,17 @@ export function AdminAfterSalesPage() {
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id}>
-                    <td>
+                    <td data-label="订单 / 来源">
                       <b>{item.orderCode || item.orderId}</b>
                       <small>
                         {sourceLabel(item.source)} · {item.customerLabel || "客户"}
                       </small>
                     </td>
-                    <td>
+                    <td data-label="责任 / 方案">
                       {responsibilityLabel(item.responsibility)}
                       <small>{solutionLabel(item.solution)}</small>
                     </td>
-                    <td className="numeric">
+                    <td className="numeric" data-label="建议 / 批准">
                       {money(item.suggestedCents || 0)}
                       <small>
                         {item.approvedCents === null
@@ -279,13 +280,13 @@ export function AdminAfterSalesPage() {
                           : `批准 ${money(item.approvedCents)}`}
                       </small>
                     </td>
-                    <td>
+                    <td data-label="状态">
                       <span className="soft-tag">{afterSaleStatusLabel(item.status)}</span>
                     </td>
-                    <td className="numeric">
+                    <td className="numeric" data-label="申请时间">
                       {new Date(item.createdAt).toLocaleString("zh-CN")}
                     </td>
-                    <td>
+                    <td data-label="操作">
                       <Link className="text-link" to={`${ADMIN}/after-sales/${item.id}`}>
                         查看与审核
                       </Link>
@@ -855,11 +856,11 @@ export function AdminAfterSaleDetail() {
         <dl className="growth-facts v1-facts">
           <div>
             <dt>订单状态</dt>
-            <dd>{orderInfo?.status || "加载中"}</dd>
+            <dd>{orderInfo?.status ? <Badge status={orderInfo.status} /> : "加载中"}</dd>
           </div>
           <div>
             <dt>装袋状态</dt>
-            <dd>{orderInfo?.packingStatus || "未装袋"}</dd>
+            <dd>{orderInfo?.packingStatus ? <Badge status={orderInfo.packingStatus} /> : "未装袋"}</dd>
           </div>
           <div>
             <dt>实际开印</dt>
@@ -1088,6 +1089,8 @@ function ReviewAfterSale({
   return (
     <ConfirmAction
       title="审核售后方案"
+      requireReason={false}
+      contentAsNotice={false}
       pending={submit.pending}
       error={submit.error}
       onClose={onClose}
@@ -1144,7 +1147,7 @@ function ReviewAfterSale({
           )}
         </>
       )}
-      <Field label="审核原因（必填）">
+      <Field label="审核原因（必填）" hint="该原因也会记录在操作审计中。">
         <textarea value={reason} onChange={(event) => setReason(event.target.value)} />
       </Field>
     </ConfirmAction>
@@ -1189,6 +1192,8 @@ function RecordRefund({
   return (
     <ConfirmAction
       title="登记线下退款"
+      requireReason={false}
+      contentAsNotice={false}
       pending={submit.pending}
       error={submit.error}
       onClose={onClose}

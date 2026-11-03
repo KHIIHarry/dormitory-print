@@ -168,6 +168,7 @@ export function ConfirmAction({
   pending,
   error,
   requireReason = true,
+  contentAsNotice = true,
 }: {
   title: string;
   children: ReactNode;
@@ -176,6 +177,7 @@ export function ConfirmAction({
   pending: boolean;
   error?: string;
   requireReason?: boolean;
+  contentAsNotice?: boolean;
 }) {
   const [reason, setReason] = useState("");
   return (
@@ -186,7 +188,7 @@ export function ConfirmAction({
             <span role="alert">{error}</span>
           </Notice>
         )}
-        <Notice type="warning">{children}</Notice>
+        {contentAsNotice ? <Notice type="warning">{children}</Notice> : <div className="growth-stack">{children}</div>}
         {requireReason && (
           <label className="growth-reason">
             操作原因
