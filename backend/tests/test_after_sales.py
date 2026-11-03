@@ -37,6 +37,42 @@ def test_self_reason_refund_rejected_after_actual_start(db,ready_preparation):
 APP_MODULES=['auth','commerce','after_sales','growth','mail','production','payroll','supplementary']
 
 
+@pytest.mark.parametrize('admin', [False, True])
+def test_creating_after_sale_queues_admin_mail_in_same_transaction(
+        db, ready_preparation, staff_factory, admin):
+    from sqlalchemy import select
+    from app.after_sales import create_case, CaseInput
+    from app.commerce import submit_order, OrderSubmit
+    from app.core import unseal
+    from app.models import EmailJob
+    from test_mail import seed_mail_config
+
+    actor, prep, artifact, slot, body = ready_preparation
+    order = submit_order(db, actor, OrderSubmit.model_validate(body))
+    order.status = 'PENDING_PRINT'
+    order.settlement_kind = 'CASH_MANUAL'
+    order.cash_received_cents = 10
+    member = staff_factory(email='reviewer@example.invalid', email_verified=True,
+                           capabilities=['payment.manage'])
+    config = seed_mail_config(db, 12345)
+    config.data = {**config.data, 'security': 'SSL_TLS'}
+    db.commit()
+    if admin:
+        actor = Actor(staff_id=member.id, staff_role='ADMIN', capabilities={'payment.manage'})
+    case = create_case(db, actor, order, CaseInput(
+        responsibility='MERCHANT', solution='REFUND', reason='材料错误，请退款'), admin)
+    jobs = list(db.scalars(select(EmailJob).where(
+        EmailJob.template_key == 'ADMIN_AFTER_SALE_CREATED')))
+    assert len(jobs) == 1
+    payload = unseal(jobs[0].protected_payload)
+    assert case.id in payload['textBody']
+    assert '退款' in payload['textBody']
+    assert ('管理员代建' if admin else '客户申请') in payload['textBody']
+    db.rollback()
+    assert list(db.scalars(select(EmailJob))) == []
+    assert list(db.scalars(select(AfterSale))) == []
+
+
 def test_employee_uses_customer_surface_for_own_after_sale(db,ready_preparation,customer_client,staff_factory):
     from app.after_sales import create_case,CaseInput
     from app.commerce import submit_order,OrderSubmit

@@ -405,12 +405,12 @@ export function PromotionSettingsPage() {
               </Field>
             </div>
             {draft.kind === "REFERRER" && (
-              <Panel title="首笔有效订单资格">
+              <Panel title="受邀新人完成什么订单后，发放邀请奖励">
                 <Notice>
-                  以邀请验证时的规则快照为准。必须是注册账号创建、现金实付大于零且成功送达的首笔达标订单；零元和历史游客导入不计入。
+                  受邀新人使用注册账号下单，现金实付大于零，且首笔达标订单成功送达后，才会向邀请人发放奖励券。零元订单和历史游客导入订单不计入。具体条件以邀请验证时保存的规则为准。
                 </Notice>
                 <div className="growth-form-grid">
-                  <Field label="资格截止时间（留空明确为不限期）">
+                  <Field label="新人订单达标截止时间（留空不限期）">
                     <input
                       type="datetime-local"
                       value={draft.qualificationDeadline}
@@ -420,8 +420,8 @@ export function PromotionSettingsPage() {
                     />
                   </Field>
                   <Field
-                    label="达标商品小计（元）"
-                    hint="独立于奖励券自身的使用门槛"
+                    label="新人订单商品小计门槛（元）"
+                    hint="用于判断新人订单是否达标；邀请人使用奖励券时，仍需满足上方的“最低适用消费”。"
                   >
                     <input
                       required
@@ -432,7 +432,7 @@ export function PromotionSettingsPage() {
                       }
                     />
                   </Field>
-                  <Field label="资格适用服务">
+                  <Field label="新人订单计入达标的服务">
                     <select
                       value={draft.qualificationService}
                       onChange={(e) =>

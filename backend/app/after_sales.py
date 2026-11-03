@@ -156,6 +156,8 @@ def create_case(db,actor,order,body,admin=False):
     if body.solution=='REFUND':order.refund_locked=True
     touch(order);add_history(order,'售后申请已受理','等待管理员核实；申请不代表已批准或已退款')
     audit(db,actor,'AFTER_SALE_REQUESTED','AFTER_SALE',case.id,data={'source':case.source,'solution':case.solution})
+    from .growth import notify_admin_after_sale_created
+    notify_admin_after_sale_created(db,order,case)
     return case
 
 

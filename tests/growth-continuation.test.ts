@@ -173,6 +173,22 @@ describe("v1.3续作回归", () => {
       expect(preview.htmlBody).toContain("DormPrint");
     }
   });
+  it("售后管理员模板使用统一品牌样式并预览真实售后字段", async () => {
+    const list = (await demoRequest("/admin/mail/templates")) as any;
+    const template = list.items.find((item: any) => item.key === "ADMIN_AFTER_SALE_CREATED");
+    expect(template).toBeDefined();
+    expect(template.name).toBe("售后单通知（管理员）");
+    expect(template.critical).toBe(false);
+    const preview = (await demoRequest(`/admin/mail/templates/${template.key}/preview`, {
+      method: "POST", body: {},
+    })) as any;
+    expect(preview.htmlBody).toContain("#c67c4e");
+    expect(preview.htmlBody).toContain("#fffdfa");
+    expect(preview.htmlBody).toContain("查看售后单");
+    expect(preview.textBody).toContain("材料错误，申请退款");
+    expect(preview.htmlBody).toContain("/manage/after-sales/sample");
+    expect(preview.htmlBody).not.toContain("{{");
+  });
 });
 
 it("导入的只读范围不会变成所有权，也不暴露原件与未授权PDF", async () => {

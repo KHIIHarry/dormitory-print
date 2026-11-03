@@ -2258,6 +2258,37 @@ def notify_admin_order_created(db, order):
     return jobs
 
 
+def notify_admin_after_sale_created(db, order, case):
+    """Notify authorised after-sales administrators once per case and staff member."""
+    origin = get_settings().public_origin.rstrip('/')
+    variables = {
+        'brandName': _mail_brand(db),
+        'afterSaleId': str(case.id),
+        'orderCode': str(getattr(order, 'pickup_code', '') or ''),
+        'afterSaleSource': '管理员代建' if case.source == 'ADMIN' else '客户申请',
+        'afterSaleResponsibility': ('商家原因（待审核）' if case.responsibility == 'MERCHANT'
+                                    else '客户自身原因（待审核）'),
+        'afterSaleSolution': '退款' if case.solution == 'REFUND' else '重做',
+        'customerNickname': str(getattr(order, 'nickname', '') or ''),
+        'customerPhone': _mask_phone(getattr(order, 'phone', '')),
+        'afterSaleReason': str(case.reason or ''),
+        'afterSaleLink': f'{origin}/manage/after-sales/{url_quote(str(case.id), safe="")}',
+    }
+    jobs = []
+    recipients = db.scalars(select(Staff).where(
+        Staff.role == 'ADMIN', Staff.enabled.is_(True), Staff.status == 'ACTIVE'))
+    for member in recipients:
+        capabilities = set(member.capabilities or [])
+        allowed = member.is_super_admin or bool(capabilities & {'payment.manage', '*'})
+        if not allowed or not member.email or not member.email_verified:
+            continue
+        job = _queue(db, 'ADMIN_AFTER_SALE_CREATED', member.email, variables,
+                     f'admin-after-sale-email:{case.id}:{member.id}')
+        if job is not None:
+            jobs.append(job)
+    return jobs
+
+
 def notify_payment_success(db, order):
     account = _active_customer(db, order)
     if account is None:

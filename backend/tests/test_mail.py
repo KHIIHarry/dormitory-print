@@ -158,7 +158,7 @@ def test_chinese_defaults_cover_transactional_and_staff_mail():
 
     assert list(DEFAULT_TEMPLATES) == [
         'CUSTOMER_VERIFY_EMAIL', 'CUSTOMER_RESET_PASSWORD',
-        'ADMIN_ORDER_CREATED', 'COURIER_DISPATCH', 'DELIVERY_UPDATED',
+        'ADMIN_ORDER_CREATED', 'ADMIN_AFTER_SALE_CREATED', 'COURIER_DISPATCH', 'DELIVERY_UPDATED',
         'PAYMENT_SUCCESS', 'ORDER_DELIVERED', 'ACCOUNT_DELETED',
         'ORDER_CREATED', 'ORDER_STATUS_UPDATED', 'REFERRAL_REWARD_GRANTED',
         'MANUAL_COUPON_GRANTED',
@@ -632,7 +632,7 @@ def test_template_routes_list_all_and_preview_uses_safe_sample(admin_client, api
     listing = api(admin_client, '/admin/mail/templates', method='GET')
     assert listing.status_code == 200, listing.text
     items = listing.json()['data']['items']
-    assert len(items) == 12
+    assert len(items) == 13
     verify = next(item for item in items if item['key'] == 'CUSTOMER_VERIFY_EMAIL')
     assert verify['critical'] is True
     preview = api(admin_client,
@@ -976,6 +976,84 @@ def _order_stub(account, status='PENDING_PRINT', version=3):
         nickname='测试同学', phone='13800000000', location_id=None,
         data={'deliveredAt': utcnow().isoformat()},
     )
+
+
+def test_after_sale_notification_restricts_recipients_and_deduplicates(
+        db, smtp_server, settings_allow_local, account_factory, staff_factory):
+    from email import policy
+    from email.parser import BytesParser
+    from types import SimpleNamespace
+    from app.core import unseal
+    from app.growth import notify_admin_after_sale_created
+    from app.mail import process_email_job
+
+    state, port = smtp_server
+    seed_mail_config(db, port)
+    customer = account_factory()
+    order = _order_stub(customer)
+    recipient = staff_factory(email='after-sale@example.invalid', email_verified=True,
+                              capabilities=['payment.manage'])
+    super_admin = staff_factory(email='super@example.invalid', email_verified=True,
+                                capabilities=['*'])
+    staff_factory(email='orders@example.invalid', email_verified=True,
+                  capabilities=['orders.manage'])
+    staff_factory(role='COURIER', email='courier@example.invalid', email_verified=True,
+                  capabilities=['payment.manage'])
+    staff_factory(email='unverified@example.invalid', email_verified=False,
+                  capabilities=['payment.manage'])
+    disabled = staff_factory(email='disabled@example.invalid', email_verified=True,
+                             capabilities=['payment.manage'])
+    disabled.enabled = False
+    db.flush()
+    case = SimpleNamespace(id='sale-1', source='CUSTOMER', responsibility='MERCHANT',
+                           solution='REPRINT', reason='换材料 <script> & 核实\n第二行')
+    jobs = notify_admin_after_sale_created(db, order, case)
+    assert len(jobs) == 2
+    assert {job.template_key for job in jobs} == {'ADMIN_AFTER_SALE_CREATED'}
+    assert {job.business_key for job in jobs} == {
+        f'admin-after-sale-email:sale-1:{recipient.id}',
+        f'admin-after-sale-email:sale-1:{super_admin.id}',
+    }
+    payload = unseal(jobs[0].protected_payload)
+    assert '/manage/after-sales/sale-1' in payload['textBody']
+    assert '重做' in payload['textBody'] and '客户申请' in payload['textBody']
+    assert case.reason in payload['textBody']
+    assert '<script>' not in payload['htmlBody']
+    assert '&lt;script&gt;' in payload['htmlBody']
+    assert '138****0000' in payload['textBody']
+    assert '13800000000' not in payload['textBody']
+    assert {job.id for job in notify_admin_after_sale_created(db, order, case)} == {
+        job.id for job in jobs}
+    process_email_job(db, jobs[0].id)
+    assert jobs[0].status == 'SMTP_ACCEPTED'
+    assert len(state.messages) == 1
+    message = BytesParser(policy=policy.default).parsebytes(
+        state.messages[0]['data'].encode())
+    assert '售后单' in str(message['Subject'])
+    assert '查看售后单' in message.get_body(preferencelist=('html',)).get_content()
+
+
+@pytest.mark.parametrize('mail_state', ['disabled', 'unavailable'])
+def test_after_sale_notification_failure_preserves_business_changes(
+        db, account_factory, staff_factory, mail_state):
+    from types import SimpleNamespace
+    from app.growth import notify_admin_after_sale_created
+    from app.mail import ensure_template
+
+    customer = account_factory()
+    staff_factory(email='after-sale@example.invalid', email_verified=True,
+                  capabilities=['payment.manage'])
+    if mail_state == 'disabled':
+        config = seed_mail_config(db, 12345)
+        config.data = {**config.data, 'security': 'SSL_TLS'}
+        ensure_template(db, 'ADMIN_AFTER_SALE_CREATED').enabled = False
+    customer.display_name = '售后事务内修改'
+    db.flush()
+    case = SimpleNamespace(id='sale-failure', source='ADMIN', responsibility='MERCHANT',
+                           solution='REFUND', reason='申请退款')
+    assert notify_admin_after_sale_created(db, _order_stub(customer), case) == []
+    assert customer.display_name == '售后事务内修改'
+    assert list(db.scalars(select(EmailJob))) == []
 
 
 def test_new_order_notifies_permitted_staff_not_customer(

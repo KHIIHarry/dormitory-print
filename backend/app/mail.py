@@ -52,6 +52,7 @@ TEMPLATE_KEYS = (
     'CUSTOMER_VERIFY_EMAIL',
     'CUSTOMER_RESET_PASSWORD',
     'ADMIN_ORDER_CREATED',
+    'ADMIN_AFTER_SALE_CREATED',
     'COURIER_DISPATCH',
     'DELIVERY_UPDATED',
     'PAYMENT_SUCCESS',
@@ -75,6 +76,12 @@ VARIABLE_DESCRIPTIONS = {
     'paidAmount': '实付金额（含币种）',
     'customerNickname': '客户昵称',
     'customerPhone': '客户联系电话',
+    'afterSaleId': '售后单号',
+    'afterSaleSource': '售后申请来源',
+    'afterSaleResponsibility': '申请责任类型（待审核）',
+    'afterSaleSolution': '申请处理方式（退款或重做）',
+    'afterSaleReason': '售后申请原因',
+    'afterSaleLink': '管理员售后单详情入口（需登录并具备售后权限）',
     'courierName': '配送员称呼',
     'courierLink': '配送员任务入口',
     'batchName': '配送批次名称',
@@ -139,6 +146,25 @@ DEFAULT_TEMPLATES: dict[str, dict[str, Any]] = {
         'htmlBody': template_html('ADMIN_ORDER_CREATED'),
         'variables': ['brandName', 'orderCode', 'orderAmount', 'customerNickname',
                       'customerPhone', 'orderLink'],
+        'critical': False,
+        'enabled': True,
+    },
+    'ADMIN_AFTER_SALE_CREATED': {
+        'name': '售后单通知（管理员）',
+        'subject': '{{brandName}}｜订单 {{orderCode}} 有新的售后单待处理',
+        'textBody': (
+            '{{brandName}} 收到一笔售后申请，请及时核实处理。\n'
+            '售后单号：{{afterSaleId}}\n关联订单：{{orderCode}}\n'
+            '申请来源：{{afterSaleSource}}\n申请责任类型：{{afterSaleResponsibility}}\n'
+            '处理诉求：{{afterSaleSolution}}\n客户昵称：{{customerNickname}}\n'
+            '联系电话：{{customerPhone}}\n申请原因：{{afterSaleReason}}\n'
+            '申请仍待审核，不代表已批准或已退款；请核实后按售后流程处理。\n'
+            '查看售后单：{{afterSaleLink}}'
+        ),
+        'htmlBody': template_html('ADMIN_AFTER_SALE_CREATED'),
+        'variables': ['brandName', 'afterSaleId', 'orderCode', 'afterSaleSource',
+                      'afterSaleResponsibility', 'afterSaleSolution', 'customerNickname',
+                      'customerPhone', 'afterSaleReason', 'afterSaleLink'],
         'critical': False,
         'enabled': True,
     },
@@ -286,6 +312,12 @@ SAMPLE_VARIABLES = {
     'paidAmount': '¥36.00',
     'customerNickname': '示例同学',
     'customerPhone': '138****0000',
+    'afterSaleId': '00000000-0000-4000-8000-000000000001',
+    'afterSaleSource': '客户申请',
+    'afterSaleResponsibility': '商家原因（待审核）',
+    'afterSaleSolution': '退款',
+    'afterSaleReason': '材料错误，申请退款',
+    'afterSaleLink': 'https://example.invalid/manage/after-sales/sample',
     'courierName': '示例配送员',
     'courierLink': 'https://example.invalid/courier',
     'batchName': '10月31日 晚班',

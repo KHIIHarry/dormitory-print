@@ -21,6 +21,12 @@ ORDER_AMOUNT = '{{orderAmount}}'
 PAID_AMOUNT = '{{paidAmount}}'
 CUSTOMER_NICKNAME = '{{customerNickname}}'
 CUSTOMER_PHONE = '{{customerPhone}}'
+AFTER_SALE_ID = '{{afterSaleId}}'
+AFTER_SALE_SOURCE = '{{afterSaleSource}}'
+AFTER_SALE_RESPONSIBILITY = '{{afterSaleResponsibility}}'
+AFTER_SALE_SOLUTION = '{{afterSaleSolution}}'
+AFTER_SALE_REASON = '{{afterSaleReason}}'
+AFTER_SALE_LINK = '{{afterSaleLink}}'
 COURIER_NAME = '{{courierName}}'
 COURIER_LINK = '{{courierLink}}'
 BATCH_NAME = '{{batchName}}'
@@ -347,6 +353,31 @@ def _admin_order_created() -> str:
                   '此邮件发送给具备接单/打印权限的管理员。')
 
 
+def _admin_after_sale_created() -> str:
+    content = (
+        _paragraph(f'订单 {ORDER_CODE} 收到一笔新的售后申请，请及时查看申请原因，'
+                   '联系客户并核实处理诉求。')
+        + _multi_facts([(f'<span style="white-space:nowrap">{label}</span>', value)
+                        for label, value in [
+            ('售后单号', f'<span style="word-break:break-all">{AFTER_SALE_ID}</span>'),
+            ('关联订单', ORDER_CODE),
+            ('申请来源', AFTER_SALE_SOURCE),
+            ('申请责任', AFTER_SALE_RESPONSIBILITY),
+            ('处理诉求', AFTER_SALE_SOLUTION),
+            ('客户昵称', CUSTOMER_NICKNAME),
+            ('联系电话', CUSTOMER_PHONE),
+        ]])
+        + _note('申请原因',
+                f'<span style="white-space:pre-wrap;word-break:break-word">{AFTER_SALE_REASON}</span>')
+        + _button('查看售后单', AFTER_SALE_LINK)
+        + _fallback(AFTER_SALE_LINK)
+        + _paragraph('申请仍待审核，不代表已批准或已退款；请核实后按售后流程处理。',
+                     size=13, color=MUTED)
+    )
+    return _shell('售后通知', _eyebrow('待处理售后'), '有新的售后单待处理', content,
+                  '此邮件仅发送给具备售后与退款处理权限的管理员。')
+
+
 def _payment_success() -> str:
     content = (
         _paragraph(f'{BRAND} 已确认收到订单 {ORDER_CODE} 的付款，正在安排打印。')
@@ -457,6 +488,7 @@ _TEMPLATE_BUILDERS = {
     'CUSTOMER_VERIFY_EMAIL': _verify_email,
     'CUSTOMER_RESET_PASSWORD': _reset_password,
     'ADMIN_ORDER_CREATED': _admin_order_created,
+    'ADMIN_AFTER_SALE_CREATED': _admin_after_sale_created,
     'COURIER_DISPATCH': _courier_dispatch,
     'DELIVERY_UPDATED': _delivery_updated,
     'PAYMENT_SUCCESS': _payment_success,

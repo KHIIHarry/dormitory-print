@@ -174,6 +174,87 @@ export const DEFAULT_TEMPLATE_HTML: Record<string, string> = {
     </td>
   </tr>
 </table>`,
+  ADMIN_AFTER_SALE_CREATED: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0;padding:0;background:#f4eee6">
+  <tr>
+    <td align="center" style="padding:32px 12px">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#fffdfa;border:1px solid #eadfd2;border-radius:20px;overflow:hidden">
+        <tr>
+          <td style="height:4px;background:#c67c4e;border-radius:20px 20px 0 0;font-size:0;line-height:0">&nbsp;</td>
+        </tr>
+        <tr>
+          <td style="padding:20px 32px;background:#fbf6f0;border-bottom:1px solid #efe5d8">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:15px;line-height:1.5;font-weight:600;color:#2f2b26">
+                  <img src="{{logoUrl}}" width="30" height="30" alt="" style="display:inline-block;width:30px;height:30px;margin-right:10px;border:0;border-radius:8px;background:#c67c4e;vertical-align:middle">
+                  <span style="vertical-align:middle">{{brandName}}</span>
+                </td>
+                <td align="right" style="white-space:nowrap">
+                  <span style="display:inline-block;padding:5px 11px;border:1px solid #ead7c4;border-radius:999px;background:#fff9f2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:11px;line-height:1.5;font-weight:600;color:#a65c31;letter-spacing:.1em">售后通知</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:30px 32px 28px">
+            <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:11px;line-height:1.5;font-weight:600;color:#a65c31;letter-spacing:.16em"><span style="display:inline-block;width:18px;height:1px;background:#d9b899;vertical-align:middle;margin-right:8px"></span>待处理售后</p>
+            <h1 style="margin:11px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:23px;line-height:1.45;font-weight:600;color:#2f2b26;letter-spacing:-.01em">有新的售后单待处理</h1>
+            <p style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:15px;line-height:1.9;font-weight:400;color:#57514a">订单 {{orderCode}} 收到一笔新的售后申请，请及时查看申请原因，联系客户并核实处理诉求。</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;border:1px solid #efe4d6;border-radius:14px;background:#fdfaf6">
+  <tr>
+    <td style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">售后单号</span></td>
+    <td align="right" style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26"><span style="word-break:break-all">{{afterSaleId}}</span></td>
+  </tr>
+  <tr>
+    <td style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">关联订单</span></td>
+    <td align="right" style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26">{{orderCode}}</td>
+  </tr>
+  <tr>
+    <td style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">申请来源</span></td>
+    <td align="right" style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26">{{afterSaleSource}}</td>
+  </tr>
+  <tr>
+    <td style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">申请责任</span></td>
+    <td align="right" style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26">{{afterSaleResponsibility}}</td>
+  </tr>
+  <tr>
+    <td style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">处理诉求</span></td>
+    <td align="right" style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26">{{afterSaleSolution}}</td>
+  </tr>
+  <tr>
+    <td style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">客户昵称</span></td>
+    <td align="right" style="padding:13px 18px;border-bottom:1px solid #f2e9de;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26">{{customerNickname}}</td>
+  </tr>
+  <tr>
+    <td style="padding:13px 18px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:400;color:#8d8478"><span style="white-space:nowrap">联系电话</span></td>
+    <td align="right" style="padding:13px 18px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;font-weight:600;color:#2f2b26">{{customerPhone}}</td>
+  </tr>
+</table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;background:#faf3ec;border-radius:14px">
+  <tr>
+    <td style="padding:16px 18px;border-left:3px solid #dcae83;border-radius:14px">
+      <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.6;font-weight:600;color:#7a4c2c">申请原因</p>
+      <p style="margin:4px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:12px;line-height:1.8;font-weight:400;color:#8d8478"><span style="white-space:pre-wrap;word-break:break-word">{{afterSaleReason}}</span></p>
+    </td>
+  </tr>
+</table><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:26px 0 0">
+  <tr>
+    <td align="center" bgcolor="#c67c4e" style="border-radius:12px">
+      <a href="{{afterSaleLink}}" style="display:inline-block;padding:13px 30px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:15px;line-height:1.4;font-weight:600;color:#ffffff;text-decoration:none;border-radius:12px">查看售后单</a>
+    </td>
+  </tr>
+</table><p style="margin:14px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:12px;line-height:1.8;font-weight:400;color:#8d8478">按钮无法打开时，请复制以下链接到浏览器访问：<br><span style="color:#a65c31;word-break:break-all">{{afterSaleLink}}</span></p><p style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:13px;line-height:1.9;font-weight:400;color:#8d8478">申请仍待审核，不代表已批准或已退款；请核实后按售后流程处理。</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:18px 32px 22px;background:#fbf6f0;border-top:1px solid #efe5d8">
+            <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:12px;line-height:1.8;font-weight:400;color:#8d8478">此邮件仅发送给具备售后与退款处理权限的管理员。</p>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:14px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:11px;line-height:1.6;font-weight:400;color:#a99f92">系统自动发送 · 请勿直接回复</p>
+    </td>
+  </tr>
+</table>`,
   COURIER_DISPATCH: `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:0;padding:0;background:#f4eee6">
   <tr>
     <td align="center" style="padding:32px 12px">
