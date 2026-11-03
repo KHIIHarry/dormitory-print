@@ -52,7 +52,7 @@ async function fixture(
     route.fulfill({
       contentType: "text/html",
       body: `
-    <meta charset="utf-8"><div id="root"></div><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
     <script type="module">
       import React from '${reactUrl}'; import ReactDOM from '${domUrl}'; import {BrowserRouter,MemoryRouter,Routes,Route} from '${routerUrl}';
       import {Slots,Batches,SlotProposals,BatchDetail} from '/src/admin/logistics.tsx'; import '/src/styles.css';
@@ -67,6 +67,41 @@ async function fixture(
   );
   await page.goto("/campus-admin-fixture");
 }
+
+test("campus filter has a usable control and clear spacing above compact slot rows", async ({
+  page,
+}, testInfo) => {
+  await fixture(page, "slots");
+  await page.locator("#root").evaluate((element) => element.classList.add("admin-content"));
+  const filter = page.getByRole("combobox", { name: "校区筛选" });
+  await expect(filter).toBeVisible();
+  const panel = filter.locator("xpath=ancestor::section[1]");
+  const geometry = await filter.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const panel = element.closest("section")!;
+    const table = panel.querySelector("table")!.getBoundingClientRect();
+    const buttons = [...panel.querySelector("tbody tr")!.querySelectorAll("button")];
+    return {
+      height: bounds.height,
+      gap: table.top - bounds.bottom,
+      borderRadius: parseFloat(getComputedStyle(element).borderRadius),
+      actionTops: buttons.map((button) => button.getBoundingClientRect().top),
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  await panel.screenshot({ path: testInfo.outputPath("campus-filter-layout.png") });
+  expect(geometry.height).toBeGreaterThanOrEqual(44);
+  expect(geometry.gap).toBeGreaterThanOrEqual(16);
+  expect(geometry.borderRadius).toBeGreaterThanOrEqual(8);
+  expect(Math.max(...geometry.actionTops) - Math.min(...geometry.actionTops)).toBeLessThan(2);
+  expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+  await filter.selectOption("east");
+  await expect(panel.getByRole("row").filter({ hasText: "东时段" })).toHaveCount(1);
+  await expect(panel.getByRole("row").filter({ hasText: "西时段" })).toHaveCount(0);
+  await filter.selectOption("");
+  await expect(panel.getByRole("row").filter({ hasText: "西时段" })).toHaveCount(1);
+});
 
 test("creates a campus slot and seal identifies its locked campus", async ({
   page,

@@ -1605,11 +1605,15 @@ export function Slots() {
         </Notice>
       )}
       <Panel>
-        <CampusFilter
-          campuses={campuses}
-          value={campusFilter}
-          onChange={setCampusFilter}
-        />
+        {!!campuses.length && (
+          <div className="slot-filter-toolbar">
+            <CampusFilter
+              campuses={campuses}
+              value={campusFilter}
+              onChange={setCampusFilter}
+            />
+          </div>
+        )}
         <div className="table-scroll">
           <table>
             <thead>
@@ -1666,7 +1670,7 @@ export function Slots() {
                       {s.sealReason && <small>原因：{s.sealReason}</small>}
                     </td>
                     <td>
-                      <div className="button-row">
+                      <div className="button-row slot-actions">
                         <button
                           className="text-button"
                           onClick={() => openEditor(s)}

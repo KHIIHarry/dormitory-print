@@ -508,6 +508,7 @@ svg.lucide {
 .field input:not([type="checkbox"]):not([type="range"]),
 .field select,
 .field textarea,
+select.campus-filter,
 input[type="date"],
 .filter-row > select,
 .filter-row > input {
@@ -3736,6 +3737,45 @@ td > .numeric {
   width: 135px;
   font-size: 11px;
   color: #9d856f;
+}
+select.campus-filter {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23806f60' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+.field select.campus-filter,
+.filter-row > select.campus-filter,
+select.campus-filter {
+  min-height: 44px;
+  padding-right: 40px;
+}
+select.campus-filter:focus {
+  border-color: #d7a282;
+}
+.slot-filter-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.slot-filter-toolbar > select.campus-filter {
+  width: 220px;
+  max-width: 100%;
+}
+.slot-actions {
+  flex-wrap: nowrap;
+}
+.slot-actions > .text-button {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+@media (max-width: 767px) {
+  .slot-filter-toolbar > select.campus-filter {
+    width: 100%;
+  }
 }
 .filter-row > .btn {
   font-size: 11px;

@@ -16,6 +16,7 @@ export function CampusFilter({
   if (!campuses?.length) return null;
   return (
     <select
+      className="campus-filter"
       aria-label={ariaLabel}
       value={value}
       onChange={(event) => onChange(event.target.value)}
