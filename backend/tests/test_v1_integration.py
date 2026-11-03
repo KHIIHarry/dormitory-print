@@ -304,6 +304,7 @@ def prepare_order(client, api, db, client_factory, *, key_prefix):
     campus = ensure_test_campus(db)
     location = Location(name='验收宿舍楼', x=0.4, y=0.6, campus_id=campus.id)
     slot = configure_slot(DeliverySlot(
+        campus_id=location.campus_id,
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='验收时段', starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1), capacity=2,
@@ -384,6 +385,7 @@ def create_batch(api, admin_client, courier, name, starts_at=None):
     start = starts_at or (now - timedelta(minutes=30))
     end = start + timedelta(hours=2) if starts_at else now + timedelta(hours=2)
     response = api(admin_client, '/admin/batches', {
+        'campusId': api(admin_client, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': name,
         'startsAt': start.isoformat(),
         'endsAt': end.isoformat(),

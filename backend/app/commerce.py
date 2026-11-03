@@ -11,6 +11,7 @@ from .core import (Actor, DTO, DomainError, Envelope, actor_dep, audit, authoriz
                    grant_scopes, lock, ok, owns_principal, require_admin, require_customer, touch)
 from .db import get_db
 from .campuses import campus_is_open
+from .delivery_scope import ensure_slot_campus, location_campus_snapshot, order_campus_id
 from .models import (AccessGrant, Account, Artifact, Asset, BindingTask, BusinessException, DeliveryAssignment,
     DeliveryProof, DeliverySlot, Location, Order, OrderFile, OrderRevision, PackingTask, Payment, Preparation,
     Principal, PrintAttempt, PrintTask, Quote, Receipt, ReceiptAdjustment, utcnow)
@@ -252,6 +253,14 @@ class ProofView(DTO):
     delivered_at:str
 
 
+class OrderLocationSnapshot(DTO):
+    id:str
+    name:str
+    map_version:int|None=None
+    campus_id:str|None=None
+    campus_name:str|None=None
+
+
 class OrderView(DTO):
     id:str
     pickup_code:str
@@ -261,6 +270,7 @@ class OrderView(DTO):
     nickname:str
     phone:str
     location_id:str
+    location_snapshot:OrderLocationSnapshot|None=None
     slot_id:str
     requested_slot_id:str
     confirmed_slot_id:str|None=None
@@ -439,8 +449,19 @@ def order_view(db,order,actor):
         if proposed_slot:
             from .delivery_plan import slot_snapshot
             proposal['proposed']=slot_snapshot(proposed_slot)
+    location_snapshot=data.get('locationSnapshot') or {}
+    # Expose only the public delivery destination, not arbitrary order data.
+    # Delivery assignment snapshots use locationId; checkout snapshots use id.
+    safe_location_snapshot={
+        'id':location_snapshot.get('id') or location_snapshot.get('locationId') or order.location_id,
+        'name':location_snapshot.get('name') or '',
+        'mapVersion':location_snapshot.get('mapVersion'),
+        'campusId':location_snapshot.get('campusId'),
+        'campusName':location_snapshot.get('campusName'),
+    } if location_snapshot else None
     return {'id':order.id,'pickupCode':order.pickup_code,'version':order.version,'contentRevision':order.content_revision,
         'status':order.status,'nickname':order.nickname,'phone':order.phone,'locationId':order.location_id,
+        'locationSnapshot':safe_location_snapshot,
         'slotId':order.confirmed_slot_id or order.requested_slot_id,'requestedSlotId':order.requested_slot_id,
         'confirmedSlotId':order.confirmed_slot_id,'slotStatus':'CONFIRMED' if order.confirmed_slot_id else 'REQUESTED',
         'slotProposal':proposal,'arrangement':arrangement,
@@ -519,6 +540,7 @@ def _current_ready(db,actor,payload,order=None):
         raise DomainError('LOCATION_UNAVAILABLE','所选楼栋当前不可用',409)
     if not campus_is_open(db, location):
         raise DomainError('CAMPUS_UNAVAILABLE','所选校区暂未开放选点',409)
+    ensure_slot_campus(db, slot, location.campus_id)
     from .delivery_plan import ensure_slot_accepting
     ensure_slot_accepting(db, slot, utcnow())
     return prep,quote,artifacts,location,slot
@@ -596,7 +618,7 @@ def submit_order(db,actor,payload):
         phone=payload.contact.phone,customer_note=payload.customer_note,location_id=location.id,requested_slot_id=slot.id,
         close_at=utcnow()+timedelta(minutes=workflow['unpaidTimeoutMinutes']),data={'quote':quote_view(quote),
         'checkoutAuthKind':'REGISTERED' if quote.checkout_account_id else 'ANONYMOUS',
-        'locationSnapshot':{'id':location.id,'name':location.name,'mapVersion':location.map_version},
+        'locationSnapshot':location_campus_snapshot(db,location),
         'requestedSlotSnapshot':_requested_slot_snapshot(slot),'history':[]})
     db.add(order);db.flush()
     from .growth import reserve_coupon
@@ -759,7 +781,16 @@ def revise_order(order_id:str,body:RevisionSubmit,db=Depends(get_db),actor:Actor
     order.content_revision+=1;order.preparation_id=prep.id;order.quote_id=quote.id;order.total_cents=quote.total_cents
     order.nickname=body.contact.wechat_nickname.strip();order.phone=body.contact.phone;order.customer_note=body.customer_note
     order.location_id=location.id;order.requested_slot_id=slot.id
-    order.data={**order.data,'quote':quote_view(quote)}
+    revised_data={**order.data,'quote':quote_view(quote),
+                  'locationSnapshot':location_campus_snapshot(db,location),
+                  'requestedSlotSnapshot':_requested_slot_snapshot(slot)}
+    original_request=(order.data or {}).get('requestedSlotSnapshot')
+    if original_request and original_request!=revised_data['requestedSlotSnapshot']:
+        revised_data['previousRequestedSlots']=[*(order.data or {}).get('previousRequestedSlots',[]),original_request]
+    # A customer's previous agreement concerns the previous destination and
+    # request. It must not override the newly confirmed revision at settlement.
+    revised_data.pop('slotProposal',None)
+    order.data=revised_data
     _activate(db,order,prep,quote,artifacts)
     add_history(order,'订单内容已修订','新内容、最终PDF及金额已确认');touch(order)
     audit(db,actor,'ORDER_REVISED','ORDER',order.id)
@@ -796,10 +827,26 @@ def change_location(order_id:str,body:LocationInput,db=Depends(get_db),actor:Act
     location=db.get(Location,body.location_id)
     if not location or not location.enabled:raise DomainError('LOCATION_UNAVAILABLE','楼栋不可用',409)
     if not campus_is_open(db,location):raise DomainError('CAMPUS_UNAVAILABLE','所选校区暂未开放选点',409)
+    source_campus=order_campus_id(db,order)
+    if not source_campus or location.campus_id!=source_campus:
+        raise DomainError('CAMPUS_CHANGE_REQUIRES_RESCHEDULE',
+                          '跨校区须同时调整楼栋与配送时段；待确认订单请修订，已结算订单请联系管理员协调',409)
+    effective_slot_id=order.confirmed_slot_id or order.requested_slot_id
+    effective_slot=lock(db,DeliverySlot,effective_slot_id)
+    # An existing legacy execution can keep changing buildings within its
+    # campus without reopening its unresolved slot to new reservations.
+    ensure_slot_campus(db,effective_slot,location.campus_id,allow_legacy=True)
     assignment=db.scalar(select(DeliveryAssignment).where(DeliveryAssignment.order_id==order.id,DeliveryAssignment.active.is_(True)).with_for_update())
     if assignment and assignment.status=='STARTED':raise DomainError('INVALID_TRANSITION','已开始配送',409)
     order.location_id=location.id
-    order.data={**order.data,'locationSnapshot':{'id':location.id,'name':location.name,'mapVersion':location.map_version}}
+    order.data={**order.data,'locationSnapshot':location_campus_snapshot(db,location)}
+    proposal=(order.data or {}).get('slotProposal')
+    if proposal:
+        proposed_slot=db.get(DeliverySlot,proposal.get('slotId'))
+        if not proposed_slot or proposed_slot.campus_id!=location.campus_id:
+            data=dict(order.data)
+            data.pop('slotProposal',None)
+            order.data=data
     if assignment:assignment.address_review=True;order.address_review=True;touch(assignment)
     add_history(order,'配送楼栋已修改','已分配的配送安排须管理员复核');touch(order)
     from .growth import notify_delivery_updated
@@ -821,6 +868,7 @@ def propose_slot(order_id:str,body:SlotProposal,db=Depends(get_db),actor:Actor=D
     require_admin(actor,'payment.manage');order=lock(db,Order,order_id,body.expected_version)
     if order.status!='PENDING_CONFIRMATION':raise DomainError('INVALID_TRANSITION','仅待结算订单可确认申请时段',409)
     slot=lock(db,DeliverySlot,body.slot_id)
+    ensure_slot_campus(db,slot,order_campus_id(db,order))
     from .delivery_plan import ensure_slot_accepting
     ensure_slot_accepting(db,slot)
     order.data={**order.data,'slotProposal':{'slotId':slot.id,'reason':body.reason,'confirmed':False}}
@@ -835,7 +883,9 @@ def agree_slot(order_id:str,body:SlotAgreement,db=Depends(get_db),actor:Actor=De
     if order.status!='PENDING_CONFIRMATION' or not proposal or proposal['slotId']!=body.slot_id:
         raise DomainError('INVALID_TRANSITION','待确认时段已变化',409)
     from .delivery_plan import ensure_slot_accepting
-    ensure_slot_accepting(db,lock(db,DeliverySlot,body.slot_id))
+    slot=lock(db,DeliverySlot,body.slot_id)
+    ensure_slot_campus(db,slot,order_campus_id(db,order))
+    ensure_slot_accepting(db,slot)
     order.data={**order.data,'slotProposal':{**proposal,'confirmed':True,'rejected':False,'confirmedAt':utcnow().isoformat()}}
     touch(order)
     return ok(order_view(db,order,actor))
@@ -918,6 +968,7 @@ def _complete_settlement(db,actor,order,body,receipt):
                           {'receiptId':receipt.id if receipt else None},commit=bool(receipt))
     slot_id=proposal['slotId'] if proposal and proposal.get('confirmed') else order.requested_slot_id
     slot=lock(db,DeliverySlot,slot_id)
+    ensure_slot_campus(db,slot,order_campus_id(db,order))
     now=utcnow()
     from .delivery_plan import (SLOT_ERRORS, add_to_auto_batch, campus_for_order,
                                slot_acceptance, slot_snapshot as plan_slot_snapshot)

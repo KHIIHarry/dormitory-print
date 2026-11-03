@@ -110,6 +110,13 @@ export type Order = {
   nickname: string;
   phone: string;
   locationId: string;
+  locationSnapshot?: {
+    id: string;
+    name: string;
+    mapVersion?: number | null;
+    campusId?: string | null;
+    campusName?: string | null;
+  } | null;
   slotId: string;
   createdAt: string;
   totalCents: number;
@@ -170,6 +177,8 @@ export type AdminCampus = Omit<Campus, "items"> & {
 };
 export type Slot = {
   id: string;
+  campusId?: string | null;
+  campusName?: string | null;
   date: string;
   weekday: string;
   name: string;
@@ -191,6 +200,8 @@ export type Slot = {
 };
 export type Batch = {
   id: string;
+  campusId?: string | null;
+  campusName?: string | null;
   name: string;
   date: string;
   time: string;

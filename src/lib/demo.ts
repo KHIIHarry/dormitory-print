@@ -94,7 +94,7 @@ export function createDemo(): DataState {
       nickname: names[i],
       phone: `1380013800${i}`,
       locationId: `building-${(i % 4) + 1}`,
-      slotId: "slot-1",
+      slotId: i % 4 === 2 ? "slot-3" : "slot-1",
       createdAt: `2026-10-29 1${i}:2${i}`,
       totalCents: [240, 360, 480, 180, 320, 640, 260, 400][i],
       files: [f],
@@ -132,6 +132,8 @@ export function createDemo(): DataState {
     batches: [
       {
         id: "batch-1",
+        campusId: "campus-west",
+        campusName: "西校区",
         name: "晚间配送 · 西区",
         date: "2026-10-29",
         time: "19:00 – 20:00",
@@ -142,6 +144,8 @@ export function createDemo(): DataState {
       },
       {
         id: "batch-2",
+        campusId: "campus-east",
+        campusName: "东校区",
         name: "午后配送 · 东区",
         date: "2026-10-29",
         time: "17:00 – 18:00",
@@ -221,6 +225,8 @@ export function createDemo(): DataState {
     slots: [
       {
         id: "slot-1",
+        campusId: "campus-east",
+        campusName: "东校区",
         date: "2026-10-29",
         weekday: "星期四",
         name: "晚间配送",
@@ -238,6 +244,8 @@ export function createDemo(): DataState {
       },
       {
         id: "slot-2",
+        campusId: "campus-east",
+        campusName: "东校区",
         date: "2026-10-30",
         weekday: "星期五",
         name: "午间配送",
@@ -255,6 +263,8 @@ export function createDemo(): DataState {
       },
       {
         id: "slot-3",
+        campusId: "campus-west",
+        campusName: "西校区",
         date: "2026-10-30",
         weekday: "星期五",
         name: "晚间配送",

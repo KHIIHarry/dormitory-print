@@ -52,11 +52,15 @@ def shanghai_day(value):
 def configured_slot(db, *, capacity=4, campus=None, offset_hours=30, open_offset=-1,
                     cutoff_offset=1, name='测试时段'):
     """A future slot with explicit order-acceptance instants."""
+    from tests.auth_helpers import ensure_test_campus
+    if campus is None:
+        existing = list(db.scalars(select(Campus)))
+        campus = existing[0] if len(existing) == 1 else ensure_test_campus(db)
     now = utcnow()
     starts_at = now + timedelta(hours=offset_hours)
     ends_at = starts_at + timedelta(hours=2)
     slot = DeliverySlot(
-        date=shanghai_day(starts_at), name=name,
+        campus_id=campus.id, date=shanghai_day(starts_at), name=name,
         starts_at=starts_at, ends_at=ends_at,
         open_at=now + timedelta(hours=open_offset),
         cutoff_at=now + timedelta(hours=cutoff_offset),
@@ -185,8 +189,12 @@ def settle(db, order, actor):
 
 def test_slot_create_requires_order_acceptance_window(db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
+    from tests.auth_helpers import ensure_test_campus
+    campus = ensure_test_campus(db)
+    db.commit()
     starts = utcnow() + timedelta(days=2)
     response = api(client, '/admin/slots', {
+        'campusId': campus.id,
         'date': shanghai_day(starts), 'name': '缺失规则时段',
         'start': '10:00', 'end': '12:00', 'capacity': 4, 'enabled': True,
     })
@@ -288,18 +296,23 @@ def test_same_group_joins_and_other_campus_gets_its_own_batch(db, admin_client):
                     campus_id=other_campus.id)
     db.add(west)
     db.flush()
+    west_slot = configured_slot(db, campus=other_campus)
+    west_slot.starts_at, west_slot.ends_at = world.slot.starts_at, world.slot.ends_at
+    west_slot.open_at, west_slot.cutoff_at = world.slot.open_at, world.slot.cutoff_at
     west_order = Order(
         principal_id=world.principal.id, pickup_code='WEST01', status='PENDING_CONFIRMATION',
         preparation_id=world.prep.id, quote_id=world.quote.id, total_cents=10,
         nickname='西区用户', phone='13800000001', location_id=west.id,
-        requested_slot_id=world.slot.id, close_at=utcnow() + timedelta(hours=24), data={})
+        requested_slot_id=west_slot.id, close_at=utcnow() + timedelta(hours=24), data={})
     db.add(west_order)
     db.commit()
     settle(db, west_order, admin_client_actor(admin))
 
     groups = list(db.scalars(select(DeliveryGroup).where(DeliveryGroup.slot_id == world.slot.id)))
-    assert {group.campus_id for group in groups} == {world.campus.id, other_campus.id}
-    batches = list(db.scalars(select(DeliveryBatch).where(DeliveryBatch.slot_id == world.slot.id)))
+    assert {group.campus_id for group in groups} == {world.campus.id}
+    assert db.scalar(select(DeliveryGroup).where(DeliveryGroup.slot_id == west_slot.id)).campus_id == other_campus.id
+    assert world.slot.occupied == west_slot.occupied == 1
+    batches = list(db.scalars(select(DeliveryBatch).where(DeliveryBatch.slot_id.in_([world.slot.id, west_slot.id]))))
     assert len(batches) == 2
     assert all(batch.is_regular for batch in batches)
 
@@ -318,7 +331,7 @@ def test_same_group_joins_and_other_campus_gets_its_own_batch(db, admin_client):
 
 
 def test_legacy_unconfigured_slot_requires_reconciliation_before_settlement(db, admin_client):
-    world = make_world(db, campus=False)
+    world = make_world(db)
     slot = world.slot
     slot.open_at = None
     slot.cutoff_at = None

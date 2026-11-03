@@ -82,6 +82,7 @@ from .models import (
     Account,
     AnonymousLedger,
     Campaign,
+    Campus,
     Coupon,
     DeliveryAssignment,
     DeliveryProof,
@@ -135,7 +136,7 @@ ORDER_SUPPLEMENTARY_FIELDS = {
 ORDER_FIELDS = (
     'orderId', 'pickupCode', 'status', 'totalCents', 'payableCents', 'createdAt',
     'deliveredAt', 'settlementKind', 'cashReceivedCents', 'refundCents',
-    'customerNameMasked', 'phoneMasked', 'locationName', 'slotName',
+    'customerNameMasked', 'phoneMasked', 'locationName', 'slotName', 'campusId', 'campusName',
     *ORDER_SUPPLEMENTARY_FIELDS,
 )
 FINANCE_SUPPLEMENTARY_FIELDS = (
@@ -706,6 +707,16 @@ def _order_value(db, order: Order, field: str, proof: DeliveryProof | None,
         return _mask_name(order.nickname)
     if field == 'phoneMasked':
         return _mask_phone(order.phone)
+    if field in ('campusId', 'campusName'):
+        data = order.data or {}
+        snapshot = data.get('locationSnapshot') or {}
+        slot_snapshot = data.get('confirmedSlotSnapshot') or data.get('requestedSlotSnapshot') or {}
+        location = db.get(Location, order.location_id) if order.location_id else None
+        campus_id = snapshot.get('campusId') or slot_snapshot.get('campusId') or (location.campus_id if location else None)
+        if field == 'campusId':
+            return campus_id or ''
+        campus = db.get(Campus, campus_id) if campus_id else None
+        return snapshot.get('campusName') or slot_snapshot.get('campusName') or (campus.name if campus else '')
     if field == 'locationName':
         location = db.get(Location, order.location_id)
         snapshot = (order.data or {}).get('locationSnapshot') or {}

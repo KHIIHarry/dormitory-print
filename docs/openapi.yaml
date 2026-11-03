@@ -1293,6 +1293,17 @@
       "BatchCreate": {
         "additionalProperties": false,
         "properties": {
+          "campusId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
           "courierId": {
             "anyOf": [
               {
@@ -10475,6 +10486,58 @@
         "title": "OrderList",
         "type": "object"
       },
+      "OrderLocationSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "campusId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
+          "campusName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusname"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mapVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapversion"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "OrderLocationSnapshot",
+        "type": "object"
+      },
       "OrderResult": {
         "additionalProperties": false,
         "properties": {
@@ -10692,6 +10755,16 @@
           "locationId": {
             "title": "Locationid",
             "type": "string"
+          },
+          "locationSnapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderLocationSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "nickname": {
             "title": "Nickname",
@@ -15405,6 +15478,11 @@
       "SlotInput": {
         "additionalProperties": false,
         "properties": {
+          "campusId": {
+            "minLength": 1,
+            "title": "Campusid",
+            "type": "string"
+          },
           "capacity": {
             "maximum": 100000,
             "minimum": 1,
@@ -15494,6 +15572,7 @@
           }
         },
         "required": [
+          "campusId",
           "date",
           "name",
           "start",
@@ -15691,6 +15770,18 @@
       "SlotUpdate": {
         "additionalProperties": false,
         "properties": {
+          "campusId": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
           "capacity": {
             "anyOf": [
               {
@@ -15859,6 +15950,28 @@
             },
             "title": "Blockers",
             "type": "array"
+          },
+          "campusId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
+          "campusName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusname"
           },
           "capacity": {
             "title": "Capacity",
@@ -28549,6 +28662,22 @@
               "title": "Include Archived",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "campusId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Campusid"
+            }
           }
         ],
         "responses": {
@@ -37013,6 +37142,22 @@
                 }
               ],
               "title": "Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "campusId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Campusid"
             }
           }
         ],

@@ -5,7 +5,7 @@ import threading
 import pytest
 
 from app.core import Actor, DomainError
-from auth_helpers import configure_slot
+from auth_helpers import configure_slot, ensure_test_campus
 from app.models import (
     Artifact,
     Asset,
@@ -86,9 +86,10 @@ def submission_fixture(db):
     db.add(quote)
     db.flush()
     prep.quote_id = quote.id
-    location = Location(name='并发测试楼', x=0.5, y=0.5)
+    campus = ensure_test_campus(db)
+    location = Location(name='并发测试楼', x=0.5, y=0.5, campus_id=campus.id)
     slot = configure_slot(DeliverySlot(
-        date=(utcnow() + timedelta(days=2)).date().isoformat(), name='并发时段',
+        campus_id=campus.id, date=(utcnow() + timedelta(days=2)).date().isoformat(), name='并发时段',
         starts_at=utcnow() + timedelta(days=2),
         ends_at=utcnow() + timedelta(days=2, hours=1), capacity=1))
     db.add_all([location, slot])
@@ -226,7 +227,7 @@ def test_slot_archive_waits_for_concurrent_revision_of_new_slot(
     original_version = revision_source.version
 
     new_slot = configure_slot(DeliverySlot(
-        date=(utcnow() + timedelta(days=3)).date().isoformat(), name='修订新时段',
+        campus_id=original_slot.campus_id, date=(utcnow() + timedelta(days=3)).date().isoformat(), name='修订新时段',
         starts_at=utcnow() + timedelta(days=3),
         ends_at=utcnow() + timedelta(days=3, hours=1), capacity=1))
     db.add(new_slot)
@@ -321,3 +322,150 @@ def test_slot_archive_waits_for_concurrent_revision_of_new_slot(
     assert not (stored.data or {}).get('archivedAt')
     updated = db.get(commerce.Order, order_id)
     assert updated is not None and updated.requested_slot_id == new_slot.id
+
+
+def _race_settlement(session, order_id, actor):
+    from app.commerce import ConfirmPayment, settle_order
+    from app.core import lock
+    from app.models import Order
+
+    order = lock(session, Order, order_id)
+    body = ConfirmPayment(expectedVersion=order.version, contentRevision=order.content_revision,
+                          quoteId=order.quote_id, receivedCents=order.total_cents,
+                          settlementKind='CASH_MANUAL', note='并发实收')
+    return settle_order(session, actor, order, body)
+
+
+def test_locked_east_slot_does_not_block_west_settlement(db, staff_factory):
+    from types import SimpleNamespace
+    from sqlalchemy import select
+    from app.db import SessionLocal
+    from app.models import Campus, DeliveryAssignment, Order
+    from tests.test_delivery_closed_loop import configured_slot, make_world, submit
+
+    world = make_world(db)
+    west = Campus(name='西校区')
+    db.add(west)
+    db.flush()
+    west_slot = configured_slot(db, campus=west, capacity=world.slot.capacity)
+    west_slot.starts_at, west_slot.ends_at = world.slot.starts_at, world.slot.ends_at
+    west_slot.open_at, west_slot.cutoff_at = world.slot.open_at, world.slot.cutoff_at
+    location = Location(name='西区楼', campus_id=west.id, x=.5, y=.5)
+    db.add(location)
+    db.flush()
+    west_world = SimpleNamespace(**{**vars(world), 'campus': west, 'slot': west_slot, 'location': location})
+    order = submit(db, west_world)
+    admin = staff_factory(role='ADMIN')
+    actor = Actor(staff_id=admin.id, staff_role='ADMIN', capabilities={'*'})
+    db.commit()
+
+    holder = SessionLocal()
+    holder.scalar(select(DeliverySlot).where(DeliverySlot.id == world.slot.id).with_for_update())
+    entered, done = threading.Event(), threading.Event()
+    result = {}
+    def worker():
+        session = SessionLocal()
+        try:
+            entered.set()
+            _race_settlement(session, order.id, actor)
+            session.commit()
+        except BaseException as error:
+            session.rollback()
+            result['error'] = error
+        finally:
+            done.set()
+            session.close()
+    thread = threading.Thread(target=worker, name='west-settlement')
+    thread.start()
+    try:
+        assert entered.wait(5)
+        finished_while_locked = done.wait(5)
+    finally:
+        holder.rollback()
+        holder.close()
+        thread.join(10)
+    assert finished_while_locked, 'West settlement waited on the independent East slot'
+    assert not thread.is_alive()
+    assert 'error' not in result, result.get('error')
+    db.expire_all()
+    assert db.get(DeliverySlot, world.slot.id).occupied == 0
+    assert db.get(DeliverySlot, west_slot.id).occupied == 1
+    assert db.get(Order, order.id).confirmed_slot_id == west_slot.id
+    assert db.scalar(select(DeliveryAssignment.id).where(DeliveryAssignment.order_id == order.id,
+                                                          DeliveryAssignment.active.is_(True)))
+
+
+def test_cash_settlement_waits_for_seal_and_preserves_unmatched_receipt(db, staff_factory, monkeypatch):
+    from sqlalchemy import select, text
+    import app.commerce as commerce
+    from app.db import SessionLocal
+    from app.delivery_plan import apply_seal
+    from app.models import DeliveryAssignment, Order, Receipt
+    from tests.test_delivery_closed_loop import make_world, submit
+
+    world = make_world(db)
+    order = submit(db, world)
+    admin = staff_factory(role='ADMIN')
+    actor = Actor(staff_id=admin.id, staff_role='ADMIN', capabilities={'*'})
+    db.commit()
+    holder = SessionLocal()
+    locked = holder.scalar(select(DeliverySlot).where(DeliverySlot.id == world.slot.id).with_for_update())
+    entered, done = threading.Event(), threading.Event()
+    outcome = {}
+    original_lock = commerce.lock
+    def observed_lock(session, model, entity_id, expected_version=None):
+        if model is DeliverySlot and entity_id == world.slot.id:
+            outcome['pid'] = session.scalar(text('select pg_backend_pid()'))
+            entered.set()
+        return original_lock(session, model, entity_id, expected_version)
+    monkeypatch.setattr(commerce, 'lock', observed_lock)
+    def worker():
+        session = SessionLocal()
+        try:
+            _race_settlement(session, order.id, actor)
+            session.commit()
+            outcome['success'] = True
+        except DomainError as error:
+            outcome['code'] = error.code
+            outcome['commit'] = error.commit
+            if error.commit:
+                session.commit()
+            else:
+                session.rollback()
+        except BaseException as error:
+            session.rollback()
+            outcome['error'] = error
+        finally:
+            done.set()
+            session.close()
+    thread = threading.Thread(target=worker, name='sealed-slot-settlement')
+    thread.start()
+    try:
+        assert entered.wait(5), f'settlement never requested slot lock: {outcome!r}'
+        # Verify PostgreSQL itself sees the lock wait, not merely thread timing.
+        blocked = False
+        for _ in range(100):
+            if db.scalar(text('select cardinality(pg_blocking_pids(:pid)) > 0'), {'pid': outcome['pid']}):
+                blocked = True
+                break
+            if done.wait(.05):
+                break
+        assert blocked, f'settlement did not wait on slot lock: {outcome!r}'
+        apply_seal(holder, locked, actor, '并发封批')
+        holder.commit()
+        assert done.wait(10), 'settlement did not finish after seal committed'
+    finally:
+        holder.rollback()
+        holder.close()
+        thread.join(10)
+    assert not thread.is_alive()
+    assert 'error' not in outcome, outcome.get('error')
+    assert outcome.get('code') == 'SLOT_SEALED' and outcome.get('commit') is True
+    db.expire_all()
+    receipts = list(db.scalars(select(Receipt).where(Receipt.order_id == order.id)))
+    assert len(receipts) == 1 and receipts[0].status == 'UNMATCHED'
+    assert receipts[0].amount_cents == order.total_cents
+    assert db.get(DeliverySlot, world.slot.id).occupied == 0
+    assert db.get(Order, order.id).confirmed_slot_id is None
+    assert db.scalar(select(DeliveryAssignment.id).where(DeliveryAssignment.order_id == order.id,
+                                                          DeliveryAssignment.active.is_(True))) is None

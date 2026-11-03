@@ -40,3 +40,22 @@ export function CampusTag({ campus }: { campus?: Campus }) {
     </span>
   );
 }
+
+export function orderCampusId(
+  buildings: { id: string; campusId?: string | null }[],
+  order: {
+    locationId?: string | null;
+    locationSnapshot?: any;
+    buildingSnapshot?: any;
+    campusId?: string | null;
+  } | null,
+): string {
+  if (!order) return "";
+  return (
+    buildings.find((building) => building.id === order.locationId)?.campusId ||
+    order.locationSnapshot?.campusId ||
+    order.buildingSnapshot?.campusId ||
+    order.campusId ||
+    ""
+  );
+}

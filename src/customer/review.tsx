@@ -18,6 +18,7 @@ import { photoCrop, photoPaper } from "../lib/photo-layout";
 import { parseRanges, pricingErrors } from "../lib/domain";
 import { isUncertainSubmission, money, now } from "../lib/api";
 import type { Order, Campus } from "../lib/types";
+import { selectableBuildingsForCampus, slotsForCampus } from "../lib/campus";
 import type { Artifact } from "../lib/artifacts";
 import {
   Button,
@@ -188,13 +189,16 @@ function ReviewContent() {
 
   useEffect(() => {
     if (!slot || (!DEMO && !resources.slots?.hasData)) return;
+    if (!campus && building && !DEMO && !resources.buildings?.hasData) return;
     const selected = data.slots.find((item) => item.id === slot);
+    const inferredCampus = !campus && building ? data.buildings.find((item) => item.id === building)?.campusId : undefined;
+    const selectedCampusId = campus || inferredCampus;
     const revoke = () => {
-      if (selected && slotCurrentlySelectable(selected)) return;
+      if (selected && selectedCampusId && selected.campusId === selectedCampusId && slotCurrentlySelectable(selected)) return;
       setSlot("");
       setFields((current) => ({
         ...current,
-        slot: "原预约时段已截单、封批或关闭，请重新选择；其他填写已保留。",
+        slot: "原预约时段不属于当前校区或已关闭，请重新选择；其他填写已保留。",
       }));
     };
     revoke();
@@ -215,7 +219,7 @@ function ReviewContent() {
       document.removeEventListener("visibilitychange", visible);
       window.removeEventListener("focus", visible);
     };
-  }, [slot, data.slots, resources.slots?.hasData]);
+  }, [slot, campus, building, data.buildings, data.slots, resources.slots?.hasData, resources.buildings?.hasData]);
 
   useEffect(() => {
     if (!data.campuses.length) return;
@@ -234,13 +238,24 @@ function ReviewContent() {
     }
   }, [building, campus, data.buildings, data.campuses]);
 
+  useEffect(() => {
+    if (!building || (!DEMO && !resources.buildings?.hasData)) return;
+    // Wait for campus inference when restoring a draft without an explicit campus.
+    if (!campus && data.buildings.some((item) => item.id === building && item.campusId && data.campuses.some((c) => c.id === item.campusId && c.selectionEnabled))) return;
+    if (!selectableBuildingsForCampus(data.buildings, campus).some((item) => item.id === building)) {
+      setBuilding("");
+      setFields((current) => ({ ...current, building: "原楼栋已不可选，请重新选择；其他填写已保留。" }));
+    }
+  }, [building, campus, data.buildings, data.campuses, resources.buildings?.hasData]);
+
   const selectCampus = (next: Campus) => {
     if (!next.selectionEnabled) return;
     setCampus(next.id);
+    if (data.slots.find((item) => item.id === slot)?.campusId !== next.id) setSlot("");
     setSearch("");
     setFields((current) => ({ ...current, campus: "" }));
     const currentBuilding = data.buildings.find((item) => item.id === building);
-    if (currentBuilding && currentBuilding.campusId !== next.id)
+    if (building && (!currentBuilding || !currentBuilding.enabled || currentBuilding.campusId !== next.id))
       setBuilding("");
   };
 
@@ -717,16 +732,10 @@ function ReviewContent() {
   const activeCampus = selectedCampus?.selectionEnabled
     ? selectedCampus
     : undefined;
-  const campusBuildings = hasCampusChoices
-    ? data.buildings.filter(
-        (item) =>
-          item.campusId === activeCampus?.id ||
-          (data.campuses.length === 1 && !item.campusId),
-      )
-    : data.buildings;
-  const visibleBuildings = campusBuildings.filter(
-    (item) => item.enabled && item.name.includes(search),
-  );
+  const campusSlots = slotsForCampus(data.slots, activeCampus?.id);
+  const selectableSlots = campusSlots.filter((item) => slotCurrentlySelectable(item, clock));
+  const campusBuildings = selectableBuildingsForCampus(data.buildings, activeCampus?.id);
+  const visibleBuildings = campusBuildings.filter((item) => item.name.includes(search));
   const mapUrl = activeCampus?.mapUrl || data.config.mapUrl;
 
   const submit = async () => {
@@ -739,7 +748,7 @@ function ReviewContent() {
       error
     )
       return;
-    if (hasCampusChoices && !activeCampus) {
+    if (!activeCampus) {
       const message =
         campus && selectedCampus && !selectedCampus.selectionEnabled
           ? "该校区暂未开放选点，请选择其他校区"
@@ -779,6 +788,10 @@ function ReviewContent() {
       });
       return;
     }
+    if ((!DEMO && !resources.buildings?.hasData) || !campusBuildings.some((item) => item.id === building)) {
+      setFields({ building: "请选择当前校区可用的楼栋" });
+      return;
+    }
     setFields({});
     if (
       !quote ||
@@ -798,7 +811,7 @@ function ReviewContent() {
       toast("当前已暂停接单，请稍后重试");
       return;
     }
-    if (!data.slots.some((s) => s.id === slot && slotCurrentlySelectable(s))) {
+    if (!selectableSlots.some((s) => s.id === slot)) {
       toast("原预约时段已截单、封批或关闭，请重新选择可预约时段");
       return;
     }
@@ -1406,8 +1419,7 @@ function ReviewContent() {
               tabIndex={-1}
               className="slot-choices"
             >
-              {data.slots
-                .filter((s) => slotCurrentlySelectable(s, clock))
+              {selectableSlots
                 .map((s) => (
                   <button
                     className={slot === s.id ? "selected" : ""}
@@ -1441,9 +1453,9 @@ function ReviewContent() {
                   </button>
                 ))}
             </div>
-            {!data.slots.some((s) => slotCurrentlySelectable(s, clock)) && (
+            {!selectableSlots.length && (
               <Notice>
-                当前暂无可预约配送时段，可保留当前工作进度与已上传文件，
+                {activeCampus ? "当前校区暂无可预约配送时段" : "请先选择校区以查看配送时段"}，可保留当前工作进度与已上传文件，
                 待管理员开放或调整时段后再下单。
               </Notice>
             )}
@@ -1604,7 +1616,7 @@ function ReviewContent() {
                 confirmedQuote !== quote.id ||
                 !allArtifactsAcknowledged(artifacts, acks) ||
                 !artifacts.length ||
-                !data.slots.some((s) => slotCurrentlySelectable(s, clock))
+                !selectableSlots.length
               }
             >
               确认并提交订单

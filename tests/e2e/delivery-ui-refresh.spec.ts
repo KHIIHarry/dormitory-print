@@ -43,8 +43,8 @@ test("successive unpaid proposals reuse the returned order version", async ({
     import React from '${reactUrl}'; import ReactDOM from '${domUrl}';
     import {SlotProposals} from '/src/admin/logistics.tsx';
     import '/src/styles.css';
-    window.deliveryFixture={versions:[],order:{id:'pending',pickupCode:'P0001',version:1,status:'PENDING_CONFIRMATION'}};
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SlotProposals,{slots:[{id:'next',date:'2030-11-01',name:'下个时段',start:'12:00',end:'13:00',enabled:true,capacity:30}]}));
+    window.deliveryFixture={versions:[],order:{id:'pending',pickupCode:'P0001',version:1,status:'PENDING_CONFIRMATION',campusId:'campus-east'}};
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SlotProposals,{slots:[{id:'next',campusId:'campus-east',date:'2030-11-01',name:'下个时段',start:'12:00',end:'13:00',enabled:true,capacity:30}]}));
     </script></body></html>
   `,
     }),

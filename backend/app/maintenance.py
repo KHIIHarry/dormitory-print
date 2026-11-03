@@ -78,6 +78,9 @@ from .models import (
     Coupon,
     DeliveryAssignment,
     DeliveryBatch,
+    DeliveryGroup,
+    DeliverySlot,
+    Campus,
     DeliveryChange,
     DeliveryProof,
     DeletionRequest,
@@ -695,6 +698,19 @@ def _restore_blockers(db, entry: TrashEntry) -> list[TrashConflict]:
     if target_type in ('ORDER', 'BATCH', 'ASSET', 'ACCOUNT', 'AFTER_SALE'):
         if getattr(target, 'deleted_at', None) is None:
             blockers.append(TrashConflict(code='TARGET_NOT_TRASHED', message='对象状态已变化，请刷新'))
+    if target_type == 'BATCH':
+        slot = db.get(DeliverySlot, target.slot_id) if target.slot_id else None
+        group = db.get(DeliveryGroup, target.group_id) if target.group_id else None
+        campus = db.get(Campus, target.campus_id) if target.campus_id else None
+        missing = ((target.slot_id and not slot) or (target.group_id and not group)
+                   or (target.campus_id and not campus)
+                   or (slot and slot.campus_id and not target.campus_id))
+        mismatch = ((slot and target.campus_id and slot.campus_id and slot.campus_id != target.campus_id)
+                    or (group and (group.slot_id != target.slot_id or group.campus_id != target.campus_id)))
+        if missing:
+            blockers.append(TrashConflict(code='BATCH_SCOPE_MISSING', message='批次关联的配送范围不存在，不能恢复'))
+        if mismatch:
+            blockers.append(TrashConflict(code='BATCH_SCOPE_MISMATCH', message='批次校区、时段或组不一致，不能恢复'))
     if target_type == 'AFTER_SALE':
         order = db.get(Order, target.order_id)
         if order is None:

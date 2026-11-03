@@ -37,6 +37,7 @@ def create_batch(api, client, courier):
     starts_at = utcnow() + timedelta(hours=-1)
     ends_at = starts_at + timedelta(hours=3)
     response = api(client, '/admin/batches', {
+        'campusId': api(client, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': f'回收站批次 {uuid4().hex[:6]}',
         'startsAt': starts_at.isoformat(),
         'endsAt': ends_at.isoformat(),
@@ -287,6 +288,7 @@ def test_delete_batch_when_member_order_was_already_deleted(
     starts_at = local.astimezone(timezone.utc).replace(tzinfo=None)
     order = make_ready_order(db, delivery_starts_at=starts_at)
     created = api(client, '/admin/batches', {
+        'campusId': api(client, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': f'订单删除批次 {uuid4().hex[:6]}',
         'date': to_shanghai_date(starts_at),
         'time': '10:00 – 12:00',

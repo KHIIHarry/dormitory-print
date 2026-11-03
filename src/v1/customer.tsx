@@ -79,6 +79,8 @@ export type AfterSaleList = {
 };
 
 type SlotBrief = {
+  campusId?: string | null;
+  campusName?: string | null;
   id?: string;
   name?: string;
   date?: string;
@@ -1284,6 +1286,7 @@ export function slotBlockLabel(
   if (!slot) return fallback || "";
   const date = slot.date || "";
   return [
+    slot.campusName,
     date,
     slot.weekday,
     slot.name,

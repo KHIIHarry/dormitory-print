@@ -1,6 +1,6 @@
 import { formatDisplayTime } from "../lib/display-format";
 import { slotCurrentlySelectable } from "../customer/checkout";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -25,10 +25,10 @@ import {
 } from "../lib/trash-blockers";
 import { growthRequest } from "../growth/client";
 import { NumberInput } from "../components/number-input";
-import { campusOfOrder, campusesOfBatch } from "../lib/campus";
-import { CampusFilter, CampusTag } from "./campus-filter";
+import { campusOfOrder, campusesOfBatch, slotsForCampus } from "../lib/campus";
+import { CampusFilter, CampusTag, orderCampusId } from "./campus-filter";
 import { batchPrimaryAction, canStartBatch } from "../lib/domain";
-import type { Batch, DataState, Slot } from "../lib/types";
+import type { Batch, Campus, DataState, Slot } from "../lib/types";
 import {
   eligibleCouriers,
   slotProposalPayload,
@@ -102,12 +102,47 @@ export function Batches() {
   const { data } = useStore();
   const [status, setStatus] = useState("");
   const [campus, setCampus] = useState("");
+  const [createBatch, setCreateBatch] = useState(false);
   const batchCampuses = (batch: Batch) =>
     campusesOfBatch(data.campuses, data.buildings, data.orders, batch);
+  const filterCampuses = [...(data.campuses || [])];
+  for (const batch of data.batches) {
+    if (
+      batch.campusId &&
+      !filterCampuses.some((c) => c.id === batch.campusId)
+    ) {
+      filterCampuses.push({
+        id: batch.campusId,
+        name: batch.campusName || batch.campusId,
+        themeColor: "#888",
+        selectionEnabled: false,
+        sortOrder: 0,
+        mapVersion: 0,
+        items: [],
+      });
+    }
+  }
+  const memberCampusIds = (batch: Batch) =>
+    new Set(
+      data.orders
+        .filter((o) => batch.orderIds.includes(o.id))
+        .map((o) => orderCampusId(data.buildings || [], o as any))
+        .filter(Boolean),
+    );
+  const hasMixedCampus = (batch: Batch) => {
+    const ids = memberCampusIds(batch);
+    return (
+      ids.size > 1 ||
+      (!!batch.campusId && [...ids].some((id) => id !== batch.campusId))
+    );
+  };
   const visibleBatches = data.batches.filter(
     (batch) =>
       (!status || batch.status === status) &&
-      (!campus || batchCampuses(batch).some((item) => item.id === campus)),
+      (!campus ||
+        (batch.campusId
+          ? batch.campusId === campus
+          : batchCampuses(batch).some((item) => item.id === campus))),
   );
   return (
     <>
@@ -115,10 +150,16 @@ export function Batches() {
         title="配送调度"
         description="先规划，再核对；资料全部装袋后，才开始配送。"
         action={
-          <Link className="text-button" to={`${ADMIN}/slots`}>
-            <Clock size={16} />
-            管理配送时段
-          </Link>
+          <div className="button-row">
+            <Link className="text-button" to={`${ADMIN}/slots`}>
+              <Clock size={16} />
+              管理配送时段
+            </Link>
+            <Button onClick={() => setCreateBatch(true)}>
+              <Plus size={17} />
+              新建批次
+            </Button>
+          </div>
         }
       />
       <div className="production-stats">
@@ -147,11 +188,11 @@ export function Batches() {
           </div>
         ))}
       </div>
-      {!!(data.campuses?.length ?? 0) && (
+      {!!filterCampuses.length && (
         <Panel className="filter-panel">
           <div className="filter-row">
             <CampusFilter
-              campuses={data.campuses}
+              campuses={filterCampuses}
               value={campus}
               onChange={setCampus}
             />
@@ -215,7 +256,7 @@ export function Batches() {
                 ) : (
                   <span className="muted">校区待定</span>
                 )}
-                {batchCampuses(b).length > 1 && (
+                {hasMixedCampus(b) && (
                   <span className="red-text">跨校区，请拆分后再配送</span>
                 )}
               </div>
@@ -250,6 +291,7 @@ export function Batches() {
           );
         })}
       </div>
+      {createBatch && <BatchForm onClose={() => setCreateBatch(false)} />}
       {!visibleBatches.length && (
         <Panel>
           <Empty
@@ -275,6 +317,22 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
     : catalog.options;
   const [name, setName] = useState(batch?.name || "");
   const [slotId, setSlotId] = useState("");
+  const [batchCampus, setBatchCampus] = useState("");
+  const [batchCampuses, setBatchCampuses] = useState<Campus[]>(
+    data.campuses || [],
+  );
+  useEffect(() => {
+    if (DEMO || batch) return;
+    let active = true;
+    growthRequest<{ items: Campus[] }>("/admin/campuses")
+      .then((result) => {
+        if (active) setBatchCampuses(result.items || []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [batch]);
   const [availableSlots, setAvailableSlots] = useState<Slot[]>(
     DEMO ? data.slots : [],
   );
@@ -305,6 +363,22 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
         />
       </Field>
       {!batch && (
+        <Field label="配送校区">
+          <CampusFilter
+            campuses={batchCampuses}
+            value={batchCampus}
+            allLabel="请选择校区"
+            ariaLabel="配送校区"
+            onChange={(value) => {
+              setBatchCampus(value);
+              setSlotId("");
+              setDate("");
+              setTime("");
+            }}
+          />
+        </Field>
+      )}
+      {!batch && (
         <Field
           label="配送时段"
           hint="选择已配置的预计配送时段；配送可根据实际情况提前开始。"
@@ -321,7 +395,7 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
             }}
           >
             <option value="">请选择配送时段</option>
-            {availableSlots
+            {slotsForCampus(availableSlots, batchCampus)
               .filter((item) => item.enabled)
               .map((item) => (
                 <option key={item.id} value={item.id}>
@@ -445,6 +519,7 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
                         courierId: courier,
                         status: "PLANNED",
                         orderIds: [],
+                        campusId: batchCampus,
                         version: 1,
                       },
                     ],
@@ -479,6 +554,60 @@ export function BatchDetail() {
     blockers: string[];
   } | null>(null);
   const [commitBlockers, setCommitBlockers] = useState<TrashBlocker[]>([]);
+  const scopeSignature = JSON.stringify({
+    mode,
+    id,
+    selected,
+    target,
+    campus: batch?.campusId,
+    members: batch?.orderIds,
+    version: batch?.version,
+    targetBatch: data.batches.find((item) => item.id === target),
+  });
+  const scopeRef = useRef(scopeSignature);
+  scopeRef.current = scopeSignature;
+  useEffect(() => {
+    setPreview(null);
+    setCommitBlockers([]);
+  }, [scopeSignature]);
+  useEffect(() => {
+    if (!target) return;
+    const source = data.batches.find((item) => item.id === id);
+    const destination = data.batches.find((item) => item.id === target);
+    if (
+      !source?.campusId ||
+      destination?.campusId !== source.campusId ||
+      ["DELIVERING", "COMPLETED", "CANCELLED"].includes(destination.status)
+    )
+      setTarget("");
+  }, [data.batches, id, target]);
+  useEffect(() => {
+    const source = data.batches.find((item) => item.id === id);
+    if (!source) return;
+    if (mode === "MERGE") {
+      setSelected((current) =>
+        JSON.stringify(current) === JSON.stringify(source.orderIds)
+          ? current
+          : [...source.orderIds],
+      );
+      return;
+    }
+    if (!["ADD", "REMOVE", "TRANSFER", "SPLIT"].includes(mode)) return;
+    setSelected((current) => {
+      const next = current.filter((orderId) => {
+        if (mode !== "ADD") return source.orderIds.includes(orderId);
+        const order = data.orders.find((item) => item.id === orderId);
+        return (
+          !!source.campusId &&
+          !!order &&
+          !order.batchId &&
+          !["CANCELLED", "DELIVERED", "DELIVERING"].includes(order.status) &&
+          orderCampusId(data.buildings || [], order as any) === source.campusId
+        );
+      });
+      return next.length === current.length ? current : next;
+    });
+  }, [data.batches, data.orders, data.buildings, id, mode]);
   if (!batch) return <Empty title="配送批次不存在" />;
   const orders = data.orders.filter((o) => batch.orderIds.includes(o.id));
   const batchCampusList = campusesOfBatch(
@@ -487,8 +616,16 @@ export function BatchDetail() {
     data.orders,
     batch,
   );
-  const batchCampusId = batchCampusList[0]?.id || "";
-  const mixedCampus = batchCampusList.length > 1;
+  const batchCampusId = batch.campusId || "";
+  const memberCampusIds = new Set(
+    orders
+      .map((order) => orderCampusId(data.buildings || [], order as any))
+      .filter(Boolean),
+  );
+  const mixedCampus =
+    memberCampusIds.size > 1 ||
+    (!!batchCampusId &&
+      [...memberCampusIds].some((value) => value !== batchCampusId));
   const canStart = canStartBatch(orders) && !mixedCampus;
   const candidates =
     mode === "ADD"
@@ -497,12 +634,8 @@ export function BatchDetail() {
           if (["CANCELLED", "DELIVERED", "DELIVERING"].includes(o.status)) {
             return false;
           }
-          const orderCampus = campusOfOrder(
-            data.campuses,
-            data.buildings,
-            o,
-          )?.id;
-          if (batchCampusId && orderCampus !== batchCampusId) return false;
+          const orderCampus = orderCampusId(data.buildings || [], o as any);
+          if (!batchCampusId || orderCampus !== batchCampusId) return false;
           if (candidateCampus && orderCampus !== candidateCampus) return false;
           return true;
         })
@@ -592,6 +725,7 @@ export function BatchDetail() {
       blockers.push("配送中批次不能直接删除，请先处理实际配送执行");
     if (!DEMO) {
       try {
+        const requestedScope = scopeRef.current;
         const plan = await mutation<{
           planId: string;
           blockers: { message: string }[];
@@ -603,6 +737,10 @@ export function BatchDetail() {
           versions: { [id!]: batch.version },
           payload: { date, time, reason },
         });
+        if (scopeRef.current !== requestedScope) {
+          toast("批次范围已变化，请重新预览");
+          return;
+        }
         setPreview({
           id: plan.planId,
           blockers: plan.blockers.map((b) => b.message),
@@ -751,7 +889,11 @@ export function BatchDetail() {
         {batchCampusList.map((item) => (
           <CampusTag key={item.id} campus={item} />
         ))}
-        {!batchCampusList.length && <span className="muted">校区待定</span>}
+        {!batchCampusList.length && (
+          <span className={batch.campusName ? "" : "muted"}>
+            {batch.campusName || batch.campusId || "校区待定"}
+          </span>
+        )}
         <span>
           规划订单 <b>{orders.length}</b>
         </span>
@@ -765,9 +907,6 @@ export function BatchDetail() {
             }
           </b>
         </span>
-        {(batch as Record<string, any>).campusName && (
-          <span>{(batch as Record<string, any>).campusName}</span>
-        )}
       </div>
       {(batch as Record<string, any>).isRegular &&
         batch.status === "PLANNED" &&
@@ -1044,25 +1183,17 @@ export function BatchDetail() {
             </>
           ) : (
             <>
-              {mode === "ADD" &&
-                !batchCampusId &&
-                (data.campuses?.length ?? 0) > 1 && (
-                  <Field label="按校区筛选可添加订单">
-                    <CampusFilter
-                      campuses={data.campuses}
-                      value={candidateCampus}
-                      onChange={(value) => {
-                        setCandidateCampus(value);
-                        setSelected([]);
-                      }}
-                      allLabel="全部校区（首单将锁定批次校区）"
-                    />
-                  </Field>
-                )}
+              {mode === "ADD" && !batchCampusId && (
+                <Notice type="error">
+                  该批次缺少明确校区，无法添加订单，请先核对旧数据。
+                </Notice>
+              )}
               {mode === "ADD" && batchCampusId && (
                 <p className="form-hint">
                   本批次已锁定校区：
-                  {batchCampusList.map((item) => item.name).join(" / ")}
+                  {batchCampusList.map((item) => item.name).join(" / ") ||
+                    batch.campusName ||
+                    batchCampusId}
                 </p>
               )}
               {["ADD", "REMOVE", "TRANSFER", "SPLIT"].includes(mode) && (
@@ -1115,18 +1246,7 @@ export function BatchDetail() {
                         ) {
                           return false;
                         }
-                        const targetCampuses = campusesOfBatch(
-                          data.campuses,
-                          data.buildings,
-                          data.orders,
-                          b,
-                        );
-                        return (
-                          !batchCampusId ||
-                          targetCampuses.length === 0 ||
-                          (targetCampuses.length === 1 &&
-                            targetCampuses[0].id === batchCampusId)
-                        );
+                        return !!batchCampusId && b.campusId === batchCampusId;
                       })
                       .map((b) => {
                         const targetCampuses = campusesOfBatch(
@@ -1238,6 +1358,32 @@ export function Slots() {
   >(null);
   const [slots, setSlots] = useState<Slot[]>(data.slots);
   const [slotError, setSlotError] = useState("");
+  const [campuses, setCampuses] = useState<Campus[]>(data.campuses || []);
+  const [campusFilter, setCampusFilter] = useState("");
+  useEffect(() => {
+    if (DEMO) {
+      setCampuses(data.campuses || []);
+      return;
+    }
+    let active = true;
+    growthRequest<{ items: Campus[] }>("/admin/campuses")
+      .then((result) => {
+        if (active) setCampuses(result.items || []);
+      })
+      .catch(() => {
+        if (active) setCampuses(data.campuses || []);
+      });
+    return () => {
+      active = false;
+    };
+  }, [data.campuses]);
+  const campusName = (slot: Slot) =>
+    slot.campusName ||
+    campuses.find((c) => c.id === slot.campusId)?.name ||
+    "校区待定";
+  const visibleSlots = slots.filter(
+    (slot) => !campusFilter || slot.campusId === campusFilter,
+  );
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [removeSlot, setRemoveSlot] = useState<Slot | null>(null);
   const [removeReason, setRemoveReason] = useState("");
@@ -1271,7 +1417,14 @@ export function Slots() {
   const openEditor = (slot?: Slot) => {
     setFormErrors({});
     if (!slot) {
-      setEdit({ enabled: true, capacity: 30 });
+      setEdit({
+        enabled: true,
+        capacity: 30,
+        campusId:
+          campuses.filter((c) => c.selectionEnabled).length === 1
+            ? campuses.find((c) => c.selectionEnabled)?.id
+            : "",
+      });
       return;
     }
     setEdit({
@@ -1284,6 +1437,7 @@ export function Slots() {
   const save = async () => {
     if (!edit) return;
     const errors: Record<string, string> = {};
+    if (!edit.campusId) errors.campusId = "请选择配送校区";
     if (!edit.date) errors.date = "请选择配送日期";
     if (!edit.name?.trim()) errors.name = "请填写时段名称";
     if (!edit.start) errors.start = "请选择预计配送开始时间";
@@ -1352,6 +1506,7 @@ export function Slots() {
       capacity: edit.capacity,
     } as Slot;
     const payload: Record<string, unknown> = {
+      campusId: edit.campusId,
       date: edit.date,
       name: edit.name,
       start: edit.start,
@@ -1450,10 +1605,16 @@ export function Slots() {
         </Notice>
       )}
       <Panel>
+        <CampusFilter
+          campuses={campuses}
+          value={campusFilter}
+          onChange={setCampusFilter}
+        />
         <div className="table-scroll">
           <table>
             <thead>
               <tr>
+                <th>校区</th>
                 <th>日期 / 名称</th>
                 <th>预计配送</th>
                 <th>接单窗口</th>
@@ -1463,12 +1624,13 @@ export function Slots() {
               </tr>
             </thead>
             <tbody>
-              {slots.map((s: any) => {
+              {visibleSlots.map((s: any) => {
                 const state =
                   s.acceptanceStatus ||
                   (s.sealedAt ? "SEALED" : s.enabled ? "OPEN" : "DISABLED");
                 return (
                   <tr key={s.id}>
+                    <td>{campusName(s)}</td>
                     <td>
                       {s.date}
                       <small>
@@ -1536,15 +1698,21 @@ export function Slots() {
             </tbody>
           </table>
         </div>
-        {!slots.length && <Empty title="尚未配置配送时段" />}
+        {!visibleSlots.length && (
+          <Empty
+            title={slots.length ? "该校区暂无配送时段" : "尚未配置配送时段"}
+          />
+        )}
       </Panel>
-      {!DEMO && <SlotProposals slots={slots} />}
-      {!DEMO && <PaidArrangementProposals slots={slots} />}
+      {!DEMO && <SlotProposals slots={slots} buildings={data.buildings} />}
+      {!DEMO && (
+        <PaidArrangementProposals slots={slots} buildings={data.buildings} />
+      )}
       {!DEMO && <DeliveryRepairPanel />}
       {removeSlot && (
         <Modal title="移除配送时段" onClose={() => setRemoveSlot(null)}>
           <Notice>
-            将归档「{removeSlot.name}
+            将归档「{campusName(removeSlot)} · {removeSlot.name}
             」，保留历史记录；有关联中的订单或批次时无法移除。
           </Notice>
           <Field label="移除原因（选填）">
@@ -1586,8 +1754,9 @@ export function Slots() {
       {sealSlot && (
         <Modal title="提前封批" onClose={() => setSealSlot(null)}>
           <Notice>
-            封批会立即结束「{sealSlot.date} · {sealSlot.name}
-            」的新申请，冻结所有校区名单； 不可撤销，需要继续接单请新建时段。
+            封批会立即结束「{campusName(sealSlot)} · {sealSlot.date} ·{" "}
+            {sealSlot.name}
+            」的新申请并冻结该时段名单； 不可撤销，需要继续接单请新建时段。
           </Notice>
           {sealError && <Notice type="error">{sealError}</Notice>}
           {!sealPreview && sealBusy && <p>正在检查影响范围…</p>}
@@ -1636,6 +1805,39 @@ export function Slots() {
           onClose={() => setEdit(null)}
         >
           <div className="slot-editor-form">
+            <Field
+              label="配送校区"
+              error={formErrors.campusId}
+              hint={
+                edit.id
+                  ? "已有业务引用的时段不能更换校区，保存时由服务器校验。"
+                  : "每个时段只属于一个校区。"
+              }
+            >
+              <select
+                data-slot-field="campusId"
+                value={edit.campusId || ""}
+                disabled={
+                  !!edit.id &&
+                  ((edit.occupied || 0) > 0 ||
+                    (edit.batchCount || 0) > 0 ||
+                    (edit.pendingApplicationCount || 0) > 0)
+                }
+                onChange={(event) =>
+                  setEdit({ ...edit, campusId: event.target.value })
+                }
+              >
+                <option value="">请选择配送校区</option>
+                {campuses
+                  .filter((c) => c.selectionEnabled || c.id === edit.campusId)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {!c.selectionEnabled ? "（已关闭）" : ""}
+                    </option>
+                  ))}
+              </select>
+            </Field>
             {((edit as any).occupied > 0 || (edit as any).batchCount > 0) && (
               <Notice>
                 该时段已有订单或批次。修改预计配送时间会影响现有预约，需要调整配送安排；
@@ -1707,7 +1909,7 @@ export function Slots() {
             <Field
               label="预约容量（单）"
               error={formErrors.capacity}
-              hint="同一时段各校区共享总容量；拆分批次不会重复占用"
+              hint="容量仅适用于该校区时段；拆分批次不会重复占用"
             >
               <NumberInput
                 min={1}
@@ -1726,7 +1928,7 @@ export function Slots() {
                   setEdit({ ...edit, enabled: e.target.checked })
                 }
               />
-              人工开启接单（关闭只停止新申请，不取消已有配送）
+              人工开启接单（关闭后停止该校区时段的新申请，不取消已有配送）
             </label>
             <Button
               busy={
@@ -1745,7 +1947,13 @@ export function Slots() {
   );
 }
 
-export function PaidArrangementProposals({ slots }: { slots: Slot[] }) {
+export function PaidArrangementProposals({
+  slots,
+  buildings = [],
+}: {
+  slots: Slot[];
+  buildings?: DataState["buildings"];
+}) {
   const [orders, setOrders] = useState<AdminOrderView[]>([]);
   const [target, setTarget] = useState<AdminOrderView | null>(null);
   const [slotId, setSlotId] = useState("");
@@ -1776,11 +1984,21 @@ export function PaidArrangementProposals({ slots }: { slots: Slot[] }) {
   useEffect(() => {
     void load();
   }, []);
-  const available = slots.filter((slot) => slotCurrentlySelectable(slot));
+  const available = slotsForCampus(
+    slots,
+    orderCampusId(buildings, target as any),
+  ).filter((slot) => slotCurrentlySelectable(slot));
+  useEffect(() => {
+    if (slotId && !available.some((slot) => slot.id === slotId)) setSlotId("");
+  }, [slotId, available]);
   const submit = async () => {
     if (!target) return;
-    if (!slotId.trim()) {
-      setError("请选择要建议的新时段");
+    if (
+      !available.some(
+        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
+      )
+    ) {
+      setError("请选择该订单校区可预约的新时段");
       return;
     }
     if (!reason.trim()) {
@@ -1911,7 +2129,13 @@ export function PaidArrangementProposals({ slots }: { slots: Slot[] }) {
   );
 }
 
-export function SlotProposals({ slots }: { slots: Slot[] }) {
+export function SlotProposals({
+  slots,
+  buildings = [],
+}: {
+  slots: Slot[];
+  buildings?: DataState["buildings"];
+}) {
   const [orders, setOrders] = useState<AdminOrderView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1919,7 +2143,13 @@ export function SlotProposals({ slots }: { slots: Slot[] }) {
   const [slotId, setSlotId] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const available = slots.filter((slot) => slotCurrentlySelectable(slot));
+  const available = slotsForCampus(
+    slots,
+    orderCampusId(buildings, target as any),
+  ).filter((slot) => slotCurrentlySelectable(slot));
+  useEffect(() => {
+    if (slotId && !available.some((slot) => slot.id === slotId)) setSlotId("");
+  }, [slotId, available]);
   const load = async () => {
     setLoading(true);
     setError("");
@@ -1940,6 +2170,14 @@ export function SlotProposals({ slots }: { slots: Slot[] }) {
   const propose = async () => {
     if (!target) return;
     let body: ReturnType<typeof slotProposalPayload>;
+    if (
+      !available.some(
+        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
+      )
+    ) {
+      setError("请选择该订单校区可预约的时段");
+      return;
+    }
     try {
       body = slotProposalPayload(target, slotId, reason);
     } catch (cause) {
@@ -2090,6 +2328,13 @@ type DeliveryRepairRow = {
   batchId?: string;
   batchIds?: string[];
   campusId?: string | null;
+  campusIds?: string[];
+  references?: {
+    type: string;
+    id: string;
+    campusId?: string | null;
+    deleted?: boolean;
+  }[];
   name?: string;
   date?: string;
   status?: string;
@@ -2103,6 +2348,7 @@ type DeliveryRepairPreview = {
   readOnly: boolean;
   generatedAt: string;
   counts: Record<string, number>;
+  campusScopeIssues?: DeliveryRepairRow[];
   unconfiguredSlots: DeliveryRepairRow[];
   paidUnassignedOrders: DeliveryRepairRow[];
   ambiguousGroups: DeliveryRepairRow[];
@@ -2133,6 +2379,7 @@ export function DeliveryRepairPanel() {
     }
   };
   const sections = [
+    ["campusScopeIssues", "校区归属需核对的时段"],
     ["unconfiguredSlots", "待补接单规则的时段"],
     ["paidUnassignedOrders", "已结算但缺少有效分配的订单"],
     ["ambiguousGroups", "需核对的同范围旧批次"],
@@ -2163,13 +2410,13 @@ export function DeliveryRepairPanel() {
           {sections.map(([key, label]) => (
             <details key={key}>
               <summary>
-                {label}：{preview.counts[key] ?? preview[key].length}
+                {label}：{preview.counts[key] ?? (preview[key] || []).length}
               </summary>
-              {!preview[key].length ? (
+              {!(preview[key] || []).length ? (
                 <p className="muted">未发现此类记录</p>
               ) : (
                 <ul>
-                  {preview[key].map((row, index) => (
+                  {(preview[key] || []).map((row, index) => (
                     <li
                       key={
                         row.orderId ||
@@ -2196,6 +2443,25 @@ export function DeliveryRepairPanel() {
                       )}
                       {row.campusId && (
                         <p className="form-hint">校区 ID：{row.campusId}</p>
+                      )}
+                      {!!row.campusIds?.length && (
+                        <p className="form-hint">
+                          涉及校区 ID：{row.campusIds.join("、")}
+                        </p>
+                      )}
+                      {!!row.references?.length && (
+                        <details>
+                          <summary>关联记录：{row.references.length}</summary>
+                          <ul>
+                            {row.references.map((ref, refIndex) => (
+                              <li key={`${ref.type}-${ref.id}-${refIndex}`}>
+                                {ref.type} · {ref.id} · 校区{" "}
+                                {ref.campusId || "待核对"}
+                                {ref.deleted ? " · 已删除" : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
                       )}
                       {!!row.batchIds?.length && (
                         <p className="form-hint">

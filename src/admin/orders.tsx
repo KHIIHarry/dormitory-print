@@ -10,7 +10,7 @@ import { AdminSupplementaryPanel } from "../v1/supplementary";
 import { assertQuote, settlementWithReceipt } from "../growth/pricing";
 import { AdminAccessLinks } from "../growth/order-links";
 import { useIdentity } from "../growth/identity";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Link,
   useNavigate,
@@ -36,8 +36,12 @@ import {
 } from "lucide-react";
 import { ADMIN, useStore } from "../lib/store";
 import { money } from "../lib/api";
-import { campusOfOrder } from "../lib/campus";
-import { CampusFilter, CampusTag } from "./campus-filter";
+import { campusOfOrder, slotsForCampus } from "../lib/campus";
+import {
+  CampusFilter,
+  CampusTag,
+  orderCampusId,
+} from "./campus-filter";
 import {
   hasWageBlocker,
   trashBlockers,
@@ -772,6 +776,7 @@ export function AdminOrderDetail() {
                 staff?.capabilities?.includes("payment.manage")) && (
                 <PendingSlotProposal
                   slots={data.slots}
+                  campusId={orderCampusId(data.buildings || [], order as any)}
                   proposal={(order as any).slotProposal}
                   onSubmit={async (slotId, reason) => {
                     await growthRequest(
@@ -1171,10 +1176,12 @@ export function DeliveryNoticePanel({
 
 export function PendingSlotProposal({
   slots,
+  campusId,
   proposal,
   onSubmit,
 }: {
   slots: Slot[];
+  campusId?: string;
   proposal?: {
     slotId: string;
     reason?: string;
@@ -1188,7 +1195,12 @@ export function PendingSlotProposal({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const available = slots.filter((slot) => slotCurrentlySelectable(slot));
+  const available = slotsForCampus(slots, campusId).filter((slot) =>
+    slotCurrentlySelectable(slot),
+  );
+  useEffect(() => {
+    if (slotId && !available.some((slot) => slot.id === slotId)) setSlotId("");
+  }, [slotId, available]);
   const submit = async () => {
     if (busy) return;
     if (

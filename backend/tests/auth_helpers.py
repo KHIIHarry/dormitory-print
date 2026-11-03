@@ -179,7 +179,7 @@ def make_order(db, principal_id: str, status: str = 'PENDING_CONFIRMATION', tota
     db.flush()
     starts = utcnow() + timedelta(hours=2)
     slot = configure_slot(DeliverySlot(
-        date=starts.date().isoformat(), name='下午', starts_at=starts,
+        campus_id=location.campus_id, date=starts.date().isoformat(), name='下午', starts_at=starts,
         ends_at=starts + timedelta(hours=2), capacity=20))
     db.add(slot)
     db.flush()

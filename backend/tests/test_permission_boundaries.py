@@ -258,6 +258,7 @@ def test_capability_hash_prevents_cached_replay_after_revocation(
     client = staff_session(client_factory, db, ['delivery.manage'])
     starts_at = utcnow() - timedelta(hours=1)
     body = {
+        'campusId': api(client, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': '幂等撤回测试',
         'startsAt': starts_at.isoformat(),
         'endsAt': (starts_at + timedelta(hours=2)).isoformat(),
@@ -281,6 +282,7 @@ def test_limited_admin_cannot_schedule_deliveries_but_delivery_manage_can(
     courier = staff_factory(role='COURIER', capabilities=[])
     day = (datetime.now(SHANGHAI) + timedelta(days=3)).date().isoformat()
     body = {
+        'campusId': api(delivery_admin, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': '权限边界批次',
         'date': day,
         'time': '10:00-12:00',
@@ -322,6 +324,7 @@ def test_limited_admin_cannot_use_the_courier_admin_bypass(
     courier = staff_factory(role='COURIER', capabilities=[])
     day = (datetime.now(SHANGHAI) + timedelta(days=3)).date().isoformat()
     batch = api(delivery_admin, '/admin/batches', {
+        'campusId': api(delivery_admin, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': '配送员旁路批次',
         'date': day,
         'time': '13:00-15:00',
@@ -360,6 +363,7 @@ def test_media_admin_capabilities_are_scope_bound(
     order = make_order(db, owner.principal_id, status='DELIVERING')
     day = (datetime.now(SHANGHAI) + timedelta(days=2)).date().isoformat()
     batch = api(delivery_admin, '/admin/batches', {
+        'campusId': api(delivery_admin, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': '凭证批次', 'date': day, 'time': '09:00-11:00',
         'courierId': courier.id, 'reason': 'fixture',
     }).json()['data']

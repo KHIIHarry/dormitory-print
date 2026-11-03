@@ -200,7 +200,7 @@ export function CourierBatch() {
       </Link>
       <PageHeading
         title={batch.name}
-        description={`${batch.date} · ${batch.time}`}
+        description={`${batch.campusName || data.campuses.find((campus) => campus.id === batch.campusId)?.name || "校区待核实"} · ${batch.date} · ${batch.time}`}
       />
       <Notice>
         {batch.status === "DELIVERING"

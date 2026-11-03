@@ -62,6 +62,11 @@ def main():
     sub.add_parser('doctor')
     sub.add_parser('maintenance')
     sub.add_parser('work-once')
+    campus_preview=sub.add_parser('delivery-campus-preview',help='只读预检旧配送时段的校区归属与容量')
+    campus_preview.add_argument('--slot-id',required=True)
+    campus_apply=sub.add_parser('delivery-campus-apply',help='依据已核对的预检清单迁移旧共享时段')
+    campus_apply.add_argument('--manifest',required=True,type=Path)
+    campus_apply.add_argument('--admin-id',required=True,help='记录本次核对的有效调度管理员 ID')
     args=parser.parse_args()
     db.configure()
     if args.command=='migrate':migrate()
@@ -77,6 +82,24 @@ def main():
     elif args.command=='work-once':
         from .jobs import run_one
         print(run_one())
+    elif args.command in ('delivery-campus-preview','delivery-campus-apply'):
+        import json
+        from .core import Actor, DomainError
+        from .models import Staff
+        from .delivery_campus_migration import apply_campus_migration, preview_campus_migration
+        try:
+            with SessionLocal.begin() as session:
+                if args.command=='delivery-campus-preview':
+                    result=preview_campus_migration(session,args.slot_id)
+                else:
+                    staff=session.get(Staff,args.admin_id)
+                    if not staff or not staff.enabled or staff.status!='ACTIVE' or staff.role!='ADMIN':
+                        raise DomainError('FORBIDDEN','须指定当前有效的调度管理员',403)
+                    actor=Actor(staff_id=staff.id,staff_role=staff.role,capabilities=set(staff.capabilities or []))
+                    result=apply_campus_migration(session,json.loads(args.manifest.read_text()),actor)
+            print(json.dumps(result,ensure_ascii=False,indent=2,default=str))
+        except DomainError as error:
+            parser.exit(2,f'{error.code}: {error.message}\n')
 
 
 if __name__=='__main__':main()

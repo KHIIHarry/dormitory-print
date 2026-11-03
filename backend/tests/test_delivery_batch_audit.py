@@ -42,7 +42,7 @@ def test_manual_add_rejects_unsettled_order(db, api, client, act_as, staff_facto
     act_as(staff_factory())
     world = make_world(db)
     order = submit(db, world)
-    batch = DeliveryBatch(name='人工批次', starts_at=world.slot.starts_at,
+    batch = DeliveryBatch(name='人工批次', campus_id=world.campus.id, starts_at=world.slot.starts_at,
                           ends_at=world.slot.ends_at, status='PLANNED', data={})
     db.add(batch)
     db.commit()
@@ -89,7 +89,7 @@ def test_transfer_into_midnight_spanning_batch_needs_reason_not_confirmation(
     _, order, source = paid_batch(db, admin)
     courier = staff_factory(role='COURIER')
     starts = shanghai_2300(source.starts_at)
-    target = DeliveryBatch(name='跨零点人工批次', courier_id=courier.id,
+    target = DeliveryBatch(name='跨零点人工批次', courier_id=courier.id, campus_id=source.campus_id,
                            starts_at=starts, ends_at=starts + timedelta(hours=3),
                            status='PLANNED', data={})
     db.add(target)
@@ -208,7 +208,7 @@ def test_transfer_cannot_silently_change_delivery_window(db, api, client, act_as
     admin = act_as(staff_factory())
     world, order, source = paid_batch(db, admin)
     courier = staff_factory(role='COURIER')
-    target = DeliveryBatch(name='另一天人工批次', courier_id=courier.id,
+    target = DeliveryBatch(name='另一天人工批次', courier_id=courier.id, campus_id=source.campus_id,
                            starts_at=source.starts_at + timedelta(days=1),
                            ends_at=source.ends_at + timedelta(days=1), status='PLANNED', data={})
     db.add(target)

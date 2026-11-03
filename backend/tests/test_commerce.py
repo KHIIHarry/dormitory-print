@@ -3,7 +3,7 @@ import pytest
 
 from app.models import (Artifact,Asset,ConfigSection,DeliverySlot,Location,Preparation,Principal,Quote,utcnow)
 from app.core import Actor,DomainError
-from auth_helpers import configure_slot
+from auth_helpers import configure_slot, ensure_test_campus
 
 
 @pytest.fixture
@@ -34,8 +34,9 @@ def ready_preparation(db):
                 subtotal_cents=10,total_cents=10,discount_cents=0,data={'id':'seed','priceVersion':prices.version,'lines':[{'key':'a4-one','relatedId':artifact.id,'unit':'SHEET','quantity':1,'unitPriceCents':10,'amountCents':10,'service':'A4'}],'discounts':[],'discountAllocations':[],'selectionMode':'AUTO','selectedPromotionType':'NONE','deliveryFeeCents':0,'volumeDiscountCandidate':None,'selectedEligibleSubtotalCents':0,'checkoutAccountId':None})
     db.add(quote);db.flush()
     prep.quote_id=quote.id
-    location=Location(name='一号楼',x=.5,y=.5)
-    slot=configure_slot(DeliverySlot(date='2030-01-01',name='晚间',starts_at=utcnow()+timedelta(days=1),ends_at=utcnow()+timedelta(days=1,hours=1),capacity=1))
+    campus=ensure_test_campus(db)
+    location=Location(name='一号楼',x=.5,y=.5,campus_id=campus.id)
+    slot=configure_slot(DeliverySlot(campus_id=campus.id,date='2030-01-01',name='晚间',starts_at=utcnow()+timedelta(days=1),ends_at=utcnow()+timedelta(days=1,hours=1),capacity=1))
     db.add_all([location,slot]);db.flush()
     body={'preparationId':prep.id,'quoteId':quote.id,'previewAcks':[{'artifactId':artifact.id,'sha256':artifact.sha256}],
           'contact':{'wechatNickname':'测试用户','phone':'13800000000'},'locationId':location.id,'slotId':slot.id,'customerNote':'备注'}

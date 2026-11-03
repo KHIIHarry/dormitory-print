@@ -9,9 +9,10 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import object_session
 
 from .config import get_config
 from .core import (
@@ -43,6 +44,7 @@ from .delivery_plan import (
     apply_seal,
     arrangement_for_order,
     batch_effective_sealed,
+    group_for_slot_campus,
     persist_seal_facts,
     record_change,
     seal_preview,
@@ -182,8 +184,10 @@ def _location_snapshot(db, order: Order) -> dict:
     if location is None:
         return {'locationId': order.location_id, 'name': '', 'type': 'DORMITORY',
                 'x': 0.0, 'y': 0.0, 'mapVersion': 1}
+    campus = db.get(Campus, location.campus_id) if location.campus_id else None
     return {'locationId': location.id, 'name': location.name, 'type': location.type,
-            'x': location.x, 'y': location.y, 'mapVersion': location.map_version}
+            'x': location.x, 'y': location.y, 'mapVersion': location.map_version,
+            'campusId': location.campus_id, 'campusName': campus.name if campus else None}
 
 
 def _slot_brief(db, slot_id: str | None) -> dict | None:
@@ -192,7 +196,9 @@ def _slot_brief(db, slot_id: str | None) -> dict | None:
     slot = db.get(DeliverySlot, slot_id)
     if slot is None:
         return None
-    return {'id': slot.id, 'date': slot.date, 'weekday': slot_weekday(slot.date),
+    campus = db.get(Campus, slot.campus_id) if slot.campus_id else None
+    return {'id': slot.id, 'campusId': slot.campus_id, 'campusName': campus.name if campus else None,
+            'date': slot.date, 'weekday': slot_weekday(slot.date),
             'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
             'end': to_shanghai_hhmm(slot.ends_at), 'startsAt': slot.starts_at,
             'endsAt': slot.ends_at,
@@ -217,7 +223,10 @@ def _slot_archived(slot: DeliverySlot) -> bool:
 
 def _slot_snapshot(slot: DeliverySlot) -> dict:
     return {
-        'id': slot.id, 'date': slot.date, 'weekday': slot_weekday(slot.date),
+        'id': slot.id, 'campusId': slot.campus_id,
+        'campusName': (object_session(slot).get(Campus, slot.campus_id).name
+                       if object_session(slot) and slot.campus_id and object_session(slot).get(Campus, slot.campus_id) else None),
+        'date': slot.date, 'weekday': slot_weekday(slot.date),
         'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
         'end': to_shanghai_hhmm(slot.ends_at),
         'startsAt': slot.starts_at.isoformat(), 'endsAt': slot.ends_at.isoformat(),
@@ -264,6 +273,8 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
         batches = explicit + legacy
     return {
         'id': slot.id,
+        'campusId': slot.campus_id,
+        'campusName': (db.get(Campus, slot.campus_id).name if slot.campus_id and db.get(Campus, slot.campus_id) else None),
         'date': slot.date,
         'weekday': slot_weekday(slot.date),
         'name': slot.name,
@@ -457,6 +468,11 @@ def _payment_confirmed(order: Order) -> bool:
 
 def _order_blockers(db, order: Order, assignment: DeliveryAssignment | None = None) -> list[dict]:
     blockers: list[dict] = []
+    if assignment is not None:
+        batch = db.get(DeliveryBatch, assignment.batch_id)
+        mismatch = _campus_mismatch_blocker(db, batch, order, existing=True) if batch else _blocker('ASSIGNMENT_INVALID', '配送批次不存在', order.id)
+        if mismatch:
+            blockers.append(mismatch)
     if order.deleted_at:
         blockers.append(_blocker('ORDER_DELETED', '订单已删除', order.id))
         return blockers
@@ -501,6 +517,9 @@ def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignme
     pauses = (get_config(db, 'workflow').data or {}).get('pauses') or {}
     if pauses.get('delivery'):
         blockers.append(_blocker('DELIVERY_PAUSED', '配送已暂停，不能开始新批次', batch.id))
+    scope = _batch_scope_blocker(db, batch, existing=bool(assignments))
+    if scope:
+        blockers.append(scope)
     if batch.deleted_at:
         blockers.append(_blocker('BATCH_DELETED', '批次已删除', batch.id))
     if batch.status != 'PUBLISHED':
@@ -537,6 +556,9 @@ def _start_blockers(db, batch: DeliveryBatch, assignments: list[DeliveryAssignme
         if order is None:
             blockers.append(_blocker('ORDER_NOT_FOUND', '订单不存在', assignment.order_id))
             continue
+        campus_mismatch = _campus_mismatch_blocker(db, batch, order, existing=True)
+        if campus_mismatch:
+            blockers.append(campus_mismatch)
         if order.status != 'READY_FOR_DELIVERY':
             blockers.append(_blocker('ORDER_NOT_READY', '订单当前不在待配送状态', order.id))
         mismatch = _slot_mismatch_blocker(batch, order)
@@ -640,9 +662,11 @@ def public_map(db=Depends(get_db)):
 
 
 @router.get('/public/slots', response_model=Envelope[SlotListView])
-def public_slots(date: str | None = None, db=Depends(get_db)):
+def public_slots(date: str | None = None, campus_id: str | None = Query(default=None, alias='campusId'), db=Depends(get_db)):
     now = utcnow()
     query = select(DeliverySlot).where(DeliverySlot.enabled.is_(True))
+    if campus_id:
+        query = query.where(DeliverySlot.campus_id == campus_id)
     if date:
         query = query.where(DeliverySlot.date == date)
     else:
@@ -873,9 +897,12 @@ def admin_delivery_staff(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
 
 @router.get('/admin/slots', response_model=Envelope[SlotListView])
 def admin_slots(date: str | None = None, include_archived: bool = False,
+                campus_id: str | None = Query(default=None, alias='campusId'),
                 db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
     query = select(DeliverySlot)
+    if campus_id:
+        query = query.where(DeliverySlot.campus_id == campus_id)
     if date:
         query = query.where(DeliverySlot.date == date)
     now = utcnow()
@@ -895,6 +922,9 @@ def _validate_slot_capacity(slot: DeliverySlot, capacity: int) -> None:
 def admin_slot_create(payload: SlotInput, db=Depends(get_db),
                       actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
+    campus = db.get(Campus, payload.campus_id)
+    if campus is None:
+        raise DomainError('CAMPUS_CONFIG_MISSING', '校区不存在', 409)
     acceptance = payload.acceptance()
     if acceptance is None:
         raise DomainError('SLOT_CONFIG_REQUIRED', '请填写开放下单时间与截单时间', 422,
@@ -902,7 +932,7 @@ def admin_slot_create(payload: SlotInput, db=Depends(get_db),
                                         'cutoffAt': ['请填写截单时间']})
     open_at, cutoff_at = acceptance
     starts_at, ends_at = payload.window()
-    slot = DeliverySlot(date=payload.date, name=payload.name, starts_at=starts_at,
+    slot = DeliverySlot(campus_id=campus.id, date=payload.date, name=payload.name, starts_at=starts_at,
                         ends_at=ends_at, open_at=open_at, cutoff_at=cutoff_at,
                         capacity=payload.capacity,
                         occupied=0, enabled=payload.enabled,
@@ -911,7 +941,7 @@ def admin_slot_create(payload: SlotInput, db=Depends(get_db),
     db.add(slot)
     db.flush()
     audit(db, actor, 'DELIVERY_SLOT_CREATED', 'DELIVERY_SLOT', slot.id,
-          reason=payload.reason or '', data={'date': slot.date, 'capacity': slot.capacity})
+          reason=payload.reason or '', data={'date': slot.date, 'capacity': slot.capacity, 'campusId': slot.campus_id})
     return ok(_slot_view(db, slot, utcnow(), admin=True))
 
 
@@ -923,8 +953,28 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
     if _slot_archived(slot):
         raise DomainError('SLOT_ARCHIVED', '时段已归档，不能继续编辑', 409,
                           {'slotId': slot.id})
+    previous_campus_id = slot.campus_id
+    if payload.campus_id is not None and payload.campus_id != slot.campus_id:
+        if db.get(Campus, payload.campus_id) is None:
+            raise DomainError('CAMPUS_CONFIG_MISSING', '校区不存在', 409)
+        referenced = (db.scalar(select(Order.id).where(
+            (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id)).limit(1))
+            or db.scalar(select(DeliveryGroup.id).where(DeliveryGroup.slot_id == slot.id).limit(1))
+            or db.scalar(select(DeliveryChange.id).where(
+                (DeliveryChange.slot_id == slot.id)
+                | (DeliveryChange.original['slotId'].as_string() == slot.id)
+                | (DeliveryChange.original['id'].as_string() == slot.id)
+                | (DeliveryChange.proposed['slotId'].as_string() == slot.id)
+                | (DeliveryChange.proposed['id'].as_string() == slot.id)).limit(1))
+            or any(_batch_slot_id(batch) == slot.id for batch in db.scalars(select(DeliveryBatch))))
+        # Proposals live in order JSON, including orders in trash.
+        if not referenced:
+            referenced = any(slot.id in str(order.data or {}) for order in db.scalars(select(Order)))
+        if referenced:
+            raise DomainError('SLOT_CAMPUS_LOCKED', '时段已被业务引用，不能更换校区', 409)
+        slot.campus_id = payload.campus_id
     history = list((slot.data or {}).get('history') or [])
-    before = {'date': slot.date, 'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
+    before = {'campusId': previous_campus_id, 'date': slot.date, 'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
               'end': to_shanghai_hhmm(slot.ends_at), 'capacity': slot.capacity,
               'enabled': slot.enabled, 'version': slot.version}
     window_supplied = (payload.date is not None or payload.start is not None
@@ -986,7 +1036,7 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
         slot.capacity = payload.capacity
     if payload.enabled is not None:
         slot.enabled = payload.enabled
-    changed = before != {'date': slot.date, 'name': slot.name,
+    changed = before != {'campusId': slot.campus_id, 'date': slot.date, 'name': slot.name,
                          'start': to_shanghai_hhmm(slot.starts_at),
                          'end': to_shanghai_hhmm(slot.ends_at),
                          'capacity': slot.capacity, 'enabled': slot.enabled,
@@ -999,7 +1049,7 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
     slot.data = data
     touch(slot)
     audit(db, actor, 'DELIVERY_SLOT_UPDATED', 'DELIVERY_SLOT', slot.id,
-          reason=payload.reason or '', data={'changed': changed})
+          reason=payload.reason or '', data={'changed': changed, 'campusId': slot.campus_id, 'previousCampusId': previous_campus_id})
     return ok(_slot_view(db, slot, utcnow(), admin=True))
 
 
@@ -1039,7 +1089,7 @@ def _seal_snapshot(db, slot: DeliverySlot) -> dict:
                                               or batch.group_id in group_ids)]
     order_ids = list(db.scalars(select(Order.id).where(
         (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id))))
-    return _schedule_snapshot(db, batch_ids, order_ids)
+    return {'campusId': slot.campus_id, 'schedule': _schedule_snapshot(db, batch_ids, order_ids)}
 
 
 @router.post('/admin/slots/{slot_id}/seal/preview', response_model=Envelope[SlotSealPlanView])
@@ -1058,7 +1108,7 @@ def admin_slot_seal_preview(slot_id: str, payload: SlotSealPreview, db=Depends(g
     plan = BatchPlan(
         staff_id=actor.staff_id, expires_at=utcnow() + PLAN_TTL,
         data={'action': 'SEAL_SLOT', 'slotId': slot.id,
-              'expectedVersion': slot.version,
+              'expectedVersion': slot.version, 'campusId': slot.campus_id,
               'blockers': preview['blockers'], 'impact': preview['impact'],
               'snapshot': snapshot})
     db.add(plan)
@@ -1085,7 +1135,8 @@ def admin_slot_seal(slot_id: str, payload: SlotSealCommit, db=Depends(get_db),
         if (plan.committed_at is not None or plan.expires_at <= utcnow()
                 or plan.staff_id != actor.staff_id
                 or (plan.data or {}).get('action') != 'SEAL_SLOT'
-                or (plan.data or {}).get('slotId') != slot.id):
+                or (plan.data or {}).get('slotId') != slot.id
+                or (plan.data or {}).get('campusId') != slot.campus_id):
             raise DomainError('PLAN_STALE', '封批预览已失效，请重新预览', 409,
                               {'planId': payload.plan_id})
         if (plan.data or {}).get('expectedVersion') != slot.version:
@@ -1203,8 +1254,15 @@ def admin_batch_create(payload: BatchCreate, db=Depends(get_db),
         if not slot.enabled:
             raise DomainError('SLOT_UNAVAILABLE', '配送时段已关闭，不能创建批次', 409,
                               {'slotId': slot.id})
+        from .delivery_scope import ensure_slot_campus
+        campus = ensure_slot_campus(db, slot, payload.campus_id or slot.campus_id)
+        group = group_for_slot_campus(db, slot, campus)
         starts_at, ends_at = slot.starts_at, slot.ends_at
     else:
+        campus = db.get(Campus, payload.campus_id) if payload.campus_id else None
+        if campus is None:
+            raise DomainError('CAMPUS_CONFIG_MISSING', '自定义批次须指定有效校区', 409)
+        group = None
         try:
             starts_at, ends_at = payload.window()
         except ValueError as error:
@@ -1218,6 +1276,7 @@ def admin_batch_create(payload: BatchCreate, db=Depends(get_db),
     batch = DeliveryBatch(name=payload.name, courier_id=courier_id, starts_at=starts_at,
                           ends_at=ends_at, status='PLANNED', reason=payload.reason,
                           slot_id=slot.id if slot is not None else None,
+                          campus_id=campus.id, group_id=group.id if group else None,
                           source='MANUAL', is_regular=False, data=data)
     db.add(batch)
     db.flush()
@@ -1407,6 +1466,9 @@ def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(ge
     if batch.deleted_at or batch.status not in ('PLANNED', 'POSTPONED'):
         raise DomainError('INVALID_TRANSITION', '只有规划中或已延期的批次可以发布', 409,
                           {'status': batch.status})
+    scope = _batch_scope_blocker(db, batch, existing=bool(orders))
+    if scope:
+        raise DomainError(scope['code'], scope['message'], 409)
     if _valid_courier(db, batch.courier_id) is None:
         raise DomainError('COURIER_REQUIRED', '发布前必须分配有效配送员', 422)
     batch_slot_id = _batch_slot_id(batch)
@@ -1420,6 +1482,10 @@ def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(ge
             raise DomainError('BATCH_NOT_SEALED', '接单截止或提前封批后才能发布批次', 409,
                               {'batchId': batch.id, 'slotId': slot.id,
                                'cutoffAt': slot.cutoff_at.isoformat() if slot.cutoff_at else None})
+    for order in orders.values():
+        mismatch = _campus_mismatch_blocker(db, batch, order, existing=True)
+        if mismatch:
+            raise DomainError(mismatch['code'], mismatch['message'], 409)
     batch.status = 'PUBLISHED'
     data = deepcopy(batch.data or {})
     data['publishedAt'] = utcnow().isoformat()
@@ -1599,17 +1665,60 @@ def _batch_campus_ids(db, batch: DeliveryBatch) -> set[str]:
     return ids
 
 
-def _campus_mismatch_blocker(db, target: DeliveryBatch, order: Order) -> dict | None:
-    order_campus = _order_campus_id(db, order)
-    if order_campus is None:
+def _batch_execution_campus(db, batch: DeliveryBatch, *, existing: bool) -> str | None:
+    if batch.campus_id:
+        return batch.campus_id if db.get(Campus, batch.campus_id) else None
+    if not existing:
         return None
-    batch_campuses = _batch_campus_ids(db, target)
-    if len(batch_campuses) > 1:
-        return _blocker('CAMPUS_MIXED',
-                        '批次已包含多个校区的订单，请先拆分后配送', order.id)
-    if batch_campuses and order_campus not in batch_campuses:
-        return _blocker('CAMPUS_MISMATCH',
-                        '订单属于其他校区，不能加入该批次', order.id)
+    assignments = _active_batch_assignments(db, batch.id)
+    if not assignments:
+        return None
+    campus_ids = []
+    for assignment in assignments:
+        member = db.get(Order, assignment.order_id)
+        campus_id = _order_campus_id(db, member) if member else None
+        if not campus_id or db.get(Campus, campus_id) is None:
+            return None
+        campus_ids.append(campus_id)
+    return campus_ids[0] if len(set(campus_ids)) == 1 else None
+
+
+def _batch_scope_blocker(db, batch: DeliveryBatch, *, existing: bool = False) -> dict | None:
+    campus_id = _batch_execution_campus(db, batch, existing=existing)
+    if not campus_id:
+        return _blocker('CAMPUS_CONFIG_MISSING', '批次缺少有效校区', batch.id)
+    slot_id = _batch_slot_id(batch)
+    if batch.group_id:
+        group = db.get(DeliveryGroup, batch.group_id)
+        if group is None or group.campus_id != campus_id or group.slot_id != slot_id:
+            return _blocker('SLOT_CAMPUS_MISMATCH', '批次与配送组归属不一致', batch.id)
+    if slot_id:
+        slot = db.get(DeliverySlot, slot_id)
+        if slot is None or (slot.campus_id != campus_id and not (existing and slot.campus_id is None)):
+            return _blocker('SLOT_CAMPUS_MISMATCH', '批次与时段校区不一致', batch.id)
+    return None
+
+
+def _campus_mismatch_blocker(db, target: DeliveryBatch, order: Order, *, existing: bool = False) -> dict | None:
+    if existing and not any(a.order_id == order.id for a in _active_batch_assignments(db, target.id)):
+        existing = False
+    order_campus = _order_campus_id(db, order)
+    batch_campus = _batch_execution_campus(db, target, existing=existing)
+    if order_campus is None or batch_campus is None:
+        return _blocker('CAMPUS_CONFIG_MISSING', '订单或批次缺少校区', order.id)
+    if batch_campus != order_campus:
+        return _blocker('CAMPUS_MISMATCH', '订单属于其他校区，不能加入该批次', order.id)
+    scope = _batch_scope_blocker(db, target, existing=existing)
+    if scope:
+        return scope
+    assignments = _active_batch_assignments(db, target.id)
+    for assignment in assignments:
+        member = db.get(Order, assignment.order_id)
+        member_campus = _order_campus_id(db, member) if member else None
+        if not member_campus:
+            return _blocker('CAMPUS_CONFIG_MISSING', '批次成员缺少校区', assignment.order_id)
+        if member_campus != batch_campus:
+            return _blocker('CAMPUS_MIXED', '批次包含多个校区的订单，请先拆分后配送', assignment.order_id)
     return None
 
 
@@ -1670,6 +1779,10 @@ def _preview_operation(db, actor: Actor, payload: BatchOperationPreview) -> dict
         else:
             orders[order_id] = order
 
+    if action == 'MERGE' and target_batch:
+        for source in source_batches:
+            if not source.campus_id or source.campus_id != target_batch.campus_id:
+                blockers.append(_blocker('CAMPUS_MISMATCH', '来源与目标批次校区不一致', source.id))
     selected_campuses = {
         campus_id
         for order in orders.values()
@@ -2146,6 +2259,10 @@ def admin_address_review(assignment_id: str, payload: AddressReviewInput,
         raise DomainError('ASSIGNMENT_INACTIVE', '配送执行已失效', 409)
     if order.status in ('DELIVERING', 'DELIVERED'):
         raise DomainError('INVALID_TRANSITION', '配送已开始，不能再复核地址', 409)
+    batch = db.get(DeliveryBatch, assignment.batch_id)
+    mismatch = _campus_mismatch_blocker(db, batch, order, existing=True) if batch else _blocker('ASSIGNMENT_INVALID', '配送批次不存在', order.id)
+    if mismatch:
+        raise DomainError(mismatch['code'], mismatch['message'], 409)
     if assignment.address_review is False and order.address_review is False:
         raise DomainError('NO_ADDRESS_REVIEW', '当前没有待复核的地址修改', 409)
     now = utcnow().isoformat()

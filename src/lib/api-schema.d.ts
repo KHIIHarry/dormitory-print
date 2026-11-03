@@ -4074,6 +4074,8 @@ export interface components {
         };
         /** BatchCreate */
         BatchCreate: {
+            /** Campusid */
+            campusId?: string | null;
             /** Courierid */
             courierId?: string | null;
             /** Date */
@@ -7296,6 +7298,19 @@ export interface components {
             /** Total */
             total?: number | null;
         };
+        /** OrderLocationSnapshot */
+        OrderLocationSnapshot: {
+            /** Campusid */
+            campusId?: string | null;
+            /** Campusname */
+            campusName?: string | null;
+            /** Id */
+            id: string;
+            /** Mapversion */
+            mapVersion?: number | null;
+            /** Name */
+            name: string;
+        };
         /** OrderResult */
         OrderResult: {
             /** Accesstoken */
@@ -7372,6 +7387,7 @@ export interface components {
             id: string;
             /** Locationid */
             locationId: string;
+            locationSnapshot?: components["schemas"]["OrderLocationSnapshot"] | null;
             /** Nickname */
             nickname: string;
             /**
@@ -9028,6 +9044,8 @@ export interface components {
         };
         /** SlotInput */
         SlotInput: {
+            /** Campusid */
+            campusId: string;
             /** Capacity */
             capacity: number;
             /** Cutoffat */
@@ -9123,6 +9141,8 @@ export interface components {
         };
         /** SlotUpdate */
         SlotUpdate: {
+            /** Campusid */
+            campusId?: string | null;
             /** Capacity */
             capacity?: number | null;
             /** Cutoffat */
@@ -9167,6 +9187,10 @@ export interface components {
             batchCount: number;
             /** Blockers */
             blockers?: components["schemas"]["BlockerView"][];
+            /** Campusid */
+            campusId?: string | null;
+            /** Campusname */
+            campusName?: string | null;
             /** Capacity */
             capacity: number;
             /** Cutoffat */
@@ -16301,6 +16325,7 @@ export interface operations {
             query?: {
                 date?: string | null;
                 include_archived?: boolean;
+                campusId?: string | null;
             };
             header?: never;
             path?: never;
@@ -22008,6 +22033,7 @@ export interface operations {
         parameters: {
             query?: {
                 date?: string | null;
+                campusId?: string | null;
             };
             header?: never;
             path?: never;

@@ -227,6 +227,9 @@ class Location(Entity, Base):
 
 class DeliverySlot(Entity, Base):
     __tablename__ = 'delivery_slots'
+    # Null is reserved for unresolved pre-campus delivery history. All newly
+    # created slots require an explicit campus through the delivery API.
+    campus_id: Mapped[str | None] = mapped_column(ForeignKey('campuses.id'), index=True)
     date: Mapped[str] = mapped_column(String(10), index=True)
     name: Mapped[str] = mapped_column(String(120))
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

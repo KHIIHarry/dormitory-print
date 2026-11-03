@@ -1453,6 +1453,7 @@ def _seed_checkout(db):
     preparation.quote_id = quote.id
     location = Location(name='一号楼', x=0.5, y=0.5, campus_id=ensure_test_campus(db).id)
     slot = configure_slot(DeliverySlot(
+        campus_id=location.campus_id,
         date='2030-01-01',
         name='晚间',
         starts_at=utcnow() + timedelta(days=1),
@@ -2021,6 +2022,7 @@ def _commerce_real(db, tmp_path, *, pages=3, copies=1, sides='SINGLE', binding='
     prices.data = {**prices.data, 'bwSingle': 10, 'bwDuplex': 12}
     location = Location(name='二号楼', x=0.4, y=0.6, campus_id=ensure_test_campus(db).id)
     slot = configure_slot(DeliverySlot(
+        campus_id=location.campus_id,
         date='2030-02-02',
         name='午后',
         starts_at=now + timedelta(days=1),

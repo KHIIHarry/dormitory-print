@@ -101,6 +101,7 @@ def _location_slot(db, *, capacity=5):
     location = Location(name=f'{BENEFITS}-{uuid4().hex[:6]}', x=0.4, y=0.6,
                         campus_id=ensure_test_campus(db).id)
     slot = configure_slot(DeliverySlot(
+        campus_id=location.campus_id,
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='扩展验收时段', starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1), capacity=capacity,

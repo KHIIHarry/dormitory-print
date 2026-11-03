@@ -91,9 +91,11 @@ def _proof_asset(db, courier, assignment, *, purpose='DELIVERY_PROOF', owner=Non
 
 
 def _batch(db, api, admin_client, courier, orders, *, building_name='一号楼'):
+    from tests.auth_helpers import ensure_test_campus
+    campus_id = db.get(Location, orders[0].location_id).campus_id if orders else ensure_test_campus(db).id
     if building_name is not None and orders:
         location = Location(name=building_name, type='DORMITORY', x=0.4, y=0.5,
-                            enabled=True, map_version=1)
+                            enabled=True, map_version=1, campus_id=campus_id)
         db.add(location)
         db.flush()
         for order in orders:
@@ -102,6 +104,7 @@ def _batch(db, api, admin_client, courier, orders, *, building_name='一号楼')
     # Use explicit instants so the window never straddles Shanghai midnight.
     starts_at = utcnow().replace(hour=3, minute=0, second=0, microsecond=0)
     created = api(admin_client, '/admin/batches', {
+        'campusId': campus_id,
         'name': f'批量凭证批次 {uuid4().hex[:6]}',
         'startsAt': starts_at.isoformat(),
         'endsAt': (starts_at + timedelta(hours=3)).isoformat(),
@@ -307,7 +310,7 @@ def test_batch_proof_rejects_mixed_building_and_mixed_batch(
     # Move one order to a different building before proof; the assignment snapshot
     # from batch start still names the original building, so update both snapshots.
     other = Location(name='二号楼', type='DORMITORY', x=0.8, y=0.2,
-                     enabled=True, map_version=1)
+                     enabled=True, map_version=1, campus_id=db.get(Location, first.location_id).campus_id)
     db.add(other)
     db.flush()
     second.location_id = other.id
@@ -440,6 +443,7 @@ def test_mail_only_admin_cannot_be_assigned_as_courier(
     mail_admin = staff_factory(role='ADMIN', capabilities=['mail.manage'])
     starts_at = utcnow() - timedelta(hours=1)
     response = api(admin_client, '/admin/batches', {
+        'campusId': api(admin_client, '/public/map', method='GET').json()['data']['campuses'][0]['id'],
         'name': '不合资格配送员',
         'startsAt': starts_at.isoformat(),
         'endsAt': (starts_at + timedelta(hours=2)).isoformat(),

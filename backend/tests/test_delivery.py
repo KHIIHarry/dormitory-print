@@ -333,10 +333,17 @@ def make_courier(staff_factory, name='配送员'):
                          username=f'courier-{uuid4().hex[:10]}')
 
 
+def _test_campus_id(api, client):
+    response = api(client, '/public/map', None, method='GET')
+    assert response.status_code == 200, response.text
+    return response.json()['data']['campuses'][0]['id']
+
+
 def create_batch(api, client, courier, *, offset_hours=0, duration=3):
     starts_at = utcnow().replace(hour=3, minute=0, second=0, microsecond=0) + timedelta(hours=offset_hours)
     ends_at = starts_at + timedelta(hours=duration)
     response = api(client, '/admin/batches', {
+        'campusId': _test_campus_id(api, client),
         'name': f'测试批次 {uuid4().hex[:6]}',
         'startsAt': starts_at.isoformat(),
         'endsAt': ends_at.isoformat(),
@@ -350,6 +357,7 @@ def create_batch(api, client, courier, *, offset_hours=0, duration=3):
 def create_batch_fixed(api, client, courier, starts_at, *, duration=1):
     ends_at = starts_at + timedelta(hours=duration)
     response = api(client, '/admin/batches', {
+        'campusId': _test_campus_id(api, client),
         'name': f'测试批次 {uuid4().hex[:6]}',
         'startsAt': starts_at.isoformat(),
         'endsAt': ends_at.isoformat(),
@@ -365,6 +373,7 @@ def create_slot(api, client, *, offset_hours=48, capacity=4, name='测试时段'
         hour=2, minute=0, second=0, microsecond=0)
     ends_at = starts_at + timedelta(hours=1)
     response = api(client, '/admin/slots', {
+        'campusId': _test_campus_id(api, client),
         'date': to_shanghai_date(starts_at), 'name': name,
         'start': to_shanghai_hhmm(starts_at), 'end': to_shanghai_hhmm(ends_at),
         'openAt': (utcnow() - timedelta(hours=2)).isoformat(),
@@ -798,6 +807,7 @@ def test_slots_do_not_consume_capacity_and_maps_require_migration(
     # A concrete future daytime window is stable even when tests run near midnight.
     starts_at = (utcnow() + timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
     slot_response = api(client, '/admin/slots', {
+        'campusId': db.get(Location, order.location_id).campus_id,
         'date': to_shanghai_date(starts_at), 'name': '测试时段',
         'start': to_shanghai_window(starts_at, starts_at + timedelta(hours=1)).split(' – ')[0],
         'end': to_shanghai_window(starts_at, starts_at + timedelta(hours=1)).split(' – ')[1],
@@ -1027,6 +1037,9 @@ def test_slot_backed_batch_rejects_orders_from_another_slot(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
+    from tests.auth_helpers import ensure_test_campus
+    ensure_test_campus(db)
+    db.commit()
     slot = create_slot(api, client, name='A 时段')
     batch = api(client, '/admin/batches', {
         'name': 'A 批次', 'slotId': slot['id'], 'courierId': courier.id}).json()['data']
@@ -1056,6 +1069,9 @@ def test_start_rechecks_order_slot_against_batch_after_assignment(
         db, api, client, act_as, staff_factory):
     act_as(staff_factory(role='ADMIN'))
     courier = make_courier(staff_factory)
+    from tests.auth_helpers import ensure_test_campus
+    ensure_test_campus(db)
+    db.commit()
     slot = create_slot(api, client, name='原时段')
     batch = api(client, '/admin/batches', {
         'name': '时段批次', 'slotId': slot['id'], 'courierId': courier.id}).json()['data']

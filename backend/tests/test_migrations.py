@@ -30,6 +30,7 @@ def test_upgrade_existing_staff_and_reverse_new_feature_schema():
         with db.begin() as conn:
             row=conn.execute(text("SELECT account_id,is_super_admin,discount_level FROM staff WHERE id='existing'")).one()
             assert tuple(row)==(None,False,None)  # No guessed account binding or automatic superadmin promotion.
+        assert 'campus_id' in {column['name'] for column in inspect(db).get_columns('delivery_slots')}
         assert 'wage_entries' in inspect(db).get_table_names()
         assert 'supplementary_charges' in inspect(db).get_table_names()
         assert 'deleted_at' in {column['name'] for column in inspect(db).get_columns('after_sales')}

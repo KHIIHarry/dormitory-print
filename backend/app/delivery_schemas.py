@@ -245,6 +245,7 @@ class PositionInput(DTO):
 
 
 class BatchCreate(DTO):
+    campus_id: str | None = None
     name: str = Field(min_length=1, max_length=120)
     slot_id: str | None = None
     date: str | None = None
@@ -327,6 +328,7 @@ class BatchOperationCommit(DTO):
 
 
 class SlotInput(DTO):
+    campus_id: str = Field(min_length=1)
     # The current frontend reposts the whole slot object; id/weekday are derived
     # server-side and accepted only so the strict DTO matches that call shape.
     id: str | None = None
@@ -367,6 +369,7 @@ class SlotInput(DTO):
 
 
 class SlotUpdate(DTO):
+    campus_id: str | None = Field(default=None, min_length=1)
     id: str | None = None
     weekday: str | None = None
     expected_version: int | None = Field(default=None, ge=1)
@@ -635,6 +638,8 @@ class CampusListView(DTO):
 
 
 class SlotView(DTO):
+    campus_id: str | None = None
+    campus_name: str | None = None
     id: str
     date: str
     weekday: str

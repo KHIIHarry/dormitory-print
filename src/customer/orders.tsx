@@ -1,4 +1,5 @@
 import { formatDisplayTime } from "../lib/display-format";
+import { orderLocationSnapshot, selectableBuildingsForCampus } from "../lib/campus";
 import { CustomerSupplementaryPanel } from "../v1/supplementary";
 import { useIdentity } from "../growth/identity";
 import { canOrderAction, effectiveOrderAccess } from "../growth/order-security";
@@ -165,7 +166,7 @@ export function OrderList() {
               <div className="order-meta">
                 <span>
                   <MapPin size={14} />
-                  {data.buildings.find((b) => b.id === o.locationId)?.name}
+                  {data.buildings.find((b) => b.id === o.locationId)?.name || orderLocationSnapshot(o)?.name}
                 </span>
                 <span>
                   <Clock size={14} />
@@ -375,6 +376,7 @@ export function OrderDetail() {
   const { id } = useParams();
   const {
     data,
+    resources,
     setDraft,
     setEditingOrderId,
     updateOrder,
@@ -394,6 +396,15 @@ export function OrderDetail() {
   const [reason, setReason] = useState("");
   const nav = useNavigate();
   const order = data.orders.find((o) => o.id === id);
+  const locationSnapshot = orderLocationSnapshot(order);
+  const currentLocation = data.buildings.find((b) => b.id === order?.locationId);
+  const campusId = locationSnapshot?.campusId || currentLocation?.campusId;
+  const campusAvailable = data.campuses.some((c) => c.id === campusId && c.selectionEnabled);
+  const locationChoices = selectableBuildingsForCampus(data.buildings, campusAvailable ? campusId : undefined);
+  const locationsReady = DEMO || !!resources.buildings?.hasData;
+  useEffect(() => {
+    if (edit && building && locationsReady && !locationChoices.some((item) => item.id === building)) setBuilding("");
+  }, [edit, building, locationsReady, data.buildings, data.campuses, campusId]);
   if (!order)
     return (
       <main className="content-page">
@@ -406,7 +417,7 @@ export function OrderDetail() {
     );
   const access = effectiveOrderAccess(order, customer, orderAccess);
   const can = (action: string) => canOrderAction(order, action, access);
-  const location = data.buildings.find((b) => b.id === order.locationId);
+  const location = currentLocation;
   const slot = data.slots.find((s) => s.id === order.slotId);
   const batch = data.batches.find((b) => b.id === order.batchId);
   const v1Order = order as Order & {
@@ -418,6 +429,8 @@ export function OrderDetail() {
     return match
       ? {
           id: match.id,
+          campusId: match.campusId,
+          campusName: match.campusName,
           name: match.name,
           date: match.date,
           weekday: match.weekday,
@@ -432,6 +445,8 @@ export function OrderDetail() {
     (slot
       ? {
           id: slot.id,
+          campusId: slot.campusId,
+          campusName: slot.campusName,
           name: slot.name,
           date: slot.date,
           weekday: slot.weekday,
@@ -633,7 +648,7 @@ export function OrderDetail() {
               <div>
                 <dt>目标楼栋</dt>
                 <dd>
-                  {location?.name || "尚未设置"}
+                  {location?.name || locationSnapshot?.name || "尚未设置"}
                   {can("ORDER_CHANGE_LOCATION_PRE_DELIVERY") && (
                     <button
                       className="text-button"
@@ -806,21 +821,13 @@ export function OrderDetail() {
             !pendingActions[`/orders/${order.id}/location`] && setEdit(false)
           }
         >
-          <Field label="选择新的楼栋">
+          <Field label="选择同校区的新楼栋">
             <select
               value={building}
               onChange={(e) => setBuilding(e.target.value)}
             >
-              {data.buildings
-                .filter(
-                  (b) =>
-                    b.enabled &&
-                    (!b.campusId ||
-                      !data.campuses.length ||
-                      data.campuses.some(
-                        (c) => c.id === b.campusId && c.selectionEnabled,
-                      )),
-                )
+              <option value="">请选择楼栋</option>
+              {locationChoices
                 .map((b) => {
                   const campus = data.campuses.find((c) => c.id === b.campusId);
                   return (
@@ -831,6 +838,7 @@ export function OrderDetail() {
                 })}
             </select>
           </Field>
+          <Notice>如需跨校区配送，请联系管理员协调。</Notice>
           {order.batchId && (
             <Notice>已分配批次，修改后需要管理员重新复核配送安排。</Notice>
           )}
@@ -841,7 +849,9 @@ export function OrderDetail() {
           )}
           <Button
             busy={!!pendingActions[`/orders/${order.id}/location`]}
+            disabled={!locationsReady || !locationChoices.some((item) => item.id === building)}
             onClick={async () => {
+              if (!locationsReady || !locationChoices.some((item) => item.id === building)) return;
               if (
                 await updateOrder(
                   order.id,

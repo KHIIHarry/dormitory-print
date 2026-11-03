@@ -2208,9 +2208,14 @@ def _order_slot_label(db, order) -> str:
     return f'{slot.date} {slot.name} {start}–{end}'.strip()
 
 
-def _order_location_label(db, order) -> str:
+def _order_location_label(db, order, arrangement=None) -> str:
+    snapshot = (order.data or {}).get('locationSnapshot') or {}
+    arrangement = arrangement or {}
+    campus_name = arrangement.get('campusName') or snapshot.get('campusName')
     location = db.get(Location, order.location_id) if order.location_id else None
-    return location.name if location else ''
+    name = snapshot.get('name') or (location.name if location else '')
+    return ' · '.join(value for value in (campus_name, name) if value)
+
 
 
 def _active_customer(db, order):
@@ -2387,7 +2392,7 @@ def _delivery_change_variables(db, order, change):
     return {
         'brandName': _mail_brand(db),
         'orderCode': str(getattr(order, 'pickup_code', '') or ''),
-        'deliveryLocation': _order_location_label(db, order),
+        'deliveryLocation': _order_location_label(db, order, change.proposed),
         'deliverySlot': new_window,
         'orderLink': _order_link(order),
         'changeType': _CHANGE_TYPE_LABELS.get(change.kind, '配送安排调整'),

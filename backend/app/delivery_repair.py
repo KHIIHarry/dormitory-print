@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from .models import (
     AfterSale, BusinessException, DeliveryAssignment, DeliveryBatch,
-    DeliverySlot, Location, Order, utcnow,
+    DeliverySlot, DeliveryGroup, DeliveryChange, Location, Order, utcnow,
 )
 
 
@@ -20,6 +20,8 @@ def delivery_repair_preview(db) -> dict:
         slots = {row.id: row for row in db.scalars(select(DeliverySlot).order_by(DeliverySlot.id))}
         orders = {row.id: row for row in db.scalars(select(Order).order_by(Order.id))}
         locations = {row.id: row for row in db.scalars(select(Location))}
+        groups = list(db.scalars(select(DeliveryGroup)))
+        changes = list(db.scalars(select(DeliveryChange)))
         batches = {row.id: row for row in db.scalars(select(DeliveryBatch).order_by(DeliveryBatch.id))}
         assignments = list(db.scalars(select(DeliveryAssignment).where(
             DeliveryAssignment.active.is_(True)).order_by(DeliveryAssignment.id)))
@@ -63,6 +65,12 @@ def delivery_repair_preview(db) -> dict:
             reasons.append('ORIGINAL_SLOT_UNRESOLVED')
         if campus_id is None:
             reasons.append('CAMPUS_UNRESOLVED')
+        slot = slots.get(slot_id)
+        group = next((row for row in groups if row.id == batch.group_id), None)
+        if slot and slot.campus_id and campus_id and slot.campus_id != campus_id:
+            reasons.append('SLOT_CAMPUS_MISMATCH')
+        if batch.group_id and (group is None or group.slot_id != slot_id or group.campus_id != campus_id):
+            reasons.append('GROUP_SCOPE_MISMATCH')
         confirmed_ids = {row.confirmed_slot_id for row in active_orders if row.confirmed_slot_id}
         if len(confirmed_ids) > 1 or (slot_id and any(value != slot_id for value in confirmed_ids)):
             reasons.append('ORDER_SLOT_MISMATCH')
@@ -77,7 +85,8 @@ def delivery_repair_preview(db) -> dict:
                              'confirmedSlotIds': sorted(confirmed_ids), 'reasons': reasons,
                              'nextAction': '人工核对原时段、校区和现有执行；保留原分配，使用受控调度预览处理，历史与垃圾桶不自动恢复。'})
         if (slot_id and campus_id and batch.deleted_at is None and batch.status in live_statuses
-                and not any(reason in reasons for reason in ('ORDER_SLOT_MISMATCH', 'ORDER_CAMPUS_MISMATCH'))):
+                and not any(reason in reasons for reason in ('ORDER_SLOT_MISMATCH', 'ORDER_CAMPUS_MISMATCH',
+                                                             'SLOT_CAMPUS_MISMATCH', 'GROUP_SCOPE_MISMATCH'))):
             candidate_groups[(slot_id, campus_id)].append(batch)
 
     ambiguous = []
@@ -128,6 +137,46 @@ def delivery_repair_preview(db) -> dict:
                                 'blockers': blockers,
                                 'nextAction': '核对收款、原确认时段、校区及名单；匹配提示仅供检查，经现有调度预览和生产守卫后显式安排，不重新收款或重复占容量。'})
 
+    # Collect both live and historical references; no inferred identity is written.
+    references = defaultdict(list)
+    def add_ref(slot_id, kind, identity, campus_id, deleted=False):
+        if slot_id in slots:
+            references[slot_id].append({'type': kind, 'id': identity,
+                                        'campusId': campus_id, 'deleted': deleted})
+    for group in groups:
+        add_ref(group.slot_id, 'GROUP', group.id, group.campus_id)
+    for batch in batches.values():
+        add_ref(batch.slot_id or (batch.data or {}).get('slotId'), 'BATCH', batch.id,
+                batch.campus_id, batch.deleted_at is not None)
+    for order in orders.values():
+        campus_id = order_campus(order)
+        for kind, slot_id in (('REQUESTED_ORDER', order.requested_slot_id),
+                              ('CONFIRMED_ORDER', order.confirmed_slot_id),
+                              ('SLOT_PROPOSAL', ((order.data or {}).get('slotProposal') or {}).get('slotId'))):
+            add_ref(slot_id, kind, order.id, campus_id, order.deleted_at is not None)
+    for change in changes:
+        order = orders.get(change.order_id)
+        campus_id = order_campus(order) if order else None
+        add_ref(change.slot_id, 'CHANGE', change.id, campus_id, bool(order and order.deleted_at))
+        for snapshot in (change.original or {}, change.proposed or {}):
+            add_ref(snapshot.get('slotId'), 'CHANGE_SNAPSHOT', change.id,
+                    snapshot.get('campusId') or campus_id, bool(order and order.deleted_at))
+    scope_issues = []
+    for slot in slots.values():
+        refs = references[slot.id]
+        campus_ids = {ref['campusId'] for ref in refs if ref['campusId']}
+        reasons = []
+        if not slot.campus_id:
+            reasons.append('SLOT_CAMPUS_MISSING')
+        if len(campus_ids) > 1:
+            reasons.append('SHARED_ACROSS_CAMPUSES')
+        if slot.campus_id and any(value != slot.campus_id for value in campus_ids):
+            reasons.append('SLOT_CAMPUS_MISMATCH')
+        if reasons:
+            scope_issues.append({'slotId': slot.id, 'campusId': slot.campus_id,
+                                 'campusIds': sorted(campus_ids), 'reasons': reasons,
+                                 'references': refs})
+
     unconfigured = [
         {'slotId': row.id, 'name': row.name, 'date': row.date, 'version': row.version,
          'enabled': row.enabled, 'archived': bool((row.data or {}).get('archivedAt')),
@@ -137,7 +186,7 @@ def delivery_repair_preview(db) -> dict:
         for row in slots.values() if row.open_at is None or row.cutoff_at is None
     ]
     result = {'readOnly': True, 'generatedAt': utcnow().isoformat(),
-              'unconfiguredSlots': unconfigured, 'paidUnassignedOrders': paid_unassigned,
+              'campusScopeIssues': scope_issues, 'unconfiguredSlots': unconfigured, 'paidUnassignedOrders': paid_unassigned,
               'ambiguousGroups': ambiguous, 'detachedBatches': detached,
               'historicalCounts': {
                   'deliveredOrders': sum(row.status == 'DELIVERED' for row in orders.values()),
@@ -154,5 +203,5 @@ def delivery_repair_preview(db) -> dict:
                   '已送达、取消、退款、售后和垃圾桶保留各自历史，不能全部重新归批。',
               ]}
     result['counts'] = {key: len(result[key]) for key in (
-        'unconfiguredSlots', 'paidUnassignedOrders', 'ambiguousGroups', 'detachedBatches')}
+        'campusScopeIssues', 'unconfiguredSlots', 'paidUnassignedOrders', 'ambiguousGroups', 'detachedBatches')}
     return result

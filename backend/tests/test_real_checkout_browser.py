@@ -109,6 +109,7 @@ def test_real_checkout_upload_ready_and_submit(
     now = utcnow()
     location = Location(name='验收宿舍楼', x=0.4, y=0.6, campus_id=campus.id)
     slot = DeliverySlot(
+        campus_id=campus.id,
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='验收时段', starts_at=now + timedelta(days=1),
         ends_at=now + timedelta(days=1, hours=1), capacity=2,
@@ -116,6 +117,7 @@ def test_real_checkout_upload_ready_and_submit(
         cutoff_at=now + timedelta(hours=2),
     )
     slot2 = DeliverySlot(
+        campus_id=campus.id,
         date=(now + timedelta(days=1)).strftime('%Y-%m-%d'),
         name='验收改期时段', starts_at=now + timedelta(days=1, hours=3),
         ends_at=now + timedelta(days=1, hours=4), capacity=2,

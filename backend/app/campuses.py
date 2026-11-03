@@ -13,7 +13,7 @@ from sqlalchemy import func, select, update
 
 from .config import get_config
 from .core import Actor, DomainError, audit, lock, touch
-from .models import Asset, Campus, Location, Order, utcnow
+from .models import Asset, Campus, DeliveryBatch, DeliveryGroup, DeliverySlot, Location, Order, utcnow
 
 DEFAULT_CAMPUS_NAME = '默认校区'
 DEFAULT_THEME_COLOR = '#C67C4E'
@@ -261,6 +261,9 @@ def delete_campus(db, campus_id: str, actor: Actor) -> dict:
         raise DomainError('CAMPUS_LAST', '至少保留一个校区', 409)
     if db.scalar(select(func.count(Location.id)).where(Location.campus_id == campus.id)):
         raise DomainError('RESOURCE_REFERENCED', '校区下仍有点位，请先删除或转移点位', 409)
+    for model in (DeliverySlot, DeliveryGroup, DeliveryBatch):
+        if db.scalar(select(model.id).where(model.campus_id == campus.id).limit(1)):
+            raise DomainError('RESOURCE_REFERENCED', '校区仍有关联配送记录，不能删除', 409)
     db.delete(campus)
     audit(db, actor, 'CAMPUS_DELETED', 'CAMPUS', campus.id)
     db.flush()
