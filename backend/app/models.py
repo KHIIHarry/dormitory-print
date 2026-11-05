@@ -194,10 +194,11 @@ class Quote(Entity, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     subtotal_cents: Mapped[int] = mapped_column(Integer)
     discount_cents: Mapped[int] = mapped_column(Integer, default=0)
+    delivery_fee_cents: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     total_cents: Mapped[int] = mapped_column(Integer)
     selected_coupon_id: Mapped[str | None] = mapped_column(String(64))
     data: Mapped[dict] = mapped_column(J, default=dict)
-    __table_args__ = (CheckConstraint('subtotal_cents >= 0 AND discount_cents >= 0 AND total_cents = subtotal_cents - discount_cents AND total_cents >= 0'),)
+    __table_args__ = (CheckConstraint('subtotal_cents >= 0 AND discount_cents >= 0 AND delivery_fee_cents >= 0 AND total_cents = subtotal_cents - discount_cents + delivery_fee_cents AND total_cents >= 0', name='ck_quotes_totals'),)
 
 
 class Campus(Entity, Base):

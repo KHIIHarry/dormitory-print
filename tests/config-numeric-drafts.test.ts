@@ -42,6 +42,30 @@ const config = {
 };
 
 describe("config numeric drafts", () => {
+  it("saves delivery fees including free and unconfigured values", () => {
+    for (const delivery of [0, 250, null]) {
+      expect(
+        configSectionPayload(
+          "prices",
+          {
+            ...config,
+            prices: { ...config.prices, delivery },
+          },
+          4,
+        ),
+      ).toMatchObject({ expectedVersion: 4, delivery });
+    }
+    expect(() =>
+      configSectionPayload(
+        "prices",
+        {
+          ...config,
+          prices: { ...config.prices, delivery: -1 },
+        },
+        4,
+      ),
+    ).toThrow();
+  });
   it("keeps blank prices as unconfigured instead of coercing them to zero", () => {
     const body = configSectionPayload(
       "prices",

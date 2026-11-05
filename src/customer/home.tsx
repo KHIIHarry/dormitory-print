@@ -295,7 +295,7 @@ export function Home() {
           </span>
           <span>
             <MapPin size={19} />
-            校内楼栋，免费配送
+            配送到校内楼栋
           </span>
         </div>
       </div>

@@ -12525,6 +12525,18 @@
             ],
             "title": "Corner"
           },
+          "delivery": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery"
+          },
           "expectedVersion": {
             "title": "Expectedversion",
             "type": "integer"
@@ -12623,6 +12635,18 @@
             ],
             "title": "Corner"
           },
+          "delivery": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery"
+          },
           "photo": {
             "anyOf": [
               {
@@ -12716,6 +12740,17 @@
             ],
             "title": "Corner"
           },
+          "delivery": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery"
+          },
           "photo": {
             "anyOf": [
               {
@@ -12746,7 +12781,8 @@
           "colorDuplex",
           "photo",
           "corner",
-          "side"
+          "side",
+          "delivery"
         ],
         "title": "PricesView",
         "type": "object"
@@ -13947,8 +13983,8 @@
             "title": "Checkoutaccountid"
           },
           "deliveryFeeCents": {
-            "const": 0,
             "default": 0,
+            "minimum": 0,
             "title": "Deliveryfeecents",
             "type": "integer"
           },

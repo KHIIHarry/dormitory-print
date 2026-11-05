@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useStore } from "../lib/store";
 import { DEMO, money } from "../lib/api";
+import { SERVICE_PRICES } from "../lib/service-prices";
 import {
   Button,
   CopyButton,
@@ -104,31 +105,28 @@ export function Help() {
               retry={refresh}
               label="正在读取打印价目"
             />
-            <div className="price-rows">
-              {[
-                ["A4 黑白单面", "bwSingle"],
-                ["A4 黑白双面", "bwDuplex"],
-                ["A4 彩色单面", "colorSingle"],
-                ["A4 彩色双面", "colorDuplex"],
-                ["5 寸照片", "photo"],
-              ].map(([label, key]) => (
+            <div className="price-rows service-price-rows">
+              {SERVICE_PRICES.map(({ label, key, unit }) => (
                 <div key={key}>
                   <span>{label}</span>
-                  <b>
+                  <b
+                    className={
+                      configReady && data.config.prices[key] === 0
+                        ? "red-text"
+                        : undefined
+                    }
+                  >
                     {!configReady
                       ? "—"
-                      : data.config.prices[
-                            key as keyof typeof data.config.prices
-                          ] !== null
-                        ? `${money(data.config.prices[key as keyof typeof data.config.prices]!)} / 张`
-                        : "暂未配置"}
+                      : data.config.prices[key] == null
+                        ? "暂未配置"
+                        : data.config.prices[key] === 0
+                          ? "免费"
+                          : `${money(data.config.prices[key]!)} / ${unit}`}
                   </b>
                 </div>
               ))}
             </div>
-            <Notice>
-              按实际纸张计价，配送费为 0。装订收费规则尚未配置时暂不开放。
-            </Notice>
           </Panel>
           <Panel title="还需要帮助？">
             <p className="muted">

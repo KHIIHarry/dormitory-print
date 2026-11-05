@@ -36,6 +36,7 @@ const emptyConfig: Config = {
     photo: null,
     corner: null,
     side: null,
+    delivery: null,
   },
   wechat: "",
   phone: "",
@@ -454,8 +455,11 @@ export function Provider({ children }: { children: ReactNode }) {
   }, [role, location.pathname, location.search, identity.generation]);
   useEffect(() => {
     if (DEMO)
-      import("../growth/demo").then((m) => m.syncDemoOrders(data.orders));
-  }, [data.orders]);
+      import("../growth/demo").then((m) => {
+        m.syncDemoOrders(data.orders);
+        m.getDemoGrowth().deliveryFeeCents = data.config.prices.delivery;
+      });
+  }, [data.orders, data.config.prices.delivery]);
   useEffect(() => {
     const reset = () => {
       latest.current.invalidate();

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy import func, select
 
 from .account_lifecycle import verification_deadline
-from .config import get_config
+from .config import get_config, section_data
 from .core import (
     Actor, DomainError, Envelope, actor_dep, advisory_lock, audit, lock, ok,
     require_admin, require_customer, touch,
@@ -449,7 +449,11 @@ def build_quote(db, preparation: Preparation, lines, actor: Actor | None = None,
     except (TypeError, ValueError):
         quote_minutes = 15
     expires_at = now + timedelta(minutes=quote_minutes)
-    price_version = get_config(db, 'prices').version
+    prices = get_config(db, 'prices')
+    price_version = prices.version
+    delivery_fee = section_data('prices', prices)['delivery']
+    if delivery_fee is None:
+        raise DomainError('PRICE_UNCONFIGURED', '配送费尚未配置，暂不可下单', 422)
     view = {
         'id': quote_id,
         'priceVersion': price_version,
@@ -457,8 +461,8 @@ def build_quote(db, preparation: Preparation, lines, actor: Actor | None = None,
         'lines': line_payload,
         'subtotalCents': subtotal,
         'discountCents': discount,
-        'totalCents': subtotal - discount,
-        'deliveryFeeCents': 0,
+        'totalCents': subtotal - discount + delivery_fee,
+        'deliveryFeeCents': delivery_fee,
         'checkoutAccountId': account.id if account else None,
         'selectedEligibleSubtotalCents': eligible_subtotal,
         'promotionRuleVersion': f"volume-{policy['version']}",
@@ -481,7 +485,8 @@ def build_quote(db, preparation: Preparation, lines, actor: Actor | None = None,
         expires_at=expires_at,
         subtotal_cents=subtotal,
         discount_cents=discount,
-        total_cents=subtotal - discount,
+        total_cents=subtotal - discount + delivery_fee,
+        delivery_fee_cents=delivery_fee,
         selected_coupon_id=best['coupon'].id if use_coupon else None,
         # Quote.data is exactly a strict Quote snapshot. Commerce's order
         # adapter copies this dict into OrderView.quote, so extra metadata

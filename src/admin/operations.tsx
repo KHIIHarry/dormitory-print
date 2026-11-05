@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { ADMIN, DEMO, useStore } from "../lib/store";
 import { NumberInput } from "../components/number-input";
+import { SERVICE_PRICES } from "../lib/service-prices";
 import { mutation, now, request } from "../lib/api";
 import { growthRequest } from "../growth/client";
 import type { Building, Config, ExceptionItem, Staff } from "../lib/types";
@@ -484,15 +485,6 @@ function SettingsForm() {
     ["retention", "保留策略"],
     ["decisions", "业务决策"],
   ];
-  const priceLabels = [
-    ["bwSingle", "A4 黑白单面"],
-    ["bwDuplex", "A4 黑白双面"],
-    ["colorSingle", "A4 彩色单面"],
-    ["colorDuplex", "A4 彩色双面"],
-    ["photo", "5 寸照片"],
-    ["corner", "左上角单钉（每册）"],
-    ["side", "左侧双钉（每册）"],
-  ] as const;
   type MarginValues = Partial<
     Record<"top" | "right" | "bottom" | "left", number | null>
   >;
@@ -647,15 +639,15 @@ function SettingsForm() {
           {tab === "prices" && (
             <>
               <h2>打印价目</h2>
-              <p className="muted">
-                单、双面均按实际纸张张数收费；装订按完整册收费，3 份即 3
-                册。留空表示尚未配置，不能当作免费。
+              <p className="muted price-config-description">
+                打印按实际纸张数收费，装订按份收费（每份装订成一册），配送每单收取一次。
+                填写 0 表示免费，留空表示尚未配置。
               </p>
               <div className="form-grid price-config">
-                {priceLabels.map(([key, label]) => (
+                {SERVICE_PRICES.map(({ key, label, unit }) => (
                   <Field
                     key={key}
-                    label={`${label}（元 / ${key === "corner" || key === "side" ? "册" : "张"}）`}
+                    label={`${label}（元 / ${unit}）`}
                   >
                     <NumberInput
                       min={0}
@@ -669,14 +661,9 @@ function SettingsForm() {
                 ))}
               </div>
               <Notice>
-                价格修改仅对新报价生效，不改变历史订单。装订已按 Q07—Q09
-                启用：按完整册计费，同文件各分段份数必须一致，超过每册实体张数上限时阻止选择。
+                价格修改仅对新报价生效，不改变历史订单。同文件各分段份数须一致，
+                每份装订的实际纸张数不能超过装订上限。
               </Notice>
-              <div className="fixed-rule">
-                <Check size={18} />
-                <b>校园配送费用固定为 ¥0.00</b>
-                <span>V1 已确认规则</span>
-              </div>
             </>
           )}
           {tab === "services" && (

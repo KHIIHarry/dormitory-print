@@ -131,7 +131,7 @@ class QuoteDTO(DTO):
     subtotal_cents: int = PField(ge=0)
     discount_cents: int = PField(ge=0)
     total_cents: int = PField(ge=0)
-    delivery_fee_cents: Literal[0] = 0
+    delivery_fee_cents: int = PField(default=0, ge=0)
     checkout_account_id: str | None
     selected_eligible_subtotal_cents: int = PField(ge=0)
     promotion_rule_version: str
@@ -147,8 +147,8 @@ class QuoteDTO(DTO):
         subtotal = sum(line.amount_cents for line in self.lines)
         if subtotal != self.subtotal_cents:
             raise ValueError('商品小计必须等于各行金额之和')
-        if self.total_cents != self.subtotal_cents - self.discount_cents:
-            raise ValueError('应付必须等于小计减折扣')
+        if self.total_cents != self.subtotal_cents - self.discount_cents + self.delivery_fee_cents:
+            raise ValueError('应付必须等于商品小计减折扣加配送费')
         if not 0 <= self.discount_cents <= self.selected_eligible_subtotal_cents:
             raise ValueError('折扣不能超过适用商品小计')
         if self.selected_eligible_subtotal_cents > self.subtotal_cents:

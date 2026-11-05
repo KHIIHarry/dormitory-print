@@ -2226,11 +2226,26 @@ input[type="date"],
 .price-rows b {
   font-weight: 400;
   font-size: 12px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .price-rows > .price-total {
   padding-top: 20px;
   margin: 23px 0 16px;
   border-top: 1px dashed #e5d8ce;
+}
+.help-layout .service-price-rows > div,
+.help-layout .service-price-rows b {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.service-price-rows > div > span {
+  color: #75685c;
+}
+.settings-admin-layout > .panel > .price-config-description {
+  font-size: 13px;
+  line-height: 1.8;
 }
 .price-total > span {
   font-weight: 500;
@@ -7322,7 +7337,7 @@ select.campus-filter:focus {
     gap: 0 15px;
   }
   .price-config > .field > span {
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.8;
   }
   .fixed-rule {

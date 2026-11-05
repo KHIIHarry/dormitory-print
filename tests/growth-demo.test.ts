@@ -4,8 +4,17 @@ import {buildQuote} from '../src/growth/pricing';
 import type {Order} from '../src/lib/types';
 const lines=[{key:'p',relatedId:'p',unit:'SHEET' as const,quantity:5,unitPriceCents:10,amountCents:50,service:'A4' as const}];
 const db=getDemoGrowth();
-beforeEach(()=>{db.orders.clear();db.preps.clear();db.coupons=[];db.links=[];db.tokens.clear();db.volume=structuredClone(defaultVolume);db.guestPrincipalId='guest-test';db.customer={role:'CUSTOMER',authKind:'ANONYMOUS',capabilities:[]};db.access=null;db.imports.clear();});
+beforeEach(()=>{db.deliveryFeeCents=0;db.orders.clear();db.preps.clear();db.coupons=[];db.links=[];db.tokens.clear();db.volume=structuredClone(defaultVolume);db.guestPrincipalId='guest-test';db.customer={role:'CUSTOMER',authKind:'ANONYMOUS',capabilities:[]};db.access=null;db.imports.clear();});
 describe('开发适配严格遵守报价和授权规则',()=>{
+ it('delivery config reaches preparation and requote snapshots',async()=>{
+  db.deliveryFeeCents=250;
+  const prep=await demoRequest('/preparations',{method:'POST',body:{lines}}) as any;
+  expect(prep.quote.totalCents).toBe(300);
+  db.deliveryFeeCents=100;
+  const next=await demoRequest(`/preparations/${prep.id}/requote`,{method:'POST',body:{}}) as any;
+  expect(next.totalCents).toBe(150);
+  expect(next.deliveryFeeCents).toBe(100);
+ });
  it('其他订单预约券不能进入新报价，零元报价可预约',async()=>{
   await demoRequest('/__demo/customer',{method:'POST'});
   db.coupons.push({id:'c',couponGrantId:'cg',campaignId:'cp',name:'测试',amountCents:50,minSpendCents:0,service:'A4',status:'RESERVED',reservedOrderId:'other',riskHold:'NONE',validUntil:null,version:1});

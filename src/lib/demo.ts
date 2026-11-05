@@ -356,6 +356,7 @@ export function createDemo(): DataState {
         photo: 200,
         corner: null,
         side: null,
+        delivery: 0,
       },
       wechat: "",
       phone: "",

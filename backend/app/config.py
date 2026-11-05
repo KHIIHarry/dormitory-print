@@ -11,7 +11,7 @@ from .models import ConfigSection
 
 router = APIRouter()
 DEFAULTS = {
-    'prices': dict.fromkeys(('bwSingle','bwDuplex','colorSingle','colorDuplex','photo','corner','side')),
+    'prices': {**dict.fromkeys(('bwSingle','bwDuplex','colorSingle','colorDuplex','photo','corner','side')), 'delivery': 0},
     'services': {'serviceEnabled':False,'maxFiles':10,'maxMb':50,'maxOrderMb':200,'maxPages':1000,'maxCopies':100,
         'maxPixels':40000000,'maxExpandedPages':10000,'maxFinalMb':500,'bindingApproved':True,
         'bindingLimits':{'CORNER':None,'SIDE':None},'formats':['pdf','doc','docx','ppt','pptx','xls','xlsx','jpg','jpeg','png','webp','heic'],
@@ -94,6 +94,7 @@ class PricePatch(DTO):
     photo: StrictInt | None = Field(default=None, ge=0)
     corner: StrictInt | None = Field(default=None, ge=0)
     side: StrictInt | None = Field(default=None, ge=0)
+    delivery: StrictInt | None = Field(default=None, ge=0)
 
 
 class ServicesPatch(DTO):
@@ -198,6 +199,7 @@ class PricesView(DTO):
     photo:int|None
     corner:int|None
     side:int|None
+    delivery:int|None
 
 
 class PublicConfigView(DTO):

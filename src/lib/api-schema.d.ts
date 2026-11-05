@@ -8096,6 +8096,8 @@ export interface components {
             colorSingle?: number | null;
             /** Corner */
             corner?: number | null;
+            /** Delivery */
+            delivery?: number | null;
             /** Expectedversion */
             expectedVersion: number;
             /** Photo */
@@ -8115,6 +8117,8 @@ export interface components {
             colorSingle?: number | null;
             /** Corner */
             corner?: number | null;
+            /** Delivery */
+            delivery?: number | null;
             /** Photo */
             photo?: number | null;
             /** Side */
@@ -8134,6 +8138,8 @@ export interface components {
             colorSingle: number | null;
             /** Corner */
             corner: number | null;
+            /** Delivery */
+            delivery: number | null;
             /** Photo */
             photo: number | null;
             /** Side */
@@ -8585,9 +8591,8 @@ export interface components {
             /**
              * Deliveryfeecents
              * @default 0
-             * @constant
              */
-            deliveryFeeCents: 0;
+            deliveryFeeCents: number;
             /** Discountallocations */
             discountAllocations: components["schemas"]["DiscountAllocation"][];
             /** Discountcents */

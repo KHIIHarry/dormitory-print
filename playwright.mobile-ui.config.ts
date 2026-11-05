@@ -1,7 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "tests/e2e",
-  testMatch: ["native-month.spec.ts", "delivery-proof-details.spec.ts"],
+  testMatch: [
+    "native-month.spec.ts",
+    "delivery-proof-details.spec.ts",
+    "service-prices.spec.ts",
+  ],
   use: {
     baseURL: "http://localhost:5173",
     reducedMotion: "reduce",

@@ -1,3 +1,5 @@
+import { SERVICE_PRICES } from "../lib/service-prices";
+
 /**
  * Local DTOs and request builders for the V1 admin integration.
  *
@@ -34,15 +36,7 @@ export const RETENTION_POLICY = {
   trashHours: 24,
 } as const;
 
-const PRICE_KEYS = [
-  "bwSingle",
-  "bwDuplex",
-  "colorSingle",
-  "colorDuplex",
-  "photo",
-  "corner",
-  "side",
-] as const;
+const PRICE_KEYS = SERVICE_PRICES.map(({ key }) => key);
 
 const CONTACT_KEYS = [
   "wechat",

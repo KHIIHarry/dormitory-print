@@ -248,6 +248,7 @@ const defaults = templateDefinitions.map(
   }),
 );
 const db = {
+  deliveryFeeCents: 0 as number | null,
   customer: {
     role: "CUSTOMER",
     authKind: "ANONYMOUS", recovered: false,
@@ -916,6 +917,8 @@ export async function demoRequest(
           quoteCoupons(current.id),
           { selectionMode: "AUTO" },
           current.id,
+          undefined,
+          db.deliveryFeeCents,
         );
       }
     db.guestPrincipalId = uid();
@@ -1048,6 +1051,7 @@ export async function demoRequest(
       body.promotionIntent,
       accountId,
       original?.id,
+      db.deliveryFeeCents,
     );
     protectDelegatedQuote(original, quote);
     const prep = {
@@ -1120,6 +1124,7 @@ export async function demoRequest(
         },
         (prep!.checkoutAccountId as string) || null,
         prep!.replacesOrderId as string | undefined,
+        db.deliveryFeeCents,
       );
       protectDelegatedQuote(
         prep!.replacesOrderId

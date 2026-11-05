@@ -632,7 +632,7 @@ export function PriceRows({
                   ? "照片打印"
                   : "装订"}{" "}
               · {line.quantity}
-              {line.unit === "SHEET" ? "张" : "本"}
+              {line.unit === "SHEET" ? "张" : "份"}
             </span>
             <b>{money(line.amountCents)}</b>
           </div>
@@ -659,8 +659,10 @@ export function PriceRows({
           </b>
         </div>
         <div>
-          <span>校园配送</span>
-          <b className="green-text">免费</b>
+          <span>校园配送 · 1次</span>
+          <b className={quote.deliveryFeeCents === 0 ? "red-text" : undefined}>
+            {quote.deliveryFeeCents === 0 ? "免费" : money(quote.deliveryFeeCents)}
+          </b>
         </div>
         <div className="price-total">
           <span>合计应付</span>
@@ -680,7 +682,7 @@ export function PriceRows({
       </div>
       <div>
         <span>校园配送</span>
-        <b className="green-text">免费</b>
+        <b className="red-text">免费</b>
       </div>
       <div className="price-total">
         <span>合计应付</span>

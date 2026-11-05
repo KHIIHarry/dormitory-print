@@ -274,6 +274,7 @@ export type Config = {
     photo: number | null;
     corner: number | null;
     side: number | null;
+    delivery: number | null;
   };
   wechat: string;
   phone: string;

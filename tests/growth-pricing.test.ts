@@ -5,6 +5,17 @@ const policy:VolumePolicy={id:'p',version:1,enabled:true,effectiveAt:null,descri
 const lines:PriceLine[]=[{key:'a',relatedId:'a',unit:'SHEET',quantity:14,unitPriceCents:100,amountCents:1400,service:'A4'},{key:'photo',relatedId:'photo',unit:'SHEET',quantity:1,unitPriceCents:500,amountCents:500,service:'PHOTO'}];
 const coupon:Coupon={id:'c',couponGrantId:'c',campaignId:'campaign',name:'test',amountCents:140,minSpendCents:0,service:'A4',status:'AVAILABLE',riskHold:'NONE',validUntil:null,version:1};
 describe('growth v1.3 pricing',()=>{
+ it('charges delivery once after product discounts and validates the snapshot',()=>{
+  const q=buildQuote(lines,{...policy,enabled:false},[{...coupon,service:'ALL',amountCents:3000}],{},'a',undefined,250);
+  expect(q.subtotalCents).toBe(1900);
+  expect(q.discountCents).toBe(1900);
+  expect(q.deliveryFeeCents).toBe(250);
+  expect(q.totalCents).toBe(250);
+  expect(()=>assertQuote(q)).not.toThrow();
+  expect(()=>assertQuote({...q,totalCents:0})).toThrow();
+  expect(()=>assertQuote({...q,deliveryFeeCents:-1})).toThrow();
+  expect(()=>buildQuote(lines,policy,[],{},null,undefined,null)).toThrow('配送费尚未配置');
+ });
  it('interprets pay rates precisely and validates duplicate/worsening tiers',()=>{expect(parsePayRate('9')).toBe(9000);expect(parsePayRate('8.555')).toBe(8555);expect(()=>parsePayRate('8.5555')).toThrow();expect(validateVolumePolicy({...policy,tiers:[...policy.tiers,{id:'b',minSheets:14,payRateBps:9500}]}).length).toBeGreaterThan(0)});
  it('includes the threshold and rounds A4 subtotal only once',()=>{expect(selectVolume(13,1001,policy)).toBeNull();expect(selectVolume(14,1001,policy)?.discountCents).toBe(100);expect(selectVolume(14,1001,{...policy,enabled:false})).toBeNull()});
  it('ties prefer volume, preserve coupons and allocate nothing to photos',()=>{const quote=buildQuote(lines,policy,[coupon],{selectionMode:'AUTO'},'account');expect(quote.selectedPromotionType).toBe('VOLUME_TIER');expect(quote.totalCents).toBe(1760);expect(quote.discountAllocations.find(a=>a.lineKey==='photo')?.amountCents??0).toBe(0)});

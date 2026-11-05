@@ -2,6 +2,8 @@
 
 V1 is approved, including all Q/R decisions. Workspace: /path/to/dormprint. Read ../docs/superpowers/specs/2026-10-30-dormprint-v1-scope.md and the delivery matrix. Final Q/R answers override older prompts. No second user/order/config system. Preserve current frontend work.
 
+2026-11-06 pricing update: `prices.delivery` is nullable integer cents, charged once per order. Missing legacy keys default to 0; explicit null blocks new quotes. `Quote.delivery_fee_cents` and snapshot `deliveryFeeCents` preserve the charge. `totalCents = subtotalCents - discountCents + deliveryFeeCents`; product discounts exclude delivery. Binding display uses 份 (one complete booklet); delivery uses 次. This supersedes the previous fixed-free-delivery rule. Apply Alembic revision `a6c8e0f2b014` before running the updated API.
+
 ## Ownership
 
 Codex owns `app/models.py`, `app/core.py`, `app/db.py`, `app/settings.py`, `app/config.py`, `app/main.py`, `app/commerce.py`, `app/after_sales.py`, `app/maintenance.py`, `app/jobs.py`, migrations, requirements, deployment and `tests/conftest.py`. DSH workers own only their assigned modules and named tests. Models are already present; read them. Ask for a shared schema change rather than independently replacing models. No worker git commits, resets or stashes.
