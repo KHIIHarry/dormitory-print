@@ -44,6 +44,7 @@ import { installChunkRecovery } from "./lib/chunk-recovery";
 const AdminBenefits = lazy(() => import("./v1/benefits").then((m) => ({ default: m.AdminBenefitsPage })));
 const AdminQrTools = lazy(() => import("./v1/qr-tools").then((m) => ({ default: m.AdminQRCodeToolsPage })));
 const AdminPayroll = lazy(() => import("./v1/payroll").then((m) => ({ default: m.AdminPayrollPage })));
+const AdminFinance = lazy(() => import("./admin/finance").then((m) => ({ default: m.AdminFinance })));
 const Upload = lazy(() =>
   import("./customer/upload").then((m) => ({ default: m.UploadPage })),
 );
@@ -426,6 +427,7 @@ function App() {
                   <Route path="after-sales/:id" element={<AdminAfterSaleDetail />} />
                   <Route path="data-operations" element={<AdminDataOperations />} />
                   <Route path="payroll" element={<AdminPayroll />} />
+                  <Route path="finance" element={<AdminFinance />} />
                   <Route path="settings/benefits" element={<AdminBenefits />} />
                   <Route path="qr-tools" element={<AdminQrTools />} />
                   <Route path="print" element={<Print />} />

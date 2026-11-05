@@ -9,8 +9,8 @@ import {
 } from "../src/admin/navigation";
 describe("后台分级导航", () => {
   it("保留原有入口并纳入售后与数据导出，各功能只出现一次", () => {
-    expect(adminNavigationItems).toHaveLength(25);
-    expect(new Set(adminNavigationItems.map((item) => item.to)).size).toBe(25);
+    expect(adminNavigationItems).toHaveLength(26);
+    expect(new Set(adminNavigationItems.map((item) => item.to)).size).toBe(26);
     expect(adminNavGroups.map((group) => group.label)).toEqual([
       "订单与生产",
       "配送管理",

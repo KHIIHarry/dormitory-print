@@ -190,12 +190,13 @@ describe("后台 V1 实接口对齐", () => {
       "payment.manage",
       "production.manage",
       "payroll.manage",
+      "finance.manage",
       "delivery.manage",
       "export.manage",
       "data.manage",
       "audit.view",
     ]);
-    expect(keys).not.toContain("finance.manage");
+    expect(keys).toContain("finance.manage");
     expect(
       CAPABILITY_CATALOG.find((item) => item.key === "delivery.manage")?.enforced,
     ).toBe(true);
@@ -225,7 +226,7 @@ describe("后台 V1 实接口对齐", () => {
     expect(() =>
       staffCapabilityPayload(
         { id: "s1", version: 2, role: "ADMIN" },
-        ["finance.manage"],
+        ["inventory.manage"],
         "x",
       ),
     ).toThrow("尚未执行");

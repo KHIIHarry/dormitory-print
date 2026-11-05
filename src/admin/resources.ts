@@ -44,6 +44,7 @@ export function adminNavAllowed(
   if (relative === "/account" || relative === "/qr-tools") return true;
   if (relative.startsWith("/staff")) return has("staff.manage");
   if (relative.startsWith("/payroll")) return has("payroll.manage");
+  if (relative === "/finance") return has("finance.manage");
   if (relative.startsWith("/customers")) return has("customer.manage");
   if (relative.startsWith("/settings/mail")) return has("mail.manage");
   if (

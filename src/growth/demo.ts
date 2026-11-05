@@ -1,3 +1,4 @@
+import { financeDemoRequest } from './finance-demo';
 import {
   grantCampaignCoupons,
   qualifyReferral,
@@ -748,6 +749,8 @@ export async function demoRequest(
   const body = (options.body || {}) as Record<string, any>;
   const seg = path.split("/").filter(Boolean);
   const write = method !== "GET";
+  if (path.startsWith("/admin/finance/"))
+    return financeDemoRequest(path, query, method, body, db.staff, [...db.orders.values()]);
   if (path === "/__demo/staff") {
     db.staff = body as StaffSession;
     return db.staff;

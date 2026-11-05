@@ -861,6 +861,12 @@ export const CAPABILITY_CATALOG: {
     enforced: true,
   },
   {
+    key: "finance.manage",
+    label: "耗材与收支",
+    description: "采购与支出录入、收支结余及作废核对",
+    enforced: true,
+  },
+  {
     key: "delivery.manage",
     label: "配送调度",
     description: "配送时段、批次、发车、分配与异常处理",

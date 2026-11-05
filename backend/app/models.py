@@ -1,8 +1,8 @@
 """Relational business facts; JSON columns contain versioned, validated snapshots."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -627,6 +627,28 @@ class AnonymousLedger(Entity, Base):
     __tablename__ = 'anonymous_ledger'
     bucket: Mapped[str] = mapped_column(String(64), unique=True)
     totals: Mapped[dict] = mapped_column(J, default=dict)
+
+
+class OperatingExpense(Entity, Base):
+    """Actual procurement/other cash spending; voids preserve the original fact."""
+    __tablename__ = 'operating_expenses'
+    category: Mapped[str] = mapped_column(String(16))
+    spent_on: Mapped[date] = mapped_column(Date, index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    paper_sheets: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(Text, default='')
+    status: Mapped[str] = mapped_column(String(16), default='ACTIVE')
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    void_reason: Mapped[str] = mapped_column(Text, default='')
+    voided_by: Mapped[str | None] = mapped_column(String(64))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("category IN ('PAPER','INK','OTHER')", name='ck_expense_category'),
+        CheckConstraint('amount_cents > 0', name='ck_expense_amount'),
+        CheckConstraint("(category = 'PAPER' AND paper_sheets IS NOT NULL AND paper_sheets > 0) OR (category != 'PAPER' AND paper_sheets IS NULL)", name='ck_expense_sheets'),
+        CheckConstraint("status IN ('ACTIVE','VOIDED')", name='ck_expense_status'),
+        CheckConstraint("(status = 'ACTIVE' AND voided_at IS NULL AND voided_by IS NULL) OR (status = 'VOIDED' AND voided_at IS NOT NULL AND voided_by IS NOT NULL AND length(trim(void_reason)) > 0)", name='ck_expense_void'),
+    )
 
 
 class DeletionRequest(Entity, Base):

@@ -893,6 +893,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/finance/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Expenses */
+        get: operations["expenses_api_v1_admin_finance_expenses_get"];
+        put?: never;
+        /** Create Expense */
+        post: operations["create_expense_api_v1_admin_finance_expenses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/finance/expenses/{expense_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void Expense */
+        post: operations["void_expense_api_v1_admin_finance_expenses__expense_id__void_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/finance/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_v1_admin_finance_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/mail/outbox/{job_id}": {
         parameters: {
             query?: never;
@@ -5963,6 +6015,18 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
+        /** Envelope[ExpenseList] */
+        Envelope_ExpenseList_: {
+            data: components["schemas"]["ExpenseList"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[ExpenseView] */
+        Envelope_ExpenseView_: {
+            data: components["schemas"]["ExpenseView"];
+            /** Requestid */
+            requestId: string;
+        };
         /** Envelope[ExportCreated] */
         Envelope_ExportCreated_: {
             data: components["schemas"]["ExportCreated"];
@@ -5978,6 +6042,12 @@ export interface components {
         /** Envelope[ExportRequestResult] */
         Envelope_ExportRequestResult_: {
             data: components["schemas"]["ExportRequestResult"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[FinanceSummary] */
+        Envelope_FinanceSummary_: {
+            data: components["schemas"]["FinanceSummary"];
             /** Requestid */
             requestId: string;
         };
@@ -6408,6 +6478,74 @@ export interface components {
             /** Orderid */
             orderId: string;
         };
+        /** ExpenseInput */
+        ExpenseInput: {
+            /** Amountcents */
+            amountCents: number;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "PAPER" | "INK" | "OTHER";
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Papersheets */
+            paperSheets?: number | null;
+            /**
+             * Spenton
+             * Format: date
+             */
+            spentOn: string;
+        };
+        /** ExpenseList */
+        ExpenseList: {
+            /** Items */
+            items: components["schemas"]["ExpenseView"][];
+            /** Page */
+            page: number;
+            /** Pagesize */
+            pageSize: number;
+            /** Total */
+            total: number;
+        };
+        /** ExpenseView */
+        ExpenseView: {
+            /** Amountcents */
+            amountCents: number;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "PAPER" | "INK" | "OTHER";
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Id */
+            id: string;
+            /** Note */
+            note: string;
+            /** Papersheets */
+            paperSheets: number | null;
+            /**
+             * Spenton
+             * Format: date
+             */
+            spentOn: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ACTIVE" | "VOIDED";
+            /** Version */
+            version: number;
+            /** Voidreason */
+            voidReason: string;
+        };
         /** ExportCreate */
         ExportCreate: {
             /** Fields */
@@ -6555,6 +6693,35 @@ export interface components {
             };
             /** Version */
             version: number;
+        };
+        /** FinanceSummary */
+        FinanceSummary: {
+            /** Balancecents */
+            balanceCents: number;
+            /** Confirmedreceivedcents */
+            confirmedReceivedCents: number;
+            /** Consumablesbalancecents */
+            consumablesBalanceCents: number;
+            /** Inkpurchasecents */
+            inkPurchaseCents: number;
+            /** Legacyarchivecount */
+            legacyArchiveCount: number;
+            /** Month */
+            month: string | null;
+            /** Netreceivedcents */
+            netReceivedCents: number;
+            /** Otherexpensecents */
+            otherExpenseCents: number;
+            /** Paidwagescents */
+            paidWagesCents: number;
+            /** Paperpurchasecents */
+            paperPurchaseCents: number;
+            /** Papersheets */
+            paperSheets: number;
+            /** Paperunityuan */
+            paperUnitYuan: string | null;
+            /** Refundcents */
+            refundCents: number;
         };
         /** GrantRevokeResult */
         GrantRevokeResult: {
@@ -9819,6 +9986,13 @@ export interface components {
              * Reason
              * @default
              */
+            reason: string;
+        };
+        /** VoidInput */
+        VoidInput: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
             reason: string;
         };
         /** VoidOrderInput */
@@ -13259,6 +13433,207 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    expenses_api_v1_admin_finance_expenses_get: {
+        parameters: {
+            query?: {
+                month?: string | null;
+                category?: ("PAPER" | "INK" | "OTHER") | null;
+                page?: number;
+                pageSize?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExpenseList_"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    create_expense_api_v1_admin_finance_expenses_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExpenseView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    void_expense_api_v1_admin_finance_expenses__expense_id__void_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoidInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExpenseView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    summary_api_v1_admin_finance_summary_get: {
+        parameters: {
+            query?: {
+                month?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_FinanceSummary_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */

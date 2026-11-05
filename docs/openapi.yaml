@@ -6811,6 +6811,42 @@
         "title": "Envelope[DisputeView]",
         "type": "object"
       },
+      "Envelope_ExpenseList_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExpenseList"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[ExpenseList]",
+        "type": "object"
+      },
+      "Envelope_ExpenseView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExpenseView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[ExpenseView]",
+        "type": "object"
+      },
       "Envelope_ExportCreated_": {
         "additionalProperties": false,
         "properties": {
@@ -6863,6 +6899,24 @@
           "requestId"
         ],
         "title": "Envelope[ExportRequestResult]",
+        "type": "object"
+      },
+      "Envelope_FinanceSummary_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FinanceSummary"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[FinanceSummary]",
         "type": "object"
       },
       "Envelope_GrantRevokeResult_": {
@@ -8138,6 +8192,166 @@
         "title": "ExchangeInput",
         "type": "object"
       },
+      "ExpenseInput": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "exclusiveMinimum": 0,
+            "maximum": 2147483647,
+            "title": "Amountcents",
+            "type": "integer"
+          },
+          "category": {
+            "enum": [
+              "PAPER",
+              "INK",
+              "OTHER"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Note",
+            "type": "string"
+          },
+          "paperSheets": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 2147483647,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Papersheets"
+          },
+          "spentOn": {
+            "format": "date",
+            "title": "Spenton",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "spentOn",
+          "amountCents"
+        ],
+        "title": "ExpenseInput",
+        "type": "object"
+      },
+      "ExpenseList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pageSize": {
+            "title": "Pagesize",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "ExpenseList",
+        "type": "object"
+      },
+      "ExpenseView": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "title": "Amountcents",
+            "type": "integer"
+          },
+          "category": {
+            "enum": [
+              "PAPER",
+              "INK",
+              "OTHER"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "paperSheets": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Papersheets"
+          },
+          "spentOn": {
+            "format": "date",
+            "title": "Spenton",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "VOIDED"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "voidReason": {
+            "title": "Voidreason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "category",
+          "spentOn",
+          "amountCents",
+          "paperSheets",
+          "note",
+          "status",
+          "voidReason",
+          "createdAt"
+        ],
+        "title": "ExpenseView",
+        "type": "object"
+      },
       "ExportCreate": {
         "additionalProperties": false,
         "properties": {
@@ -8521,6 +8735,94 @@
           "attemptVersions"
         ],
         "title": "FileView",
+        "type": "object"
+      },
+      "FinanceSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "balanceCents": {
+            "title": "Balancecents",
+            "type": "integer"
+          },
+          "confirmedReceivedCents": {
+            "title": "Confirmedreceivedcents",
+            "type": "integer"
+          },
+          "consumablesBalanceCents": {
+            "title": "Consumablesbalancecents",
+            "type": "integer"
+          },
+          "inkPurchaseCents": {
+            "title": "Inkpurchasecents",
+            "type": "integer"
+          },
+          "legacyArchiveCount": {
+            "title": "Legacyarchivecount",
+            "type": "integer"
+          },
+          "month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month"
+          },
+          "netReceivedCents": {
+            "title": "Netreceivedcents",
+            "type": "integer"
+          },
+          "otherExpenseCents": {
+            "title": "Otherexpensecents",
+            "type": "integer"
+          },
+          "paidWagesCents": {
+            "title": "Paidwagescents",
+            "type": "integer"
+          },
+          "paperPurchaseCents": {
+            "title": "Paperpurchasecents",
+            "type": "integer"
+          },
+          "paperSheets": {
+            "title": "Papersheets",
+            "type": "integer"
+          },
+          "paperUnitYuan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paperunityuan"
+          },
+          "refundCents": {
+            "title": "Refundcents",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "month",
+          "confirmedReceivedCents",
+          "refundCents",
+          "netReceivedCents",
+          "paperPurchaseCents",
+          "inkPurchaseCents",
+          "otherExpenseCents",
+          "consumablesBalanceCents",
+          "paidWagesCents",
+          "balanceCents",
+          "paperSheets",
+          "paperUnitYuan",
+          "legacyArchiveCount"
+        ],
+        "title": "FinanceSummary",
         "type": "object"
       },
       "GrantRevokeResult": {
@@ -17752,6 +18054,28 @@
         "title": "VersionReason",
         "type": "object"
       },
+      "VoidInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "reason"
+        ],
+        "title": "VoidInput",
+        "type": "object"
+      },
       "VoidOrderInput": {
         "additionalProperties": false,
         "properties": {
@@ -23846,6 +24170,346 @@
           }
         },
         "summary": "Admin Export Download"
+      }
+    },
+    "/admin/finance/expenses": {
+      "get": {
+        "operationId": "expenses_api_v1_admin_finance_expenses_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PAPER",
+                    "INK",
+                    "OTHER"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Pagesize",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExpenseList_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Expenses"
+      },
+      "post": {
+        "operationId": "create_expense_api_v1_admin_finance_expenses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExpenseView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create Expense",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/admin/finance/expenses/{expense_id}/void": {
+      "post": {
+        "operationId": "void_expense_api_v1_admin_finance_expenses__expense_id__void_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "title": "Expense Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoidInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExpenseView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Void Expense"
+      }
+    },
+    "/admin/finance/summary": {
+      "get": {
+        "operationId": "summary_api_v1_admin_finance_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_FinanceSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Summary"
       }
     },
     "/admin/mail/outbox/{job_id}": {

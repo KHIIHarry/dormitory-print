@@ -1411,6 +1411,7 @@ def _quote_shared(db, quote_id: str, *, ignore_order_id: str | None = None) -> b
 
 def _order_ledger(db, order: Order, quote: Quote | None) -> dict:
     """Mirror commerce.dashboard's aggregation exactly, once for a purged order."""
+    from .finance import order_cash_days
     # The anonymous ledger always carries the five stable financial keys, even
     # for an unpaid cancelled order; consumers must not see a sparse row.
     totals = {
@@ -1471,6 +1472,7 @@ def _order_ledger(db, order: Order, quote: Quote | None) -> dict:
                 0, charge.amount_cents - charge.cash_received_cents)
     if order.status == 'DELIVERED':
         totals['deliveredCount'] = 1
+    totals['cashFlowByDay'] = order_cash_days(db, order.id)
     return totals
 
 

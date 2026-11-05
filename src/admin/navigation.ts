@@ -89,6 +89,7 @@ export const adminNavGroups: readonly AdminNavGroup[] = [
       item("系统配置", "settings", Settings, true),
       item("员工管理", "staff", Users),
       item("员工工资", "payroll", ScrollText),
+      item("耗材与收支", "finance", ChartNoAxesCombined),
       item("员工折扣", "settings/benefits", ShoppingBag),
       item("链接二维码", "qr-tools", Files),
       item("邮件配置", "settings/mail", Settings),
