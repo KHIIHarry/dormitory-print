@@ -53,6 +53,7 @@ import {
   submissionErrorText,
 } from "./task-state";
 import { BatchProof, LocationExceptionRequest } from "./batch-proof";
+import { DeliveryProofPanel } from "../components/delivery-proof";
 import "./batch-proof.css";
 export function CourierHome() {
   const { data, role } = useStore();
@@ -322,6 +323,7 @@ function useAssignment() {
 }
 export function CourierOrder() {
   const { order, batch, data } = useAssignment();
+  const { generation } = useIdentity();
   if (!order)
     return (
       <Empty title="该配送任务已不可访问" text="请返回工作台确认是否已改派。" />
@@ -379,7 +381,11 @@ export function CourierOrder() {
         </dl>
       </Panel>
       {order.status === "DELIVERED" ? (
-        <Notice>此订单已完成交付，交付时间 {formatDisplayTime(order.proof?.deliveredAt)}。</Notice>
+        <DeliveryProofPanel
+          key={`${order.id}:${generation}:${order.proof?.deliveredAt || ""}`}
+          proof={order.proof}
+          delivered
+        />
       ) : (
         <div className="courier-action-stack">
           {order.status === "DELIVERING" && order.packingStatus === "PACKED" ? (

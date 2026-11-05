@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 from typing import Literal
 
@@ -343,6 +343,42 @@ def add_history(order,title,description):
     order.data=data
 
 
+def order_history(db, order):
+    """Project real delivery facts into the timeline, including legacy orders.
+
+    This is read-only: delivery timestamps come from assignments/proofs, never
+    from the current status or the time somebody opens the order page.
+    """
+    rows = list((order.data or {}).get('history') or [])
+
+    def instant(value):
+        try:
+            stamp = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+            return stamp.replace(tzinfo=stamp.tzinfo or timezone.utc)
+        except (TypeError, ValueError):
+            return datetime.min.replace(tzinfo=timezone.utc)
+
+    seen = {(row['title'], instant(row['time'])) for row in rows}
+
+    def append(title, stamp, description):
+        if not stamp or (title, instant(stamp)) in seen:
+            return
+        rows.append({'title': title, 'time': stamp, 'description': description})
+        seen.add((title, instant(stamp)))
+
+    for assignment in db.scalars(select(DeliveryAssignment).where(
+            DeliveryAssignment.order_id == order.id)):
+        append('配送已开始', (assignment.data or {}).get('startedAt'),
+               '配送员已开始配送，请留意交付凭证。')
+    for proof in db.scalars(select(DeliveryProof).where(
+            DeliveryProof.order_id == order.id, DeliveryProof.active.is_(True))):
+        data = proof.data or {}
+        append('资料已送达', data.get('serverDeliveredAt') or data.get('deliveredAt')
+               or proof.created_at.isoformat(),
+               '已提交交付凭证，请及时领取资料。')
+    return sorted(rows, key=lambda row: instant(row['time']), reverse=True)
+
+
 def _artifact_view(artifact,file_id,segment_id):
     values=artifact.settings or {}
     return {'id':artifact.id,'fileId':file_id,'segmentId':segment_id,'sha256':artifact.sha256,
@@ -484,7 +520,7 @@ def order_view(db,order,actor):
         'note':order.note if actor.staff_role=='ADMIN' else '', 'customerNote':order.customer_note,
         'priority':bool(data.get('priority',False)),'batchId':assignment.batch_id if assignment else None,
         'deliveryAssignmentId':assignment.id if assignment else None,'settlement':settlement,'proof':proof_view,
-        'history':data.get('history',[]),'allowedActions':actions,'blockers':blockers,'supplementary':extra_summary}
+        'history':order_history(db,order),'allowedActions':actions,'blockers':blockers,'supplementary':extra_summary}
 
 
 def _current_ready(db,actor,payload,order=None):
@@ -1138,7 +1174,7 @@ def refund_receipt(receipt_id:str,body:ReceiptRefundInput,db=Depends(get_db),act
 @router.get('/orders/{order_id}/history',response_model=Envelope[list[HistoryView]])
 def history(order_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=db.get(Order,order_id);authorize_order(db,actor,order)
-    return ok((order.data or {}).get('history',[]))
+    return ok(order_history(db,order))
 
 
 @router.get('/orders/{order_id}/proof',response_model=Envelope[ProofView|None])

@@ -499,6 +499,7 @@ export function normalizeProof(
   const position = view.position;
   return {
     photoUrl,
+    photoAssetId: view.photoAssetId || undefined,
     skipPhotoReason: view.skipPhotoReason || undefined,
     position:
       position && Number.isFinite(position.latitude)

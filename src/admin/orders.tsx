@@ -62,6 +62,7 @@ import {
 } from "../components/ui";
 import { ResourceSkeleton, RefreshStatus } from "../components/feedback";
 import { ErrorState } from "../components/ui";
+import { DeliveryProofPanel } from "../components/delivery-proof";
 export function AdminOrders() {
   const { data, resources, refresh } = useStore();
   const resource = resources.orders;
@@ -369,7 +370,7 @@ export function AdminOrderDetail() {
   const [recordedReceiptOrder, setRecordedReceiptOrder] = useState<
     string | null
   >(null);
-  const { staff } = useIdentity();
+  const { staff, generation } = useIdentity();
   const [note, setNote] = useState("");
   const [internal, setInternal] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -629,6 +630,11 @@ export function AdminOrderDetail() {
               </div>
             ))}
           </Panel>
+          <DeliveryProofPanel
+            key={`${order.id}:${generation}:${order.proof?.deliveredAt || ""}`}
+            proof={order.proof}
+            delivered={order.status === "DELIVERED"}
+          />
           <Panel title="订单动态与操作记录">
             <div className="history-list">
               {order.history.map((h, i) => (

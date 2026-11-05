@@ -702,5 +702,7 @@ test("single proof waits for the server DTO and uses the real assignment id", as
   expect(
     (proofs[0].body as { deliveryAssignmentId: string }).deliveryAssignmentId,
   ).not.toBe("batch-1");
-  await expect(page.getByText("此订单已完成交付")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "交付凭证", exact: true }),
+  ).toBeVisible();
 });

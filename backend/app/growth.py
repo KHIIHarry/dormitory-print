@@ -32,7 +32,7 @@ from .settings import get_settings
 from .benefits import current_staff_candidate
 from .models import (
     Account, BusinessException, Campaign, ConfigSection, Coupon,
-    DeliveryAssignment, DeliveryBatch, DeliveryChange, DeliveryNotice,
+    DeliveryAssignment, DeliveryBatch, DeliveryChange, DeliveryNotice, DeliveryProof,
     DeliverySlot, EmailJob, Location, Order, Preparation, PromotionEvent, Quote,
     Referral, Refund, Staff, utcnow,
 )
@@ -2321,8 +2321,28 @@ def notify_order_delivered(db, order, delivered_at=None):
         'deliveryLocation': _order_location_label(db, order),
         'orderLink': _order_link(order),
     }
-    return _queue(db, 'ORDER_DELIVERED', account.email, variables,
-                  f'order-email:ORDER_DELIVERED:{order.id}:{order.version}')
+    business_key = f'order-email:ORDER_DELIVERED:{order.id}:{order.version}'
+    proof_id = (order.data or {}).get('deliveryProofId')
+    if not proof_id:
+        return _queue(db, 'ORDER_DELIVERED', account.email, variables, business_key)
+    # The proof is the durable event identity. An SMTP/template/queue outage
+    # must not lose the intent, nor should unrelated order edits duplicate it.
+    dedupe = f'delivery-proof-notice:{proof_id}:ORDER_DELIVERED'
+    advisory_lock(db, dedupe)
+    notice = db.scalar(select(DeliveryNotice).where(
+        DeliveryNotice.dedupe_key == dedupe).with_for_update())
+    if notice is None:
+        notice = DeliveryNotice(
+            order_id=order.id, kind='ORDER_DELIVERED', recipient=account.email,
+            status='PENDING', dedupe_key=dedupe,
+            data={'proofId': proof_id, 'variables': variables,
+                  'businessKey': business_key, 'eventKind': 'ORDER_DELIVERED',
+                  'eventCreatedAt': _iso(stamp)})
+        db.add(notice)
+        db.flush()
+    if not notice.email_job_id and notice.status not in ('ACCEPTED', 'UNKNOWN'):
+        _enqueue_delivery_notice(db, notice, order, None)
+    return db.get(EmailJob, notice.email_job_id) if notice.email_job_id else None
 
 
 _CHANGE_TYPE_LABELS = {
@@ -2420,17 +2440,19 @@ def _enqueue_delivery_notice(db, notice, order, change):
     metadata = dict(notice.data or {})
     variables = metadata.get('variables') or _delivery_change_variables(db, order, change)
     metadata.setdefault('variables', variables)
-    metadata.setdefault('eventKind', change.kind)
-    metadata.setdefault('eventCreatedAt', change.created_at.isoformat())
+    if change is not None:
+        metadata.setdefault('eventKind', change.kind)
+        metadata.setdefault('eventCreatedAt', change.created_at.isoformat())
     metadata.setdefault('arrangementVersion', order.arrangement_version or 0)
     notice.data = metadata
     import hashlib
     recipient_key = hashlib.sha256(notice.recipient.encode()).hexdigest()[:24]
-    business_key = f'order-email:DELIVERY_UPDATED:{order.id}:{change.id}:{recipient_key}'
+    business_key = (metadata['businessKey'] if notice.kind == 'ORDER_DELIVERED'
+                    else f'order-email:DELIVERY_UPDATED:{order.id}:{change.id}:{recipient_key}')
     try:
         with db.begin_nested():
             job = enqueue_email(db, notice.kind, notice.recipient, variables, business_key)
-            job.data = {**(job.data or {}), 'deliveryChangeId': change.id,
+            job.data = {**(job.data or {}), 'deliveryChangeId': notice.change_id,
                         'eventCreatedAt': metadata['eventCreatedAt'],
                         'arrangementVersion': metadata['arrangementVersion']}
             db.flush()
@@ -2477,7 +2499,7 @@ def recover_delivery_notices(db, limit=100):
     for notice in rows:
         order = db.get(Order, notice.order_id)
         change = db.get(DeliveryChange, notice.change_id) if notice.change_id else None
-        if order is None or change is None:
+        if order is None or not _delivery_notice_event_exists(db, notice, change):
             notice.status = 'FAILED'
             notice.last_error = 'DELIVERY_EVENT_MISSING'
             touch(notice)
@@ -2485,6 +2507,14 @@ def recover_delivery_notices(db, limit=100):
         _enqueue_delivery_notice(db, notice, order, change)
         queued += int(notice.email_job_id is not None)
     return queued
+
+
+def _delivery_notice_event_exists(db, notice, change):
+    if notice.kind != 'ORDER_DELIVERED':
+        return change is not None
+    proof_id = (notice.data or {}).get('proofId')
+    proof = db.get(DeliveryProof, proof_id) if proof_id else None
+    return proof is not None and proof.order_id == notice.order_id
 
 
 def _delivery_notice_view(notice):
@@ -2511,7 +2541,7 @@ def retry_delivery_notice(db, notice):
         return notice
     order = db.get(Order, notice.order_id)
     change = db.get(DeliveryChange, notice.change_id) if notice.change_id else None
-    if order is None or change is None:
+    if order is None or not _delivery_notice_event_exists(db, notice, change):
         raise DomainError('NOT_FOUND', '配送变更记录不存在', 404)
     if notice.email_job_id:
         job = db.get(EmailJob, notice.email_job_id)

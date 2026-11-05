@@ -69,6 +69,7 @@ export type Position = {
 };
 export type Proof = {
   photoUrl?: string;
+  photoAssetId?: string | null;
   skipPhotoReason?: string;
   position?: Position;
   skipLocationReason?: string;
