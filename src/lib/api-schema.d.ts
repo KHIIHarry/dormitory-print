@@ -4945,6 +4945,11 @@ export interface components {
              * @default
              */
             note: string;
+            /**
+             * Paymentdifferenceaccepted
+             * @default false
+             */
+            paymentDifferenceAccepted: boolean;
             /** Quoteid */
             quoteId: string;
             /** Receiptid */
@@ -8999,6 +9004,20 @@ export interface components {
             confirmedBy: string;
             /** Discountcents */
             discountCents: number;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Payablecents */
+            payableCents?: number | null;
+            /**
+             * Paymentdifferenceaccepted
+             * @default false
+             */
+            paymentDifferenceAccepted: boolean;
+            /** Paymentdifferencecents */
+            paymentDifferenceCents?: number | null;
             /** Settlementkind */
             settlementKind: string;
         };

@@ -184,7 +184,7 @@ Order 用户视图至少包含 id、pickupCode、version、contentRevision、sta
 | PATCH /orders/{id}/location | `{expectedVersion,locationId}`；配送开始前更改楼栋 |
 | GET /orders/{id}/history；GET /orders/{id}/proof | 角色裁剪后的历史/自己的凭证 |
 | GET /admin/dashboard；GET /admin/orders | 后台统计、组合筛选、游标分页与稳定排序 |
-| POST /admin/orders/{id}/confirm-payment | `{expectedVersion,contentRevision,quoteId,receivedCents,settlementKind,note?}`；CASH_MANUAL 要求应付/实收大于 0 且相等，ZERO_PAYABLE 要求两者均为 0；均人工确认 |
+| POST /admin/orders/{id}/confirm-payment | `{expectedVersion,contentRevision,quoteId,receivedCents,settlementKind,paymentDifferenceAccepted?,note?}`；CASH_MANUAL 要求应付/实收均大于 0；实收不同于应付时必须显式 paymentDifferenceAccepted=true 接受差额，按实际到账完成最终结算，不挂欠款或自动退款，ZERO_PAYABLE 要求两者均为 0；均人工确认 |
 | GET /admin/print-tasks；GET /admin/print-tasks/{id} | 按订单/类型/批次过滤同一批任务，含最终 PDF 和打印设置 |
 | POST /admin/print-tasks/{id}/attempts | `{expectedVersion,artifactId}`；创建尝试并返回 attemptId；不保证实际弹出打印框 |
 | POST /admin/print-attempts/{id}/result | `{expectedVersion,outcome:'COMPLETED'|'FAILED'|'CANCELLED',reason?}` |

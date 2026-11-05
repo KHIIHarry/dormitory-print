@@ -62,7 +62,7 @@
 - 统一公式：subtotalCents=sum(非负正向商品行)，deliveryFeeCents=0，totalCents=subtotalCents-discountCents，0≤discountCents≤selectedEligibleSubtotalCents≤subtotalCents；selectedEligibleSubtotalCents 为所选券适用小计、满量A4小计或员工优惠原打印单整单小计，券/满量/员工等级三类优惠最多取一种。折扣不是负 PriceLine。Order 返回 currentQuoteId、contentRevision、完整 quote 快照和结算记录。
 - Quote 扩展 checkoutAccountId（游客为 null）、selectedEligibleSubtotalCents、promotionRuleVersion、discountAllocations（按 lineKey/relatedId 的整数分分摊）、selectedPromotionType=NONE/COUPON/VOLUME_TIER/STAFF_GRADE；身份与活动版本由服务端判定，不信任前端自填。订单首次创建时记录不可回溯重写的 checkoutAccountId、checkoutAuthKind 与邀请资格来源，导入/合并不能把历史游客单变成注册首单。
 - 全部页面、微信付款文案、收款、统计使用同一订单快照，不按当前价目/活动重新算历史应付。Quote 未就绪是 null/显式状态；禁止 `prep.total || total`、`Number(value) || 原价` 把 0 当未生成，真实模式禁止回退本地估价。禁止固定 `quote-v1`，收款提交服务端 currentQuoteId。
-- 扩展原 `POST /admin/orders/{id}/confirm-payment` 请求：`{expectedVersion,contentRevision,quoteId,receivedCents,settlementKind:'CASH_MANUAL'|'ZERO_PAYABLE',note?}`。CASH_MANUAL 必须 receivedCents=totalCents>0；ZERO_PAYABLE 必须两者都为 0、管理员明确人工确认，空白实收输入不能被 Number(空串) 当作人工零元确认，且无阻断风控。均复用原生产前置与幂等事务，只有成功才进入 PENDING_PRINT；仅所选 COUPON 才将有效 RESERVED 券核销，VOLUME_TIER/STAFF_GRADE/NONE不产生券核销。
+- 扩展原 `POST /admin/orders/{id}/confirm-payment` 请求：`{expectedVersion,contentRevision,quoteId,receivedCents,settlementKind:'CASH_MANUAL'|'ZERO_PAYABLE',paymentDifferenceAccepted?,note?}`。CASH_MANUAL 必须 receivedCents>0、totalCents>0，且差额非零须 paymentDifferenceAccepted=true；ZERO_PAYABLE 必须两者都为 0、管理员明确人工确认，空白实收输入不能被 Number(空串) 当作人工零元确认，且无阻断风控。均复用原生产前置与幂等事务，只有成功才进入 PENDING_PRINT；仅所选 COUPON 才将有效 RESERVED 券核销，VOLUME_TIER/STAFF_GRADE/NONE不产生券核销。
 - 零元记录 settlementKind=ZERO_PAYABLE、cashReceivedCents=0、discountCents、确认人/时间，不描述为已收到微信转账。零元页面提示“无需转账，等待管理员确认零元结算”，仍可联系微信；不自动放行、不产生邀请有效实付。
 - 统计分开商品原价、优惠让利、订单应付、现金实收、零元确认数量、退款/人工调整，不将补贴当现金营收。
 - 这是金额语义升级，仅无优惠路径保持数值兼容；先改 OpenAPI（含 additionalProperties:false 的严格 schema），再生成类型/部署前端与后端。未升级客户端不得接受/提交自己不能正确显示的优惠报价；版本/能力不符明确要求升级，不隐藏折扣。
@@ -285,7 +285,7 @@ volumeDiscountCents = a4SubtotalCents - volumePayableCents
 - 只改优惠券且最终 PDF hash 未变，沿用已有 `previewAcks`，但**金额变更要求再次明确确认**；改打印设置仍严格按原流程重新生成 PDF 与预览确认。
 - `POST /orders` 仍以所选 `quoteId`、最终 PDF 确认为准；提交成功后订单固定报价和已锁定优惠，不应因后台改活动而悄然改变。
 - 已付款订单不因后续注册/邀请而追溯减价、自动退款；原 D-01 未批准不得通过优惠操作绕过已付款订单的内容/价格变更控制。
-- 用户端订单详情、联系管理员付款文案显示**优惠后应付**；管理员订单确认收款和账目也用同一个订单金额快照。实际支付不等于应付时仍走原人工核对异常，不自动变 PENDING_PRINT。
+- 用户端订单详情、联系管理员付款文案显示**优惠后应付**；管理员订单确认收款和账目也用同一个订单金额快照。实际收款不同于应付时显示差额，由管理员勾选接受后按真实实收进入 PENDING_PRINT；原应付快照不变。
 
 ### 4.3 管理端营销页面
 
@@ -444,7 +444,7 @@ volumeDiscountCents = a4SubtotalCents - volumePayableCents
 | FE-ADD-05 | 单订单链接打开后只能访问该单，地址栏 token 兑换后消失；短提取码猜测无权读取私密订单。 |
 | FE-ADD-06 | 管理端生成查询链接只显示一次；复制文案后可微信人工发送；撤销后旧链接失效。 |
 | FE-ADD-07 | 修改优惠券后 quoteId / 应付金额由后端重新返回，用户重新确认金额；PDF SHA-256 不因此变化。 |
-| FE-ADD-08 | 管理端确认付款看到与用户相同的折扣后应付，不符合不能自动确认收款。 |
+| FE-ADD-08 | 管理端确认付款看到与用户相同的折扣后应付，金额不同须显式接受差额后确认收款，不能静默放行。 |
 | FE-ADD-09 | 邀请码非必填、不可自邀；奖励未达标显示待生效；个人邀请页不泄露好友敏感信息。 |
 | FE-ADD-10 | SMTP 密码无明文回显，保存/测试/发送状态严格区分；修改表单有版本冲突提示。 |
 | FE-ADD-11 | 邮件模板主题/正文预览、插入变量、恢复默认、测试发送可完整走通；测试预览不得使用真实 token。 |

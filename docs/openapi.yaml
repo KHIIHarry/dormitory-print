@@ -3822,6 +3822,11 @@
             "title": "Note",
             "type": "string"
           },
+          "paymentDifferenceAccepted": {
+            "default": false,
+            "title": "Paymentdifferenceaccepted",
+            "type": "boolean"
+          },
           "quoteId": {
             "title": "Quoteid",
             "type": "string"
@@ -3838,6 +3843,7 @@
             "title": "Receiptid"
           },
           "receivedCents": {
+            "maximum": 2147483647,
             "minimum": 0,
             "title": "Receivedcents",
             "type": "integer"
@@ -15358,6 +15364,38 @@
           "discountCents": {
             "title": "Discountcents",
             "type": "integer"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "payableCents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payablecents"
+          },
+          "paymentDifferenceAccepted": {
+            "default": false,
+            "title": "Paymentdifferenceaccepted",
+            "type": "boolean"
+          },
+          "paymentDifferenceCents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paymentdifferencecents"
           },
           "settlementKind": {
             "title": "Settlementkind",

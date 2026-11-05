@@ -133,11 +133,13 @@ ORDER_SUPPLEMENTARY_FIELDS = {
     'supplementaryOutstandingCents': 'outstandingCents',
     'supplementaryPayrollFeeCents': 'payrollFeeCents',
 }
+PAYMENT_VARIANCE_FIELDS = ('paymentDifferenceCents', 'paymentDifferenceAccepted', 'paymentNote')
 ORDER_FIELDS = (
     'orderId', 'pickupCode', 'status', 'totalCents', 'payableCents', 'createdAt',
     'deliveredAt', 'settlementKind', 'cashReceivedCents', 'refundCents',
     'customerNameMasked', 'phoneMasked', 'locationName', 'slotName', 'campusId', 'campusName',
     *ORDER_SUPPLEMENTARY_FIELDS,
+    *PAYMENT_VARIANCE_FIELDS,
 )
 FINANCE_SUPPLEMENTARY_FIELDS = (
     'rowType', 'isTrashed', 'chargeId', 'movementId', 'ledgerBucket',
@@ -155,6 +157,7 @@ FINANCE_FIELDS = (
     'createdAt', 'receiptStatus', 'paymentKind', 'receiptAmountCents',
     'adjustmentCents', 'refundRecordCents',
     *FINANCE_SUPPLEMENTARY_FIELDS,
+    *PAYMENT_VARIANCE_FIELDS,
 )
 PROMOTION_FIELDS = (
     'accountMasked', 'campaignName', 'type', 'status', 'amountCents', 'reason', 'time',
@@ -681,8 +684,21 @@ def _anonymous_summary_rows(db, filters: dict) -> list[AnonymousLedger]:
     return rows
 
 
+def _payment_variance_value(order: Order, field: str) -> str | int | bool:
+    if not order.settlement_kind:
+        return ''
+    settlement = (order.data or {}).get('settlement') or {}
+    if field == 'paymentDifferenceCents':
+        return order.cash_received_cents - order.total_cents
+    if field == 'paymentDifferenceAccepted':
+        return settlement.get('paymentDifferenceAccepted') is True
+    return settlement.get('note', '')
+
+
 def _order_value(db, order: Order, field: str, proof: DeliveryProof | None,
                  supplementary: dict | None = None) -> str | int:
+    if field in PAYMENT_VARIANCE_FIELDS:
+        return _payment_variance_value(order, field)
     if field in ORDER_SUPPLEMENTARY_FIELDS:
         return (supplementary or {}).get(ORDER_SUPPLEMENTARY_FIELDS[field], 0)
     if field == 'orderId':
@@ -779,6 +795,8 @@ def _finance_context(db, orders: list[Order]):
 
 
 def _finance_value(order: Order, field: str, context) -> str | int | bool:
+    if field in PAYMENT_VARIANCE_FIELDS:
+        return _payment_variance_value(order, field)
     payments, receipts, adjustments, refunds, unmatched = context
     payment = payments.get(order.id)
     receipt = receipts.get(payment.receipt_id) if payment and payment.receipt_id else None

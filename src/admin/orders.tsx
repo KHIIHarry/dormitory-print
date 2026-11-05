@@ -7,7 +7,11 @@ import {
   slotBlockLabel,
 } from "../v1/customer";
 import { AdminSupplementaryPanel } from "../v1/supplementary";
-import { assertQuote, settlementWithReceipt } from "../growth/pricing";
+import {
+  assertQuote,
+  settlementInput,
+  settlementWithReceipt,
+} from "../growth/pricing";
 import { AdminAccessLinks } from "../growth/order-links";
 import { useIdentity } from "../growth/identity";
 import { useEffect, useState } from "react";
@@ -37,11 +41,7 @@ import {
 import { ADMIN, useStore } from "../lib/store";
 import { money } from "../lib/api";
 import { campusOfOrder, slotsForCampus } from "../lib/campus";
-import {
-  CampusFilter,
-  CampusTag,
-  orderCampusId,
-} from "./campus-filter";
+import { CampusFilter, CampusTag, orderCampusId } from "./campus-filter";
 import {
   hasWageBlocker,
   trashBlockers,
@@ -362,6 +362,8 @@ export function AdminOrderDetail() {
   const [reason, setReason] = useState("");
   const [received, setReceived] = useState("");
   const [zeroConfirmed, setZeroConfirmed] = useState(false);
+  const [paymentDifferenceAccepted, setPaymentDifferenceAccepted] =
+    useState(false);
   const [receiptId, setReceiptId] = useState("");
   const [receiptNotice, setReceiptNotice] = useState("");
   const [recordedReceiptOrder, setRecordedReceiptOrder] = useState<
@@ -379,6 +381,17 @@ export function AdminOrderDetail() {
         action={<Link to={`${ADMIN}/orders`}>返回订单列表</Link>}
       />
     );
+  const paymentBlockers = (order.blockers || []).filter(
+    (blocker) => blocker.code !== "PAYMENT_MISMATCH",
+  );
+  let paymentDifference: number | null = null;
+  try {
+    paymentDifference =
+      settlementInput(order.totalCents, received, true, true).receivedCents -
+      order.totalCents;
+  } catch {
+    // A difference is shown only for a valid cash amount; submit explains invalid input.
+  }
   const confirm = async () => {
     let settlement: ReturnType<typeof settlementWithReceipt>;
     try {
@@ -396,10 +409,11 @@ export function AdminOrderDetail() {
         order.unmatchedReceipts || [],
         receiptId,
         recordedReceiptOrder === order.id,
+        paymentDifferenceAccepted,
       );
       if (!order.currentQuoteId)
         throw new Error("缺少订单锁定报价，请刷新订单后核对");
-      if (order.blockers?.length)
+      if (paymentBlockers.length)
         throw new Error("订单存在风控阻断，请先人工核对处理");
     } catch (e) {
       toast((e as Error).message);
@@ -428,6 +442,12 @@ export function AdminOrderDetail() {
                   discountCents: o.quote?.discountCents ?? 0,
                   confirmedAt: new Date().toISOString(),
                   confirmedBy: staff?.id || "admin",
+                  payableCents: o.totalCents,
+                  paymentDifferenceCents:
+                    settlement.receivedCents - o.totalCents,
+                  paymentDifferenceAccepted:
+                    !!settlement.paymentDifferenceAccepted,
+                  note,
                 },
                 version: o.version + 1,
                 history: [
@@ -513,9 +533,11 @@ export function AdminOrderDetail() {
               (staff?.capabilities?.includes("*") ||
                 staff?.capabilities?.includes("payment.manage")) && (
                 <Button
-                  disabled={!!order.blockers?.length || !order.currentQuoteId}
+                  disabled={!!paymentBlockers.length || !order.currentQuoteId}
                   onClick={() => {
                     setZeroConfirmed(false);
+                    setPaymentDifferenceAccepted(false);
+                    setNote("");
                     setReceived("");
                     setReceiptId("");
                     setReceiptNotice("");
@@ -543,7 +565,9 @@ export function AdminOrderDetail() {
       {!!order.blockers?.length && (
         <Notice type="warning">
           {order.blockers.map((b) => b.message).join("；")}
-          。当前保留锁定金额，解除阻断前不能结算或生产。
+          {paymentBlockers.length
+            ? "。当前保留锁定金额，解除阻断前不能结算或生产。"
+            : "。请在核对收款中复用原实收记录，确认差额后完成结算。"}
         </Notice>
       )}
       <div className="detail-grid">
@@ -821,6 +845,54 @@ export function AdminOrderDetail() {
             <Panel title="费用快照">
               <PriceRows total={order.totalCents} quote={order.quote} />
               <p className="form-hint">历史订单金额不会随新价目修改。</p>
+              {order.settlement && (
+                <dl className="detail-dl">
+                  <div>
+                    <dt>实际收款</dt>
+                    <dd className="amount">
+                      {money(order.settlement.cashReceivedCents)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>差额</dt>
+                    <dd>
+                      <span
+                        className={
+                          order.settlement.cashReceivedCents > order.totalCents
+                            ? "green-text"
+                            : order.settlement.cashReceivedCents <
+                                order.totalCents
+                              ? "red-text"
+                              : ""
+                        }
+                      >
+                        {order.settlement.cashReceivedCents > order.totalCents
+                          ? "+"
+                          : order.settlement.cashReceivedCents <
+                              order.totalCents
+                            ? "-"
+                            : ""}
+                        {money(
+                          Math.abs(
+                            order.settlement.cashReceivedCents -
+                              order.totalCents,
+                          ),
+                        )}
+                      </span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>收款确认时间</dt>
+                    <dd>{formatDisplayTime(order.settlement.confirmedAt)}</dd>
+                  </div>
+                  {order.settlement.note && (
+                    <div>
+                      <dt>收款备注</dt>
+                      <dd>{order.settlement.note}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
             </Panel>
           </div>
         </aside>
@@ -861,17 +933,19 @@ export function AdminOrderDetail() {
                 value={receiptId}
                 onChange={(event) => {
                   setReceiptId(event.target.value);
+                  setPaymentDifferenceAccepted(false);
                   const receipt = order.unmatchedReceipts?.find(
                     (item) => item.id === event.target.value,
                   );
-                  if (receipt)
-                    setReceived(
-                      (
-                        (receipt.refundableCents ??
-                          receipt.amountCents - (receipt.refundedCents || 0)) /
-                        100
-                      ).toFixed(2),
-                    );
+                  setReceived(
+                    receipt
+                      ? (
+                          (receipt.refundableCents ??
+                            receipt.amountCents -
+                              (receipt.refundedCents || 0)) / 100
+                        ).toFixed(2)
+                      : "",
+                  );
                 }}
               >
                 <option value="">请选择实收记录</option>
@@ -893,10 +967,37 @@ export function AdminOrderDetail() {
               type="number"
               min="0"
               step="0.01"
+              max="21474836.47"
               value={received}
-              onChange={(e) => setReceived(e.target.value)}
+              onChange={(e) => {
+                setReceived(e.target.value);
+                setPaymentDifferenceAccepted(false);
+              }}
             />
           </Field>
+          {paymentDifference !== null && paymentDifference !== 0 && (
+            <>
+              <p role="status">
+                差额：
+                <span
+                  className={paymentDifference > 0 ? "green-text" : "red-text"}
+                >
+                  {paymentDifference > 0 ? "+" : "-"}
+                  {money(Math.abs(paymentDifference))}
+                </span>
+              </p>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={paymentDifferenceAccepted}
+                  onChange={(event) =>
+                    setPaymentDifferenceAccepted(event.target.checked)
+                  }
+                />
+                <span>接受差额并结算</span>
+              </label>
+            </>
+          )}
           {order.totalCents === 0 && (
             <label className="checkbox-label">
               <input
@@ -915,7 +1016,12 @@ export function AdminOrderDetail() {
           <Button
             className="full"
             busy={busy}
-            disabled={busy}
+            disabled={
+              busy ||
+              (paymentDifference !== null &&
+                paymentDifference !== 0 &&
+                !paymentDifferenceAccepted)
+            }
             onClick={confirm}
           >
             {busy

@@ -385,7 +385,11 @@ export function syncDemoOrders(orders: Order[]) {
         });
       }
     }
-    db.orders.set(order.id, order);
+    // Customer projections omit internal payment notes. Syncing such a view
+    // must not erase the canonical admin ledger or mutate the public view.
+    db.orders.set(order.id, previous?.settlement && order.settlement && !("note" in order.settlement)
+      ? { ...order, settlement: { ...order.settlement, note: previous.settlement.note } }
+      : order);
     qualifyReferral(db, order);
   }
 }
@@ -417,13 +421,19 @@ function grantedSources(
       }
   return sources;
 }
+function customerOrderView(order: Order): Order {
+  if (!order.settlement) return { ...order };
+  const { note: _note, ...settlement } = order.settlement;
+  return { ...order, settlement };
+}
+
 function grantOrderView(
   order: Order,
   scopes: string[],
   kind: Order["accessKind"],
 ): Order {
   return {
-    ...order,
+    ...customerOrderView(order),
     accessKind: kind,
     allowedActions: [...(order.allowedActions || []), ...readScopes].filter(
       (action) => scopes.includes(action),
@@ -455,7 +465,7 @@ export function visibleDemoOrders(
     if (owned)
       return [
         {
-          ...order,
+          ...customerOrderView(order),
           accessKind:
             order.ownerPrincipalId === db.guestPrincipalId
               ? "GUEST_OWNER"
@@ -492,17 +502,19 @@ export function validateDemoOrderAction(path: string, input: unknown) {
     order.status !== "PENDING_CONFIRMATION"
   )
     fail("订单报价或状态已变化，请重新核对", "VERSION_CONFLICT", 409);
-  if (order.blockers?.length)
+  if (order.blockers?.some((blocker) => blocker.code !== "PAYMENT_MISMATCH"))
     fail("订单有风控阻断，请先人工核对", "ORDER_BLOCKED", 409);
   if (
     !Number.isSafeInteger(body.receivedCents) ||
-    body.receivedCents !== order.totalCents ||
+    body.receivedCents > 2147483647 ||
     !(
-      (body.receivedCents > 0 && body.settlementKind === "CASH_MANUAL") ||
-      (body.receivedCents === 0 && body.settlementKind === "ZERO_PAYABLE")
+      (order.totalCents > 0 && body.receivedCents > 0 && body.settlementKind === "CASH_MANUAL") ||
+      (order.totalCents === 0 && body.receivedCents === 0 && body.settlementKind === "ZERO_PAYABLE")
     )
   )
     fail("结算类型或实收金额无效");
+  if (body.receivedCents !== order.totalCents && body.paymentDifferenceAccepted !== true)
+    fail("请确认接受本次收款差额", "PAYMENT_DIFFERENCE_CONFIRMATION_REQUIRED", 409);
   const coupon = couponFor(order);
   if (
     coupon &&
@@ -1243,7 +1255,7 @@ export async function demoRequest(
     };
     const serialized = ownsOrder(order!)
       ? ({
-          ...order!,
+          ...customerOrderView(order!),
           accessKind:
             order!.ownerPrincipalId === db.guestPrincipalId
               ? "GUEST_OWNER"

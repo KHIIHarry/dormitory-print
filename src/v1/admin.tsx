@@ -1691,8 +1691,8 @@ function ExportOperations() {
   const [error, setError] = useState("");
   const fieldOptions =
     kind === "ORDERS"
-      ? ["orderId", "pickupCode", "status", "totalCents", "createdAt", "deliveredAt"]
-      : ["orderId", "payableCents", "cashReceivedCents", "refundCents", "settlementKind", "createdAt"];
+      ? ["orderId", "pickupCode", "status", "totalCents", "cashReceivedCents", "paymentDifferenceCents", "paymentDifferenceAccepted", "paymentNote", "createdAt", "deliveredAt"]
+      : ["orderId", "payableCents", "cashReceivedCents", "paymentDifferenceCents", "paymentDifferenceAccepted", "paymentNote", "refundCents", "settlementKind", "createdAt"];
   const create = async (auditReason: string) => {
     setError("");
     const result = await submit.run(
@@ -1732,7 +1732,13 @@ function ExportOperations() {
       <Panel title="新建受控导出">
         <div className="v1-two-col">
           <Field label="导出类型">
-            <select value={kind} onChange={(event) => setKind(event.target.value as "ORDERS" | "FINANCE")}>
+            <select value={kind} onChange={(event) => {
+              const next = event.target.value as "ORDERS" | "FINANCE";
+              setKind(next);
+              setFields(next === "FINANCE"
+                ? ["orderId", "payableCents", "cashReceivedCents", "paymentDifferenceCents", "paymentDifferenceAccepted", "paymentNote", "refundCents", "settlementKind", "createdAt"]
+                : ["orderId", "pickupCode", "status"]);
+            }}>
               <option value="ORDERS">订单</option>
               <option value="FINANCE">收退款对账</option>
             </select>

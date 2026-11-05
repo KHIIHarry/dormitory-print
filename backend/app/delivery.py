@@ -462,8 +462,18 @@ def _proof_for_assignment(db, assignment_id: str) -> DeliveryProof | None:
 
 
 def _payment_confirmed(order: Order) -> bool:
-    return (order.settlement_kind in ('CASH_MANUAL', 'ZERO_PAYABLE')
-            and order.cash_received_cents == order.total_cents)
+    if order.settlement_kind == 'ZERO_PAYABLE':
+        return order.total_cents == 0 and order.cash_received_cents == 0
+    if order.settlement_kind != 'CASH_MANUAL' or order.total_cents <= 0 or order.cash_received_cents <= 0:
+        return False
+    if order.cash_received_cents == order.total_cents:
+        return True
+    settlement = (order.data or {}).get('settlement') or {}
+    return (settlement.get('paymentDifferenceAccepted') is True
+            and settlement.get('settlementKind') == order.settlement_kind
+            and settlement.get('payableCents') == order.total_cents
+            and settlement.get('cashReceivedCents') == order.cash_received_cents
+            and settlement.get('paymentDifferenceCents') == order.cash_received_cents - order.total_cents)
 
 
 def _order_blockers(db, order: Order, assignment: DeliveryAssignment | None = None) -> list[dict]:

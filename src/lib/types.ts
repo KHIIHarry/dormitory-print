@@ -100,6 +100,10 @@ export type Order = {
     discountCents: number;
     confirmedAt: string;
     confirmedBy: string;
+    payableCents?: number | null;
+    paymentDifferenceCents?: number | null;
+    paymentDifferenceAccepted?: boolean;
+    note?: string;
   };
   blockers?: { code: string; message: string }[];
   id: string;

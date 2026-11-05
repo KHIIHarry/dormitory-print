@@ -258,7 +258,7 @@ Order 用户视图至少包含 id、pickupCode、version、contentRevision、sta
 | PATCH /orders/{id}/location | `{expectedVersion,locationId}`；配送开始前更改楼栋 |
 | GET /orders/{id}/history；GET /orders/{id}/proof | 角色裁剪后的历史/自己的凭证 |
 | GET /admin/dashboard；GET /admin/orders | 后台统计、组合筛选、游标分页与稳定排序 |
-| POST /admin/orders/{id}/confirm-payment | `{expectedVersion,contentRevision,quoteId,receivedCents,settlementKind,note?}`；CASH_MANUAL 要求应付/实收大于 0 且相等，ZERO_PAYABLE 要求两者均为 0；均人工确认 |
+| POST /admin/orders/{id}/confirm-payment | `{expectedVersion,contentRevision,quoteId,receivedCents,settlementKind,paymentDifferenceAccepted?,note?}`；CASH_MANUAL 要求应付/实收均大于 0；实收不同于应付时必须显式 paymentDifferenceAccepted=true 接受差额，按实际到账完成最终结算，不挂欠款或自动退款，ZERO_PAYABLE 要求两者均为 0；均人工确认 |
 | GET /admin/print-tasks；GET /admin/print-tasks/{id} | 按订单/类型/批次过滤同一批任务，含最终 PDF 和打印设置 |
 | POST /admin/print-tasks/{id}/attempts | `{expectedVersion,artifactId}`；创建尝试并返回 attemptId；不保证实际弹出打印框 |
 | POST /admin/print-attempts/{id}/result | `{expectedVersion,outcome:'COMPLETED'|'FAILED'|'CANCELLED',reason?}` |
@@ -450,7 +450,7 @@ POST orders 在一个事务中重检：当前匿名/账号/单订单委托授权
 
 ### H3. 人工收款与零元结算确认
 
-confirm-payment 只有 ADMIN 可用，事务锁订单、确认其当前状态/版本/quoteId/contentRevision；实际收到金额不等应收金额时只能记录核对异常，不能进入 PENDING_PRINT。报价有效期仅限制创建/修改提交；已提交且内容未变的订单不得因 quote.expiresAt 已过而拒绝正常收款或自动改价。正数应付要求 settlementKind=CASH_MANUAL、receivedCents=totalCents>0；零元应付要求 settlementKind=ZERO_PAYABLE、receivedCents=0，管理员明确确认而非自动放行；追加不可变结算记录，零元不计现金实收和邀请有效实付。两种人工结算均追加 payment record（含 kind 与折扣快照），激活生产任务资格、写状态与审计；重复 key 不重复记录，另一 key 再次确认也不能重复入账。
+confirm-payment 只有 ADMIN 可用，事务锁订单、确认其当前状态/版本/quoteId/contentRevision；实际收到金额不等应收金额时，须由有收款权限的管理员明确接受差额后完成最终结算；未接受不得放行。报价有效期仅限制创建/修改提交；已提交且内容未变的订单不得因 quote.expiresAt 已过而拒绝正常收款或自动改价。正数应付要求 settlementKind=CASH_MANUAL、receivedCents>0、totalCents>0，且差额非零须 paymentDifferenceAccepted=true；零元应付要求 settlementKind=ZERO_PAYABLE、receivedCents=0，管理员明确确认而非自动放行；追加不可变结算记录，零元不计现金实收和邀请有效实付。两种人工结算均追加 payment record（含 kind 与折扣快照），激活生产任务资格、写状态与审计；重复 key 不重复记录，另一 key 再次确认也不能重复入账。
 
 付款记录不可原地覆盖。补款/退款仅是线下人工记录，不调用支付系统。D-01 未批准不得付款后替换文件；如批准则引入 change request：新文件/配置→新产物与报价→差额核对→人工确认新版本激活，期间锁定受影响生产，保留旧事实。不得自动作废已实际完成的打印记录或让旧 URL 作为新任务打印。
 

@@ -29,7 +29,24 @@ export function assertQuote(quote:Quote):Quote{
  return quote;
 }
 export function eligibleReferral(order:{status:string;checkoutAccountId:string|null;settlementKind:string;cashReceivedCents:number}){return order.status==='DELIVERED'&&!!order.checkoutAccountId&&order.settlementKind==='CASH_MANUAL'&&order.cashReceivedCents>0}
-export function settlementInput(totalCents:number,received:string,zeroConfirmed:boolean){if(!received.trim())throw new Error('请明确填写实际收到金额');if(!/^\d+(\.\d{1,2})?$/.test(received))throw new Error('请输入有效金额，最多两位小数');const cents=Math.round(Number(received)*100);if(cents!==totalCents)throw new Error('实收与应付不一致，请人工核对');if(totalCents===0&&!zeroConfirmed)throw new Error('请明确确认零元结算');return {receivedCents:cents,settlementKind:totalCents===0?'ZERO_PAYABLE' as const:'CASH_MANUAL' as const}}
+export function settlementInput(totalCents: number, received: string, zeroConfirmed: boolean, paymentDifferenceAccepted = false) {
+  if (!received.trim()) throw new Error('请明确填写实际收到金额');
+  if (!/^\d+(\.\d{1,2})?$/.test(received)) throw new Error('请输入有效金额，最多两位小数');
+  const [whole, fraction = ''] = received.split('.');
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  if (!Number.isSafeInteger(cents) || cents > 2147483647) throw new Error('实际收款金额超出允许范围');
+  if (totalCents === 0) {
+    if (cents !== 0) throw new Error('零元订单的实际收款必须为0');
+    if (!zeroConfirmed) throw new Error('请明确确认零元结算');
+  } else if (cents <= 0) throw new Error('实际收款须大于0，免单需另行处理');
+  const difference = cents !== totalCents;
+  if (difference && !paymentDifferenceAccepted) throw new Error('请勾选接受本次收款差额并完成结算');
+  return {
+    receivedCents: cents,
+    settlementKind: totalCents === 0 ? 'ZERO_PAYABLE' as const : 'CASH_MANUAL' as const,
+    ...(difference ? { paymentDifferenceAccepted: true } : {}),
+  };
+}
 
 /** A recorded cash receipt must be matched explicitly instead of recording the cash twice. */
 export function settlementWithReceipt(
@@ -39,8 +56,9 @@ export function settlementWithReceipt(
   receipts: { id: string; amountCents: number; refundedCents?: number; refundableCents?: number; status: string }[],
   receiptId: string,
   cashAlreadyRecorded = false,
+  paymentDifferenceAccepted = false,
 ) {
-  const settlement = settlementInput(totalCents, received, zeroConfirmed);
+  const settlement = settlementInput(totalCents, received, zeroConfirmed, paymentDifferenceAccepted);
   if (!receipts.length && !receiptId) {
     if (cashAlreadyRecorded) throw new Error("款项已登记，请刷新订单取得待核对实收记录后复用结算");
     return settlement;
@@ -50,6 +68,6 @@ export function settlementWithReceipt(
   if (!receipt) throw new Error("待核对实收记录已变化，请刷新后重新选择");
   const net = receipt.refundableCents ?? receipt.amountCents - (receipt.refundedCents || 0);
   if (!Number.isSafeInteger(net) || net !== settlement.receivedCents)
-    throw new Error("待核对实收净额与本次应付不一致，请先核对退款和实收");
+    throw new Error("待核对实收净额与本次填写的实收不一致，请先核对退款和实收");
   return { ...settlement, receiptId };
 }

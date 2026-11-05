@@ -3,7 +3,7 @@ import secrets
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import Field, StrictInt, field_validator
+from pydantic import Field, StrictBool, StrictInt, field_validator
 from sqlalchemy import and_, func, or_, select
 
 from .config import get_config, public_config
@@ -107,8 +107,9 @@ class ConfirmPayment(DTO):
     expected_version:StrictInt
     content_revision:StrictInt
     quote_id:str
-    received_cents:StrictInt=Field(ge=0)
+    received_cents:StrictInt=Field(ge=0,le=2147483647)
     settlement_kind:Literal['CASH_MANUAL','ZERO_PAYABLE']
+    payment_difference_accepted:StrictBool=False
     note:str=Field(default='',max_length=1000)
     receipt_id:str|None=None
 
@@ -233,6 +234,10 @@ class SettlementView(DTO):
     confirmed_by:str
     batch_id:str|None=None
     batch_name:str|None=None
+    payable_cents:int|None=None
+    payment_difference_cents:int|None=None
+    payment_difference_accepted:bool=False
+    note:str=''
 
 
 class PositionView(DTO):
@@ -459,6 +464,9 @@ def order_view(db,order,actor):
         'campusId':location_snapshot.get('campusId'),
         'campusName':location_snapshot.get('campusName'),
     } if location_snapshot else None
+    settlement=dict(data['settlement']) if data.get('settlement') else None
+    if settlement and actor.staff_role!='ADMIN':
+        settlement.pop('note',None)
     return {'id':order.id,'pickupCode':order.pickup_code,'version':order.version,'contentRevision':order.content_revision,
         'status':order.status,'nickname':order.nickname,'phone':order.phone,'locationId':order.location_id,
         'locationSnapshot':safe_location_snapshot,
@@ -475,7 +483,7 @@ def order_view(db,order,actor):
         'actualStartedAt':order.actual_started_at.isoformat() if order.actual_started_at else None,'refundLocked':order.refund_locked,
         'note':order.note if actor.staff_role=='ADMIN' else '', 'customerNote':order.customer_note,
         'priority':bool(data.get('priority',False)),'batchId':assignment.batch_id if assignment else None,
-        'deliveryAssignmentId':assignment.id if assignment else None,'settlement':data.get('settlement'),'proof':proof_view,
+        'deliveryAssignmentId':assignment.id if assignment else None,'settlement':settlement,'proof':proof_view,
         'history':data.get('history',[]),'allowedActions':actions,'blockers':blockers,'supplementary':extra_summary}
 
 
@@ -915,6 +923,10 @@ def settle_order(db,actor,order,body):
     require_admin(actor,'payment.manage')
     if order.content_revision!=body.content_revision or order.quote_id!=body.quote_id:
         raise DomainError('VERSION_CONFLICT','内容或报价已变化，请重新核对',409)
+    if (order.total_cents>0 and body.received_cents>0
+            and body.received_cents!=order.total_cents and not body.payment_difference_accepted):
+        raise DomainError('PAYMENT_DIFFERENCE_CONFIRMATION_REQUIRED',
+                          '实收与应收不同，请明确接受本次收款差额后完成结算',409)
     receipt=None
     if body.receipt_id:
         receipt=lock(db,Receipt,body.receipt_id)
@@ -933,10 +945,12 @@ def settle_order(db,actor,order,body):
             receipt.data={**receipt.data,'refundRequired':True,'reasonCode':'CLOSED_ORDER'}
             raise DomainError('ORDER_CLOSED_CASH_REVIEW','订单已关闭或到期，已登记待核对实收，请线下退回后重新下单',409,{'receiptId':receipt.id,'refundRequired':True},commit=True)
         raise DomainError('INVALID_TRANSITION','订单当前不能重复结算',409)
-    if body.received_cents!=order.total_cents or (order.total_cents==0)!=(body.settlement_kind=='ZERO_PAYABLE'):
+    valid_cash=order.total_cents>0 and body.received_cents>0 and body.settlement_kind=='CASH_MANUAL'
+    valid_zero=order.total_cents==0 and body.received_cents==0 and body.settlement_kind=='ZERO_PAYABLE'
+    if not (valid_cash or valid_zero):
         if receipt:
             db.add(BusinessException(order_id=order.id,type='PAYMENT_MISMATCH',reason='实收与订单应付不一致，待人工核对',blocks_production=True))
-        raise DomainError('PAYMENT_AMOUNT_MISMATCH','实收金额必须与当前订单应付一致，已登记待核对实收',409,{'receiptId':receipt.id if receipt else None},commit=bool(receipt))
+        raise DomainError('PAYMENT_AMOUNT_MISMATCH','正数应收须登记正数实收；零元结算仅适用于应收与实收均为0的订单',409,{'receiptId':receipt.id if receipt else None},commit=bool(receipt))
     # The receipt is already flushed outside this savepoint. Every fulfilment
     # change rolls back together while an actually received payment survives.
     try:
@@ -1012,7 +1026,10 @@ def _complete_settlement(db,actor,order,body,receipt):
     order.confirmed_slot_id=slot.id;order.cash_received_cents=body.received_cents;order.settlement_kind=body.settlement_kind
     order.status='PENDING_PRINT'
     quote=db.get(Quote,order.quote_id)
-    summary={'settlementKind':body.settlement_kind,'cashReceivedCents':body.received_cents,'discountCents':quote.discount_cents,
+    difference=body.received_cents-order.total_cents
+    cash_facts={'payableCents':order.total_cents,'cashReceivedCents':body.received_cents,
+                'paymentDifferenceCents':difference,'paymentDifferenceAccepted':bool(difference and body.payment_difference_accepted)}
+    summary={'settlementKind':body.settlement_kind,**cash_facts,'discountCents':quote.discount_cents,'note':body.note,
              'confirmedAt':utcnow().isoformat(),'confirmedBy':actor.staff_id,
              'batchId':auto_batch.id if auto_batch else None,
              'batchName':auto_batch.name if auto_batch else None}
@@ -1020,9 +1037,9 @@ def _complete_settlement(db,actor,order,body,receipt):
                 'settlementSlotSnapshot':plan_slot_snapshot(slot,public=False)}
     order.arrangement_version=max(1,int(order.arrangement_version or 0))
     order.arrangement_updated_at=utcnow()
-    db.add(Payment(order_id=order.id,receipt_id=receipt.id if receipt else None,amount_cents=body.received_cents,kind=body.settlement_kind,staff_id=actor.staff_id,data={'quoteId':quote.id,'discountCents':quote.discount_cents}))
+    db.add(Payment(order_id=order.id,receipt_id=receipt.id if receipt else None,amount_cents=body.received_cents,kind=body.settlement_kind,staff_id=actor.staff_id,data={'quoteId':quote.id,'discountCents':quote.discount_cents,**cash_facts,'note':body.note}))
     # Matching the cash does not bypass an unrelated blocker.
-    for mismatch in db.scalars(select(BusinessException).where(BusinessException.order_id==order.id,BusinessException.type=='PAYMENT_MISMATCH',BusinessException.status=='OPEN')):
+    for mismatch in db.scalars(select(BusinessException).where(BusinessException.order_id==order.id,BusinessException.type=='PAYMENT_MISMATCH',BusinessException.status.in_(('OPEN','IN_PROGRESS')))):
         mismatch.status='RESOLVED';touch(mismatch)
     for failure in db.scalars(select(BusinessException).where(
             BusinessException.order_id==order.id,BusinessException.type=='AUTO_BATCH_FAILED',
@@ -1043,7 +1060,7 @@ def _complete_settlement(db,actor,order,body,receipt):
             reason=(auto_batch.reason or '配送时间调整')[:300],actor_id=actor.id,
             batch_id=auto_batch.id,slot_id=slot.id)
         notify_delivery_change(db,order,change)
-    audit(db,actor,'PAYMENT_CONFIRMED','ORDER',order.id)
+    audit(db,actor,'PAYMENT_CONFIRMED','ORDER',order.id,body.note,cash_facts)
     from .growth import notify_payment_success
     notify_payment_success(db,order)
     return order
