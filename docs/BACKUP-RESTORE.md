@@ -96,6 +96,13 @@ if target is None:
     return
 ```
 - **HTTP 手工 purge 的返回状态**：`purge_trash` 只做无锁的 404/版本/恢复态早期检查，不修改 `entry.data`、不在这里 `enqueue_job`。`process_purge_job(db, ..., reason=...)` 在取得文件锁和 Trash 行锁之后才写 `purgeReason` 并 enqueue，避免 dirty Trash 行的 flush 先拿数据库写锁。路由在序列化响应时若 `entry.data.cleanupPending` 或 `entry.data.stagedFiles` 仍存在，只对 view 做 `model_copy(update={'status': 'PURGE_PENDING'})`，不修改数据库；commit 回调完成 GC 后，下一次读取/GET 才返回真实的 `PURGED` 或 `PURGE_PENDING`。因此“响应已返回 pending”不等于 DB 已 pending，也不允许把有暂存文件的清理说成 `PURGED`。
+
+- **失败任务恢复**：现有 `POST /admin/trash/{id}/purge`（回收站“彻底清理”）同时是管理员显式重试入口，需要 `data.manage` 权限、当前 `expectedVersion` 和原因，仍检查未结业务及有效引用。取得文件锁和 Trash 行锁后，复用 `purge:{id}` 唯一 Job；若旧 Job 为 `FAILED`/`READY`，重置尝试次数并清除旧错误、退避时间和失效租约，允许后续存储阶段继续执行。`PROCESSING` 的活动租约不被覆盖。新操作使用新 Idempotency-Key，同一 key 的网络重放仍返回原响应。
+  - 数据库异常统一记为 `PURGE_DATABASE_FAILED`；`gkpj` 是 SQLAlchemy `IntegrityError` 的文档标识，不能据此判定为 rollback-only。不可用的事务先 rollback，禁止为了保存恢复事实而再次 commit。正常事务的 `DomainError(commit=True)` 仍保留其恢复事实。
+  - 数据库错误由 worker 退避重试至第 3 次；维护扫描可恢复旧失败任务至累计第 10 次。扫描不自动重排 `PURGE_BLOCKED`/`TRASH_RESTORED`；耗尽后由管理员在解决原因后显式重试，避免无上限循环。
+  - 订单永久清理先删配送通知，再删配送变更；批次清理仅解除所保留配送变更的 `batch_id`。删除/解除记录都进入 tombstone，恢复工具按同样的外键顺序回放。
+  - 同一 preparation 多次重新报价产生的历史 Quote，按 preparation 收入清理计划并在 preparation 之前删除，不能只删订单当前 `quote_id`。其他订单/历史版本仍引用的 preparation 和 Quote 保留；单独清理无引用草稿时同样处理其全部兄弟报价。
+  - `ledgerTotals` 保留真实结构：有限数字、`*Date` 的严格 ISO 日期（`YYYY-MM-DD`）、`cashFlowByDay` 的日期桶（`receivedCents`/`refundCents` 有限数字）。导出和恢复共用同一校验，拒绝无效日期、布尔值、null、NaN/Infinity、任意文本或额外嵌套字段；不需要把日期移到其他字段或改写账本。
 - **正常 Q29/定时过期**（不是用户手工 Trash 的 24h 永久清理）必须用 `storage_gc_guard(db, timeout=None)` 包住整个 `maintenance_sweep(db)`：
   - `maintenance.py::maintenance_sweep` 现已自行 `with storage_gc_guard(db): recover_orphaned_staging(db); ...`；调用方仍必须在 guard 外 `db.commit()`。
   - 进入时取同一把锁；guard 内调用 `purge_storage_key_locked(key)` / `purge_storage_tree_locked(key)` 时**只暂存、不立即 unlink**，原路径一直可读到调用方根事务 commit 或 rollback。

@@ -6,7 +6,9 @@ import secrets
 
 from celery import Celery
 from sqlalchemy import or_, select
+from sqlalchemy.exc import SQLAlchemyError
 
+from .core import DomainError
 from .db import SessionLocal
 from .models import Asset, EmailJob, ExportJob, Job, Preparation, TrashEntry, utcnow
 from .settings import get_settings
@@ -53,6 +55,7 @@ def claim_next_job(kinds=None):
 
 def process_claim(job_id,lease_token):
     _database()
+    kind=None
     try:
         with SessionLocal() as session:
             job=session.scalar(select(Job).where(Job.id==job_id).with_for_update())
@@ -90,7 +93,10 @@ def process_claim(job_id,lease_token):
                 except Exception as error:
                     # A pending-storage error may carry durable recovery facts.
                     # Respect the same explicit commit contract as HTTP mutations.
-                    if getattr(error,'commit',False):session.commit()
+                    if isinstance(error,DomainError) and error.commit and session.is_active:
+                        session.commit()
+                    else:
+                        session.rollback()
                     raise
                 # Physical cleanup is finalized after the graph transaction
                 # commits. Only its persisted result can make the job READY.
@@ -125,7 +131,7 @@ def process_claim(job_id,lease_token):
             elif kind=='PURGE':
                 trash=session.get(TrashEntry,target_id,populate_existing=True)
                 if trash and (trash.status=='PURGE_PENDING' or (trash.data or {}).get('cleanupPending')):
-                    job.status='QUEUED'
+                    job.status='QUEUED' if job.attempts<10 else 'FAILED'
                     job.data={**job.data,'availableAt':(utcnow()+timedelta(seconds=2)).isoformat(),'failureCode':'PURGE_STORAGE_PENDING'}
                 else:job.status='READY' if trash and trash.status=='PURGED' else 'FAILED'
             elif target and target.status=='FAILED':
@@ -144,12 +150,20 @@ def process_claim(job_id,lease_token):
             session.commit()
             return True
     except Exception as error:
+        # SQLAlchemy's .code is a documentation identifier (e.g. gkpj), not
+        # an application failure code. Keep other processors' domain codes.
         code=getattr(error,'code','WORKER_PROCESSING_FAILED')
+        if isinstance(error,SQLAlchemyError):
+            code='PURGE_DATABASE_FAILED' if kind=='PURGE' else 'WORKER_PROCESSING_FAILED'
         if not isinstance(code,str) or len(code)>80:code='WORKER_PROCESSING_FAILED'
         with SessionLocal.begin() as session:
             job=session.scalar(select(Job).where(Job.id==job_id).with_for_update())
             if not job or job.lease_token!=lease_token:return False
-            retryable=(code in ('CONVERSION_TIMEOUT','TRANSIENT_IO','WORKER_LOST') and job.attempts<3) or (code=='PURGE_STORAGE_PENDING' and job.attempts<10)
+            retryable=(
+                (code in ('CONVERSION_TIMEOUT','TRANSIENT_IO','WORKER_LOST') and job.attempts<3)
+                or (code=='PURGE_STORAGE_PENDING' and job.attempts<10)
+                or (job.kind=='PURGE' and code=='PURGE_DATABASE_FAILED' and job.attempts<3)
+            )
             job.status='QUEUED' if retryable else 'FAILED'
             job.data={**job.data,'failureCode':code,'availableAt':(utcnow()+timedelta(seconds=min(300,10**job.attempts))).isoformat()}
             job.lease_until=None;job.lease_token=None

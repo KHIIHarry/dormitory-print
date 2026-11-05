@@ -98,6 +98,49 @@ def test_tombstone_whitelist_rejects_caller_supplied_table(tmp_path):
     assert "TOMBSTONE_INVALID" in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('totals', [
+    {'orderCount': 1, 'purgedDate': '2026-11-05', 'orderCreatedDate': '2026-10-31'},
+    {'cashFlowByDay': {'2026-10-31': {'receivedCents': 980, 'refundCents': 0},
+                       '2026-11-01': {'receivedCents': 200, 'refundCents': 100}}},
+    {'cashFlowByDay': {}, 'manualAdjustmentCents': -100, 'legacyTotal': 1.5},
+])
+def test_tombstone_ledger_accepts_real_anonymous_finance_structure(tmp_path, totals):
+    journal = tmp_path / 'tombstones.jsonl'
+    entry = {'version': 2, 'trashId': 'ledger-test', 'targetType': 'ORDER',
+             'targetId': 'purged-order', 'rows': [{'table': 'orders', 'id': 'purged-order'}],
+             'ledger': {'bucket': 'trash:ledger-test', 'totals': totals}}
+    journal.write_text(json.dumps(entry) + '\n', encoding='utf-8')
+    result = _run([BACKUP / 'apply_tombstones.py', '--journal', journal,
+                   '--dry-run', '--storage', tmp_path / 'storage'])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'TOMBSTONE_OK' in result.stdout
+
+
+@pytest.mark.parametrize('totals', [
+    {'purgedDate': '2026-02-30'}, {'purgedDate': '20261105'},
+    {'purgedDate': '2026-11-05T00:00:00Z'}, {'purgedDate': 20261105},
+    {'cashReceivedCents': '100'}, {'cashReceivedCents': True}, {'cashReceivedCents': None},
+    {'cashReceivedCents': float('nan')}, {'cashReceivedCents': float('inf')},
+    {'cashReceivedCents': float('-inf')}, {'memo': 'personal data'},
+    {'cashFlowByDay': []}, {'cashFlowByDay': {'2026-02-30': {'receivedCents': 10, 'refundCents': 0}}},
+    {'cashFlowByDay': {'2026-11-05': '10'}},
+    {'cashFlowByDay': {'2026-11-05': {'receivedCents': float('inf'), 'refundCents': 0}}},
+    {'cashFlowByDay': {'2026-11-05': {'receivedCents': True, 'refundCents': 0}}},
+    {'cashFlowByDay': {'2026-11-05': {'receivedCents': 10, 'refundCents': 0, 'extra': 5}}},
+    [], None,
+])
+def test_tombstone_ledger_rejects_nonfinite_or_unrecognized_values(tmp_path, totals):
+    journal = tmp_path / 'tombstones.jsonl'
+    entry = {'version': 2, 'trashId': 'ledger-test', 'targetType': 'ORDER',
+             'targetId': 'purged-order', 'rows': [{'table': 'orders', 'id': 'purged-order'}],
+             'ledger': {'bucket': 'trash:ledger-test', 'totals': totals}}
+    journal.write_text(json.dumps(entry) + '\n', encoding='utf-8')
+    result = _run([BACKUP / 'apply_tombstones.py', '--journal', journal,
+                   '--dry-run', '--storage', tmp_path / 'storage'])
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert 'TOMBSTONE_INVALID' in result.stderr
+
+
 def test_restore_refuses_to_overwrite_the_primary_database(tmp_path):
     env = os.environ.copy()
     env.update({"PGDATABASE": "dormprint", "RESTIC_REPOSITORY": "", "RESTIC_PASSWORD": ""})

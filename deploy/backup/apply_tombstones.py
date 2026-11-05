@@ -34,6 +34,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from datetime import date
 from typing import NoReturn
 
 
@@ -47,6 +48,7 @@ ALLOWED_TABLES = {
     "order_files", "print_tasks", "print_attempts", "binding_tasks",
     "packing_tasks", "cash_receipts", "payment_records", "receipt_adjustments",
     "delivery_batches", "delivery_assignments", "delivery_proofs",
+    "delivery_changes", "delivery_notices",
     "business_exceptions", "batch_plans", "after_sales", "refund_records",
     "promotion_campaigns", "coupon_grants", "promotion_events", "referrals",
     "mail_templates", "email_outbox", "export_jobs", "trash_entries",
@@ -66,6 +68,7 @@ DETACH_COLUMNS = {
     "coupon_grants": {"reserved_order_id", "used_order_id"},
     "referrals": {"qualified_order_id"},
     "refund_records": {"after_sale_id"},
+    "delivery_changes": {"batch_id"},
 }
 
 # Child-before-parent delete order. Grouping by table (rather than emitting
@@ -76,7 +79,8 @@ DELETE_ORDER = (
     "wage_settlement_items", "print_attempts", "wage_entries",
     "supplementary_movements", "supplementary_disputes", "refund_records",
     "receipt_adjustments", "promotion_events", "print_tasks",
-    "payment_records", "delivery_proofs", "binding_tasks",
+    "payment_records", "delivery_proofs", "delivery_notices", "delivery_changes",
+    "binding_tasks",
     "supplementary_charges", "referrals", "packing_tasks", "order_revisions",
     "order_files", "order_access_grants", "delivery_assignments",
     "coupon_grants", "cash_receipts", "business_exceptions", "after_sales",
@@ -340,6 +344,32 @@ def _validate_authority(entry: dict) -> dict:
     }
 
 
+def _cash_day_ok(day, amounts) -> bool:
+    return (
+        _ledger_value_ok('cashDate', day)
+        and isinstance(amounts, dict)
+        and set(amounts) == {'receivedCents', 'refundCents'}
+        and all(_ledger_value_ok(key, value) for key, value in amounts.items())
+    )
+
+
+def _ledger_value_ok(key: str, value) -> bool:
+    # Only the anonymous finance schema can contain structured/string values.
+    # Do not open arbitrary JSON or PII fields just to accept current ledgers.
+    if key.endswith('Date'):
+        if not isinstance(value, str):
+            return False
+        try:
+            return date.fromisoformat(value).isoformat() == value
+        except ValueError:
+            return False
+    if key == 'cashFlowByDay':
+        return isinstance(value, dict) and all(
+            _cash_day_ok(day, amounts) for day, amounts in value.items()
+        )
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
 def _validate_ledger(value, trash_id: str):
     if value is None:
         return None
@@ -348,16 +378,14 @@ def _validate_ledger(value, trash_id: str):
     bucket = value.get("bucket") or f"trash:{trash_id}"
     if not isinstance(bucket, str) or not BUCKET.match(bucket):
         fail(f"TOMBSTONE_INVALID trashId={trash_id} ledger bucket")
-    totals = value.get("totals") or {}
+    totals = value.get("totals", {})
     if not isinstance(totals, dict):
         fail(f"TOMBSTONE_INVALID trashId={trash_id} ledger totals must be an object")
     for key, amount in totals.items():
         if not isinstance(key, str) or not TOTAL_KEY.match(key):
             fail(f"TOMBSTONE_INVALID trashId={trash_id} ledger key={key!r}")
-        if isinstance(amount, bool) or amount is None:
-            continue
-        if not isinstance(amount, (int, float)):
-            fail(f"TOMBSTONE_INVALID trashId={trash_id} ledger value for {key} is not numeric")
+        if not _ledger_value_ok(key, amount):
+            fail(f"TOMBSTONE_INVALID trashId={trash_id} ledger value for {key} has invalid type or format")
     return {"bucket": bucket, "totals": totals}
 
 

@@ -51,6 +51,7 @@ DETACHABLE_COLUMNS: dict[str, frozenset[str]] = {
     'coupon_grants': frozenset({'reserved_order_id', 'used_order_id'}),
     'referrals': frozenset({'qualified_order_id'}),
     'refund_records': frozenset({'after_sale_id'}),
+    'delivery_changes': frozenset({'batch_id'}),
 }
 
 # All tombstone-replayable tables, derived from the models so a newly added

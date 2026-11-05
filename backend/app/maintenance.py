@@ -82,6 +82,7 @@ from .models import (
     DeliverySlot,
     Campus,
     DeliveryChange,
+    DeliveryNotice,
     DeliveryProof,
     DeletionRequest,
     EmailJob,
@@ -1487,6 +1488,13 @@ def _purge_plan(db, entry: TrashEntry, target_type: str, target) -> dict:
                               {'blockers': blockers})
         file_ids, prep_ids, quote_ids, task_ids, artifact_ids, proof_ids, asset_ids = \
             _assets_for_order(db, order)
+        # Requoting leaves multiple Quote rows for one preparation. Collect
+        # every sibling before deleting that preparation, while keeping the
+        # history of preparations still used by another order/revision.
+        exclusive_prep_ids = {prep_id for prep_id in prep_ids
+                              if not _preparation_shared(db, prep_id, ignore_order_id=order.id)}
+        quote_ids.update(db.scalars(select(Quote.id).where(
+            Quote.preparation_id.in_(exclusive_prep_ids))))
         deletable_assets = set()
         for asset_id in asset_ids:
             if not _asset_referenced_outside(db, asset_id, ignore_order_id=order.id,
@@ -1518,6 +1526,7 @@ def _purge_plan(db, entry: TrashEntry, target_type: str, target) -> dict:
     if target_type == 'BATCH':
         assignment_ids = list(db.scalars(select(DeliveryAssignment.id).where(
             DeliveryAssignment.batch_id == target.id)))
+        blockers = []
         if assignment_ids:
             blockers = _unsettled_wage_blockers(db, assignment_ids=assignment_ids)
         if blockers:
@@ -1641,7 +1650,8 @@ def _purge_plan(db, entry: TrashEntry, target_type: str, target) -> dict:
             select(Asset).where(Asset.id.in_(deletable))) if asset.storage_key]
         plan.update(files=files, asset_ids=deletable,
                     preparation={'artifact_ids': {row.id for row in artifacts},
-                                 'quote_id': target.quote_id})
+                                 'quote_ids': set(db.scalars(select(Quote.id).where(
+                                     Quote.preparation_id == target.id)))})
         return plan
     if target_type == 'ARTIFACT':
         if db.scalar(select(PrintTask.id).where(
@@ -1709,6 +1719,8 @@ def _delete_order_graph(db, order: Order, context: dict) -> None:
     db.execute(delete(PrintTask).where(PrintTask.order_id == order_id))
     db.execute(delete(BindingTask).where(BindingTask.order_id == order_id))
     db.execute(delete(PackingTask).where(PackingTask.order_id == order_id))
+    db.execute(delete(DeliveryNotice).where(DeliveryNotice.order_id == order_id))
+    db.execute(delete(DeliveryChange).where(DeliveryChange.order_id == order_id))
     db.execute(delete(DeliveryProof).where(DeliveryProof.order_id == order_id))
     db.execute(delete(DeliveryAssignment).where(DeliveryAssignment.order_id == order_id))
     db.execute(delete(OrderFile).where(OrderFile.order_id == order_id))
@@ -1851,9 +1863,9 @@ def _delete_simple_target(db, entry: TrashEntry, target_type: str, target, plan:
         artifact_ids = plan.get('preparation', {}).get('artifact_ids', set())
         if artifact_ids:
             db.execute(delete(Artifact).where(Artifact.id.in_(artifact_ids)))
-        quote_id = plan.get('preparation', {}).get('quote_id')
-        if quote_id and not _quote_shared(db, quote_id):
-            db.execute(delete(Quote).where(Quote.id == quote_id))
+        for quote_id in plan.get('preparation', {}).get('quote_ids', set()):
+            if not _quote_shared(db, quote_id):
+                db.execute(delete(Quote).where(Quote.id == quote_id))
         db.delete(target)
     elif target_type == 'ARTIFACT':
         db.delete(target)
@@ -1954,8 +1966,21 @@ def process_purge_job(db, trash_id: str, expected_version: int | None = None,
             data['purgeReason'] = reason
             entry.data = data
             touch(entry)
-            enqueue_job(db, 'PURGE', entry.id, f'purge:{entry.id}',
-                        {'targetType': entry.target_type})
+            job = enqueue_job(db, 'PURGE', entry.id, f'purge:{entry.id}',
+                              {'targetType': entry.target_type})
+            # The explicit admin action is also the recovery path after the
+            # automatic retry budget is exhausted. Reuse the unique outbox
+            # row, and never replace a live worker's lease.
+            if job.status in ('FAILED', 'READY'):
+                job.status = 'QUEUED'
+                job.attempts = 0
+                job.lease_token = None
+                job.lease_until = None
+                job_data = dict(job.data or {})
+                job_data.pop('failureCode', None)
+                job_data.pop('availableAt', None)
+                job.data = job_data
+                touch(job)
 
         target_type = _canonical_target(entry.target_type)
         target = db.get(TARGETS[target_type], entry.target_id)

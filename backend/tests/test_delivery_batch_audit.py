@@ -177,9 +177,22 @@ def test_slot_seal_rejects_unpreviewed_pending_application(db, api, client, act_
     assert committed.json()['error']['code'] == 'PLAN_STALE'
 
 
+def same_day_world(db):
+    # These edit cases use same-day HH:mm fields. A relative +30h fixture
+    # crosses midnight after 16:00 Shanghai time and changes their scenario.
+    world = make_world(db)
+    local = (utcnow().astimezone(ZoneInfo('Asia/Shanghai')) + timedelta(days=2)).replace(
+        hour=10, minute=0, second=0, microsecond=0)
+    world.slot.starts_at = local.astimezone(timezone.utc)
+    world.slot.ends_at = world.slot.starts_at + timedelta(hours=2)
+    world.slot.date = to_shanghai_date(world.slot.starts_at)
+    db.commit()
+    return world
+
+
 def test_slot_edit_accepts_unchanged_time_fields_after_order_exists(db, api, client, act_as, staff_factory):
     act_as(staff_factory())
-    world = make_world(db)
+    world = same_day_world(db)
     submit(db, world)
     from app.delivery_schemas import to_shanghai_hhmm
     result = api(client, f'/admin/slots/{world.slot.id}', {
@@ -193,7 +206,7 @@ def test_slot_edit_accepts_unchanged_time_fields_after_order_exists(db, api, cli
 
 def test_legacy_referenced_slot_can_fill_missing_acceptance_rules(db, api, client, act_as, staff_factory):
     act_as(staff_factory())
-    world = make_world(db)
+    world = same_day_world(db)
     submit(db, world)
     opens, cutoff = world.slot.open_at, world.slot.cutoff_at
     world.slot.open_at = world.slot.cutoff_at = None
