@@ -17,7 +17,9 @@
     "format": "prettier --write src tests vite.config.ts",
     "contract:generate": "node scripts/generate-contract.mjs && node scripts/extend-growth-contract.mjs && npm run api:generate",
     "test:e2e:motion": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test --config playwright.motion.config.ts",
-    "test:e2e:install": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install chromium"
+    "test:e2e:install": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install chromium",
+    "test:e2e:mobile-ui": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test --config playwright.mobile-ui.config.ts",
+    "test:e2e:install-webkit": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install webkit"
   },
   "dependencies": {
     "@fontsource/sora": "5.3.0",

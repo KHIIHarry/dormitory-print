@@ -12,7 +12,8 @@ from test_real_browser import free_port, wait_ready
 pytestmark = pytest.mark.skipif(os.environ.get('DORMPRINT_RUN_BROWSER_TESTS') != '1', reason='Requires local Chrome and Node')
 
 
-def test_live_finance_mobile_and_desktop(db, account_factory, staff_factory, tmp_path):
+@pytest.mark.parametrize('browser_engine', ['chromium', 'webkit'])
+def test_live_finance_mobile_and_desktop(db, account_factory, staff_factory, tmp_path, browser_engine):
     from app.models import OperatingExpense
     root = Path(__file__).resolve().parents[2]
     account = account_factory(email='finance-browser-admin@example.test')
@@ -25,9 +26,12 @@ def test_live_finance_mobile_and_desktop(db, account_factory, staff_factory, tmp
     db.commit()
     api_port, ui_port = free_port(), free_port()
     origin = f'http://127.0.0.1:{ui_port}'
+    browser_cache = Path(os.environ.get('PLAYWRIGHT_BROWSERS_PATH', str(root / '.playwright-browsers'))).resolve()
     env = {**os.environ, 'DORMPRINT_PUBLIC_ORIGIN': origin,
         'DORMPRINT_DEV_API_TARGET': f'http://127.0.0.1:{api_port}', 'VITE_DEMO_MODE': 'false',
-        'DORMPRINT_BROWSER_ORIGIN': origin, 'DORMPRINT_FINANCE_TODAY': today.isoformat()}
+        'DORMPRINT_BROWSER_ORIGIN': origin, 'DORMPRINT_FINANCE_TODAY': today.isoformat(),
+        'DORMPRINT_BROWSER_ENGINE': browser_engine,
+        'PLAYWRIGHT_BROWSERS_PATH': str(browser_cache)}
     processes, logs = [], []
     try:
         for label, args, cwd, url in (

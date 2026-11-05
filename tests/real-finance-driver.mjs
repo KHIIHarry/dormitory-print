@@ -1,17 +1,28 @@
-import { chromium, expect } from "@playwright/test";
+import { chromium, webkit, expect } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 const base = process.env.DORMPRINT_BROWSER_ORIGIN;
 const today = process.env.DORMPRINT_FINANCE_TODAY;
-const out = "output/finance-qa";
+const engine = process.env.DORMPRINT_BROWSER_ENGINE || "chromium";
+const out = `output/finance-qa/${engine}`;
 mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ channel: "chrome", headless: true });
+const browser =
+  engine === "webkit"
+    ? await webkit.launch({ headless: true })
+    : await chromium.launch({ channel: "chrome", headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
   reducedMotion: "reduce",
 });
 const page = await context.newPage();
 const errors = [];
-page.on("pageerror", (e) => errors.push(e.message));
+let deliberateOffline = false;
+page.on("pageerror", (e) => {
+  // WebKit also reports blocked fetches as page diagnostics during the
+  // intentional offline probe; unrelated JavaScript failures still fail QA.
+  if (deliberateOffline && /due to access control checks\.?$/.test(e.message))
+    return;
+  errors.push(e.message);
+});
 try {
   await page.goto(base + "/u/account/login");
   await page
@@ -131,6 +142,7 @@ try {
     .locator(".finance-page")
     .screenshot({ path: `${out}/desktop.png` });
   await form.getByLabel("纸张张数", { exact: true }).fill("10");
+  deliberateOffline = true;
   await context.setOffline(true);
   await form.getByRole("button", { name: "保存支出", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("离线");
@@ -138,6 +150,8 @@ try {
     "15.50",
   );
   await context.setOffline(false);
+  await page.waitForLoadState("networkidle");
+  deliberateOffline = false;
   await form.getByRole("button", { name: "取消", exact: true }).click();
   await page.getByRole("button", { name: "月份", exact: true }).click();
   const previous = new Date(`${today.slice(0, 7)}-01T00:00:00Z`);
@@ -168,6 +182,28 @@ try {
       .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
   ).toBeGreaterThanOrEqual(16);
   await mobile.screenshot({ path: `${out}/touch-mobile.png`, fullPage: true });
+  await mobile.goto(base + "/manage/account");
+  await expect(
+    mobile.getByRole("heading", { name: "我的工资", exact: true }),
+  ).toBeVisible();
+  const salaryMonth = mobile.getByLabel("工资月份", { exact: true });
+  await expect(salaryMonth).toBeVisible();
+  const salaryBounds = await salaryMonth.evaluate((input) => {
+    const card = input.closest(".panel");
+    const padding = parseFloat(getComputedStyle(card).paddingRight);
+    return {
+      right: input.getBoundingClientRect().right,
+      limit: card.getBoundingClientRect().right - padding,
+      scroll: document.documentElement.scrollWidth,
+      viewport: innerWidth,
+    };
+  });
+  expect(salaryBounds.right).toBeLessThanOrEqual(salaryBounds.limit + 1);
+  expect(salaryBounds.scroll).toBeLessThanOrEqual(salaryBounds.viewport + 1);
+  await mobile.screenshot({
+    path: `${out}/personal-payroll-mobile.png`,
+    fullPage: true,
+  });
   await mobileContext.close();
   expect(errors).toEqual([]);
   console.log(

@@ -525,6 +525,10 @@ input[type="date"],
 .field textarea::placeholder {
   color: #a19b94;
 }
+/* Native WebKit menu lists may ignore min-height without an explicit height. */
+.field select:not([multiple]):not([size]) {
+  height: 44px;
+}
 .field input:focus,
 .field select:focus,
 .field textarea:focus {
@@ -8380,13 +8384,24 @@ button.session-action svg { stroke-width: 1.7; }
 
 /* Native date/time inputs have intrinsic widths in iOS WebKit. */
 .field input[type="date"],
+.field input[type="month"],
 .field input[type="time"],
 .field input[type="datetime-local"] {
   display: block;
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   -webkit-appearance: none;
   appearance: none;
+}
+.field input:is([type="date"], [type="month"], [type="time"], [type="datetime-local"])::-webkit-date-and-time-value {
+  min-width: 0;
+  min-height: 1.25em;
+  text-align: start;
 }
 .slot-editor-form { min-width: 0; }
 .slot-editor-form .form-grid {

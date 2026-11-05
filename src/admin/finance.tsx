@@ -173,21 +173,42 @@ export function AdminFinance() {
       <AccessState access={access} />
       {access.allowed && (
         <>
-          <div className="finance-toolbar">
-            <div className="finance-period" role="group" aria-label="统计范围">
-              <Button
-                variant={selectedMonth ? "" : "secondary"}
-                disabled={busy}
-                onClick={() => changePeriod(month)}
+          <div
+            className={`finance-toolbar${selectedMonth ? " has-month" : ""}`}
+          >
+            <div className="finance-toolbar-actions">
+              <div
+                className="finance-period"
+                role="group"
+                aria-label="统计范围"
               >
-                月份
-              </Button>
+                <Button
+                  variant={selectedMonth ? "" : "secondary"}
+                  disabled={busy}
+                  onClick={() => changePeriod(month)}
+                >
+                  月份
+                </Button>
+                <Button
+                  variant={!selectedMonth ? "" : "secondary"}
+                  disabled={busy}
+                  onClick={() => changePeriod("")}
+                >
+                  累计
+                </Button>
+              </div>
               <Button
-                variant={!selectedMonth ? "" : "secondary"}
-                disabled={busy}
-                onClick={() => changePeriod("")}
+                onClick={() => {
+                  setShowForm(true);
+                  setVoiding(null);
+                  setReason("");
+                  setError("");
+                  setMessage("");
+                }}
+                disabled={busy || showForm}
               >
-                累计
+                <Plus size={16} />
+                记录支出
               </Button>
             </div>
             {selectedMonth && (
@@ -207,19 +228,6 @@ export function AdminFinance() {
                 />
               </Field>
             )}
-            <Button
-              onClick={() => {
-                setShowForm(true);
-                setVoiding(null);
-                setReason("");
-                setError("");
-                setMessage("");
-              }}
-              disabled={busy || showForm}
-            >
-              <Plus size={16} />
-              记录支出
-            </Button>
           </div>
           <div aria-live="polite">
             {message && <Notice type="success">{message}</Notice>}

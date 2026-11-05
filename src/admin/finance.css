@@ -46,7 +46,7 @@
   background: #edd6c8;
   color: #313131;
 }
-.finance-toolbar,
+.finance-toolbar-actions,
 .finance-period,
 .finance-actions,
 .finance-list-toolbar,
@@ -57,15 +57,29 @@
   gap: 12px;
   flex-wrap: wrap;
 }
-.finance-toolbar > .btn {
-  margin-left: auto;
+.finance-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 16px;
+}
+.finance-toolbar.has-month {
+  grid-template-columns: minmax(0, 1fr) 200px;
+}
+.finance-toolbar-actions {
+  justify-content: space-between;
+}
+.finance-period {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.finance-period > .btn {
+  min-width: 64px;
+  padding-inline: 14px;
 }
 .finance-toolbar .field,
 .finance-list-toolbar .field {
   margin: 0;
-}
-.finance-toolbar input {
-  max-width: 200px;
 }
 .finance-entry form {
   display: grid;
@@ -236,17 +250,8 @@
   .finance-page .page-heading h1 {
     font-size: 24px;
   }
-  .finance-toolbar {
-    align-items: flex-end;
-  }
-  .finance-toolbar > .btn {
-    margin-left: 0;
-  }
-  .finance-toolbar > .field {
-    flex: 1 1 145px;
-  }
-  .finance-toolbar input {
-    max-width: 100%;
+  .finance-toolbar.has-month {
+    grid-template-columns: minmax(0, 1fr);
   }
   .finance-form-grid {
     grid-template-columns: minmax(0, 1fr);

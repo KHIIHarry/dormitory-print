@@ -2,6 +2,7 @@
   --payroll-line: color-mix(in srgb, var(--line, #d8d5cc) 78%, transparent);
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .payroll-page .page-heading {
@@ -42,7 +43,11 @@
 .payroll-policy-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  min-width: 0;
+}
+.payroll-filter-panel {
+  min-width: 0;
 }
 
 .payroll-filter-panel .field,
