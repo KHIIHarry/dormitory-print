@@ -3775,13 +3775,37 @@ select.campus-filter:focus {
   border-color: #d7a282;
 }
 .slot-filter-toolbar {
-  display: flex;
-  align-items: center;
-  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  margin-bottom: 16px;
+  min-width: 0;
 }
-.slot-filter-toolbar > select.campus-filter {
-  width: 220px;
-  max-width: 100%;
+.slot-filter-toolbar > .field {
+  margin-bottom: 0;
+}
+.slot-date-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin: 0 0 20px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.slot-date-summary > span {
+  color: #6b625a;
+}
+@media (max-width: 1000px) {
+  .slot-filter-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 540px) {
+  .slot-filter-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .slot-actions {
   flex-wrap: nowrap;
@@ -3790,11 +3814,6 @@ select.campus-filter:focus {
   min-width: 44px;
   min-height: 44px;
   justify-content: center;
-}
-@media (max-width: 767px) {
-  .slot-filter-toolbar > select.campus-filter {
-    width: 100%;
-  }
 }
 .filter-row > .btn {
   font-size: 11px;

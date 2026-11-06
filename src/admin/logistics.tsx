@@ -27,6 +27,11 @@ import { growthRequest } from "../growth/client";
 import { NumberInput } from "../components/number-input";
 import { campusOfOrder, campusesOfBatch, slotsForCampus } from "../lib/campus";
 import { CampusFilter, CampusTag, orderCampusId } from "./campus-filter";
+import {
+  SlotDateFilter,
+  SlotDateSummary,
+  useSlotDateFilter,
+} from "./slot-date-filter";
 import { batchPrimaryAction, canStartBatch } from "../lib/domain";
 import type { Batch, Campus, DataState, Slot } from "../lib/types";
 import {
@@ -1381,8 +1386,15 @@ export function Slots() {
     slot.campusName ||
     campuses.find((c) => c.id === slot.campusId)?.name ||
     "校区待定";
-  const visibleSlots = slots.filter(
+  const campusSlots = slots.filter(
     (slot) => !campusFilter || slot.campusId === campusFilter,
+  );
+  const dateFilter = useSlotDateFilter(campusSlots.map((slot) => slot.date));
+  const visibleSlots = campusSlots.filter(
+    (slot) =>
+      !dateFilter.error &&
+      slot.date >= dateFilter.range.start &&
+      slot.date <= dateFilter.range.end,
   );
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [removeSlot, setRemoveSlot] = useState<Slot | null>(null);
@@ -1605,14 +1617,23 @@ export function Slots() {
         </Notice>
       )}
       <Panel>
-        {!!campuses.length && (
-          <div className="slot-filter-toolbar">
-            <CampusFilter
-              campuses={campuses}
-              value={campusFilter}
-              onChange={setCampusFilter}
-            />
-          </div>
+        <div className="slot-filter-toolbar">
+          {!!campuses.length && (
+            <Field label="校区筛选">
+              <CampusFilter
+                campuses={campuses}
+                value={campusFilter}
+                onChange={setCampusFilter}
+              />
+            </Field>
+          )}
+          <SlotDateFilter filter={dateFilter} />
+        </div>
+        {!dateFilter.error && (
+          <SlotDateSummary
+            range={dateFilter.range}
+            count={visibleSlots.length}
+          />
         )}
         <div className="table-scroll">
           <table>
@@ -1704,7 +1725,22 @@ export function Slots() {
         </div>
         {!visibleSlots.length && (
           <Empty
-            title={slots.length ? "该校区暂无配送时段" : "尚未配置配送时段"}
+            title={
+              dateFilter.error
+                ? "请调整日期范围"
+                : !slots.length
+                  ? "尚未配置配送时段"
+                  : !campusSlots.length
+                    ? "该校区暂无配送时段"
+                    : "所选日期范围内暂无配送时段"
+            }
+            text={
+              dateFilter.error
+                ? "请检查上方开始日期和结束日期。"
+                : slots.length && campusSlots.length
+                  ? "可切换日期范围或选择“全部时段”查看。"
+                  : "新建时段后会显示在这里。"
+            }
           />
         )}
       </Panel>

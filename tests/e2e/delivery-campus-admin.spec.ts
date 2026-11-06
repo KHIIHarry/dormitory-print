@@ -6,6 +6,8 @@ async function fixture(
   page: import("@playwright/test").Page,
   view: "slots" | "batches" | "proposals" | "detail",
 ) {
+  if (view === "slots")
+    await page.clock.install({ time: new Date("2030-11-01T04:00:00Z") });
   page.on("pageerror", (error) => console.log("FIXTURE ERROR", error.message));
   const main = await (await page.request.get("/src/main.tsx")).text();
   const reactUrl = main.match(/from "([^\"]*\/react\.js\?[^\"]*)"/)![1];
@@ -72,7 +74,9 @@ test("campus filter has a usable control and clear spacing above compact slot ro
   page,
 }, testInfo) => {
   await fixture(page, "slots");
-  await page.locator("#root").evaluate((element) => element.classList.add("admin-content"));
+  await page
+    .locator("#root")
+    .evaluate((element) => element.classList.add("admin-content"));
   const filter = page.getByRole("combobox", { name: "校区筛选" });
   await expect(filter).toBeVisible();
   const panel = filter.locator("xpath=ancestor::section[1]");
@@ -80,7 +84,9 @@ test("campus filter has a usable control and clear spacing above compact slot ro
     const bounds = element.getBoundingClientRect();
     const panel = element.closest("section")!;
     const table = panel.querySelector("table")!.getBoundingClientRect();
-    const buttons = [...panel.querySelector("tbody tr")!.querySelectorAll("button")];
+    const buttons = [
+      ...panel.querySelector("tbody tr")!.querySelectorAll("button"),
+    ];
     return {
       height: bounds.height,
       gap: table.top - bounds.bottom,
@@ -90,17 +96,27 @@ test("campus filter has a usable control and clear spacing above compact slot ro
       viewportWidth: window.innerWidth,
     };
   });
-  await panel.screenshot({ path: testInfo.outputPath("campus-filter-layout.png") });
+  await panel.screenshot({
+    path: testInfo.outputPath("campus-filter-layout.png"),
+  });
   expect(geometry.height).toBeGreaterThanOrEqual(44);
   expect(geometry.gap).toBeGreaterThanOrEqual(16);
   expect(geometry.borderRadius).toBeGreaterThanOrEqual(8);
-  expect(Math.max(...geometry.actionTops) - Math.min(...geometry.actionTops)).toBeLessThan(2);
+  expect(
+    Math.max(...geometry.actionTops) - Math.min(...geometry.actionTops),
+  ).toBeLessThan(2);
   expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
   await filter.selectOption("east");
-  await expect(panel.getByRole("row").filter({ hasText: "东时段" })).toHaveCount(1);
-  await expect(panel.getByRole("row").filter({ hasText: "西时段" })).toHaveCount(0);
+  await expect(
+    panel.getByRole("row").filter({ hasText: "东时段" }),
+  ).toHaveCount(1);
+  await expect(
+    panel.getByRole("row").filter({ hasText: "西时段" }),
+  ).toHaveCount(0);
   await filter.selectOption("");
-  await expect(panel.getByRole("row").filter({ hasText: "西时段" })).toHaveCount(1);
+  await expect(
+    panel.getByRole("row").filter({ hasText: "西时段" }),
+  ).toHaveCount(1);
 });
 
 test("creates a campus slot and seal identifies its locked campus", async ({
