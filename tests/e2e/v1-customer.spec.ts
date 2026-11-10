@@ -338,11 +338,17 @@ async function installApi(
       });
     if (path === "/customer/account/deletion-requests" && method === "GET")
       return json(route, { items: state.deletionRequests, nextCursor: null });
-    if (path === "/customer/account/deletion-requests" && method === "POST") {
+    if (path === "/customer/account/deletion-request" && method === "POST") {
       const created = {
         id: "DEL-1",
-        status: "REQUESTED",
-        createdAt: "2026-10-30T04:10:00.000Z",
+        deletionRequestId: "DEL-1",
+        status: "RECOVERY",
+        requestedAt: "2026-10-30T04:10:00.000Z",
+        recoveryUntil: "2026-11-06T04:10:00.000Z",
+        canRecover: true,
+        recovered: false,
+        message:
+          "注销申请已进入 7 天恢复期；此期间使用账号密码登录可恢复账号。期满后将按数据保留与账务规则完成注销，不会立即不可逆删除。",
         reason: (body as { reason?: string })?.reason || "",
         blockers: [],
       };
@@ -465,7 +471,7 @@ test("order after-sales requires allowedActions, posts exact DTOs and separates 
   await expect(
     page.getByRole("heading", { name: "订单详情" }),
   ).toBeVisible();
-  await expect(page.getByText("申请，未保证名额")).toBeVisible();
+  await expect(page.getByText("当前配送时段", { exact: true })).toBeVisible();
   const afterSales = page
     .locator("section.panel")
     .filter({ hasText: "售后与退款" });
@@ -589,7 +595,7 @@ test("personal data export retries the same idempotency key after an uncertain r
   expect(exports[0].headers["idempotency-key"]).toBeTruthy();
 });
 
-test("deletion request needs explicit confirmation, posts confirm:true and shows pending administrator review without deleting", async ({
+test("deletion request needs explicit confirmation, posts the current DTO and signs out into seven-day recovery", async ({
   page,
 }) => {
   const state = await installApi(page, { deletionRequests: [] });
@@ -604,15 +610,23 @@ test("deletion request needs explicit confirmation, posts confirm:true and shows
   ).toBeDisabled();
   await confirm.check();
   await deletion.getByRole("button", { name: "提交注销申请" }).click();
-  await expect(page.getByText("注销申请等待管理员审核")).toBeVisible();
+  await expect(page).toHaveURL(/\/u\/account\/login$/);
+  await expect(page.getByText(/注销申请已进入 7 天恢复期/)).toBeVisible();
+  await expect(page.getByText(/恢复截止：/)).toBeVisible();
+  const signedOutProfile = page.locator("a.header-profile");
+  await expect(signedOutProfile).toBeVisible();
+  await expect(signedOutProfile).toHaveAttribute("href", "/u/account/login");
+  await expect(
+    page.getByRole("button", { name: "我的账户", exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByText("已按保留规则处理")).toHaveCount(0);
 
   const posted = state.calls.find(
     (call) =>
-      call.path === "/customer/account/deletion-requests" &&
+      call.path === "/customer/account/deletion-request" &&
       call.method === "POST",
   );
-  expect(posted?.body).toEqual({ confirm: true, reason: "不再使用" });
+  expect(posted?.body).toEqual({ reason: "不再使用" });
   const listed = state.calls.some(
     (call) =>
       call.path === "/customer/account/deletion-requests" &&
@@ -1013,7 +1027,9 @@ test("upload waits for account hydration and the upload session before accepting
     const choose = page.getByRole("button", { name: "选择文件", exact: true });
     await expect(choose).toBeDisabled();
     resolveAccount();
-    await expect(page.locator(".header-profile")).toHaveAttribute("href", "/u/account");
+    await expect(
+      page.getByRole("button", { name: "我的账户", exact: true }),
+    ).toBeVisible();
     await expect(choose).toBeDisabled();
     resolveSession();
     await expect(choose).toBeEnabled();
@@ -1028,6 +1044,9 @@ test("Excel upload asks for print area/pagination and sends strict excelOptions 
 }) => {
   const state = await installUploadApi(page, { assetReady: true });
   await page.goto(appUrl("/u/new"));
+  await expect(
+    page.getByRole("button", { name: "选择文件", exact: true }),
+  ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "成绩表.xlsx",
     mimeType:
@@ -1078,6 +1097,9 @@ test("HEIC upload uses the server READY normalized PNG for the local display sou
     normalized: true,
   });
   await page.goto(appUrl("/u/new"));
+  await expect(
+    page.getByRole("button", { name: "选择文件", exact: true }),
+  ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "IMG_0001.HEIC",
     mimeType: "image/heic",
@@ -1106,6 +1128,9 @@ test("a lost chunk reuses the same session, offset and idempotency key on retry"
     normalized: false,
   });
   await page.goto(appUrl("/u/new"));
+  await expect(
+    page.getByRole("button", { name: "选择文件", exact: true }),
+  ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "资料.pdf",
     mimeType: "application/pdf",
@@ -1148,6 +1173,9 @@ test("processing cancellation records a request, then polls the real final resul
     normalized: false,
   });
   await page.goto(appUrl("/u/new"));
+  await expect(
+    page.getByRole("button", { name: "选择文件", exact: true }),
+  ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "资料.pdf",
     mimeType: "application/pdf",
@@ -1184,7 +1212,7 @@ test("requested slot and auto-close deadline are shown before settlement; unpaid
     }),
   });
   await page.goto(appUrl("/u/orders/ORD-1"));
-  await expect(page.getByText("申请，未保证名额")).toBeVisible();
+  await expect(page.getByText("管理员确认收款后占用名额。")).toBeVisible();
   await expect(
     page.getByText(/未人工确认收款，订单将按配置期限自动关闭/),
   ).toBeVisible();

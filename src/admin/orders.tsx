@@ -1,11 +1,6 @@
-import { slotCurrentlySelectable } from "../customer/checkout";
 import { growthRequest } from "../growth/client";
 import { formatDisplayTime } from "../lib/display-format";
-import {
-  requestedSlotOf,
-  confirmedSlotOf,
-  slotBlockLabel,
-} from "../v1/customer";
+import { deliveryWindowOf, slotBlockLabel } from "../v1/customer";
 import { AdminSupplementaryPanel } from "../v1/supplementary";
 import {
   assertQuote,
@@ -40,14 +35,16 @@ import {
 } from "lucide-react";
 import { ADMIN, useStore } from "../lib/store";
 import { money } from "../lib/api";
-import { campusOfOrder, slotsForCampus } from "../lib/campus";
+import { campusOfOrder } from "../lib/campus";
 import { CampusFilter, CampusTag, orderCampusId } from "./campus-filter";
 import {
   hasWageBlocker,
   trashBlockers,
   type TrashBlocker,
 } from "../lib/trash-blockers";
-import type { Order, Slot } from "../lib/types";
+import type { Order } from "../lib/types";
+import type { AdminOrderView } from "../v1/admin-api";
+import { OrderSlotChangeDialog } from "./order-slot-change";
 import {
   Badge,
   Button,
@@ -357,6 +354,7 @@ export function AdminOrderDetail() {
   const navigate = useNavigate();
   const { data, act, updateOrder, toast, refresh, actionIssues } = useStore();
   const [payment, setPayment] = useState(false);
+  const [changingSlot, setChangingSlot] = useState(false);
   const [voiding, setVoiding] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteBlockers, setDeleteBlockers] = useState<TrashBlocker[]>([]);
@@ -382,6 +380,24 @@ export function AdminOrderDetail() {
         action={<Link to={`${ADMIN}/orders`}>返回订单列表</Link>}
       />
     );
+  const orderForChange = order as Order & AdminOrderView;
+  const { unpaid, current, previous, hasLegacyProposal } = deliveryWindowOf(
+    order,
+    data.slots.find((slot) => slot.id === order.slotId),
+  );
+  const canChangeSlot =
+    (unpaid ||
+      (!!orderForChange.confirmedSlotId &&
+        ![
+          "DELIVERING",
+          "DELIVERY_EXCEPTION",
+          "DELIVERED",
+          "CANCELLED",
+        ].includes(order.status))) &&
+    (staff?.capabilities?.includes("*") ||
+      staff?.capabilities?.includes(
+        unpaid ? "payment.manage" : "delivery.manage",
+      ));
   const paymentBlockers = (order.blockers || []).filter(
     (blocker) => blocker.code !== "PAYMENT_MISMATCH",
   );
@@ -751,26 +767,15 @@ export function AdminOrderDetail() {
                   </dd>
                 </div>
                 <div>
-                  <dt>原预约时段</dt>
-                  <dd>
-                    {slotBlockLabel(requestedSlotOf(order)) ||
-                      data.slots.find((s) => s.id === order.slotId)?.name ||
-                      "历史预约快照缺失"}
-                  </dd>
+                  <dt>{unpaid ? "申请时段" : "当前配送时段"}</dt>
+                  <dd>{slotBlockLabel(current) || "待安排"}</dd>
                 </div>
-                <div>
-                  <dt>确认时段</dt>
-                  <dd>
-                    {slotBlockLabel(confirmedSlotOf(order)) || "尚未确认"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>当前预计安排</dt>
-                  <dd>
-                    {slotBlockLabel((order as any).arrangement?.effective) ||
-                      "待协调"}
-                  </dd>
-                </div>
+                {previous && (
+                  <div>
+                    <dt>原确认时段</dt>
+                    <dd>{slotBlockLabel(previous)}</dd>
+                  </div>
+                )}
                 <div>
                   <dt>最新批次</dt>
                   <dd>
@@ -780,6 +785,28 @@ export function AdminOrderDetail() {
                   </dd>
                 </div>
               </dl>
+              {hasLegacyProposal && <Notice>有一条旧改期建议待处理。</Notice>}
+              {canChangeSlot && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setChangingSlot(true)}
+                >
+                  调整配送时段
+                </Button>
+              )}
+              {changingSlot && canChangeSlot && (
+                <OrderSlotChangeDialog
+                  order={orderForChange}
+                  slots={data.slots}
+                  campusId={orderCampusId(data.buildings, orderForChange)}
+                  onClose={() => setChangingSlot(false)}
+                  onSaved={() => {
+                    setChangingSlot(false);
+                    toast("配送时段已更新");
+                    void refresh();
+                  }}
+                />
+              )}
               {order.addressReview && (
                 <>
                   <Notice>用户修改了楼栋，必须复核后才可配送。</Notice>
@@ -801,30 +828,6 @@ export function AdminOrderDetail() {
           </div>
           <div className="order-detail-column">
             <AdminSupplementaryPanel orderId={order.id} />
-            {order.status === "PENDING_CONFIRMATION" &&
-              (staff?.capabilities?.includes("*") ||
-                staff?.capabilities?.includes("payment.manage")) && (
-                <PendingSlotProposal
-                  slots={data.slots}
-                  campusId={orderCampusId(data.buildings || [], order as any)}
-                  proposal={(order as any).slotProposal}
-                  onSubmit={async (slotId, reason) => {
-                    await growthRequest(
-                      `/admin/orders/${encodeURIComponent(order.id)}/slot-proposals`,
-                      {
-                        method: "POST",
-                        body: {
-                          expectedVersion: order.version,
-                          slotId,
-                          reason,
-                        },
-                      },
-                    );
-                    await refresh();
-                    toast("时段建议已提交，等待客户接受后再结算");
-                  }}
-                />
-              )}
             {!!order.deliveryNotices?.length && (
               <DeliveryNoticePanel
                 notices={order.deliveryNotices}
@@ -1211,6 +1214,7 @@ export function DeliveryNoticePanel({
     UNKNOWN: "发送结果未知，请人工核实",
     ACCEPTED: "SMTP 已接受",
     NO_EMAIL: "无有效邮箱，需人工联系",
+    CANCELLED: "旧通知已取消",
     EXPIRED: "发送任务已过期",
   };
   const retry = async () => {
@@ -1282,111 +1286,6 @@ export function DeliveryNoticePanel({
           </Button>
         </Modal>
       )}
-    </Panel>
-  );
-}
-
-export function PendingSlotProposal({
-  slots,
-  campusId,
-  proposal,
-  onSubmit,
-}: {
-  slots: Slot[];
-  campusId?: string;
-  proposal?: {
-    slotId: string;
-    reason?: string;
-    confirmed?: boolean;
-    rejected?: boolean;
-    proposed?: any;
-  } | null;
-  onSubmit: (slotId: string, reason: string) => Promise<void>;
-}) {
-  const [slotId, setSlotId] = useState("");
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const available = slotsForCampus(slots, campusId).filter((slot) =>
-    slotCurrentlySelectable(slot),
-  );
-  useEffect(() => {
-    if (slotId && !available.some((slot) => slot.id === slotId)) setSlotId("");
-  }, [slotId, available]);
-  const submit = async () => {
-    if (busy) return;
-    if (
-      !available.some(
-        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
-      )
-    ) {
-      setError("请选择当前可预约的新时段");
-      return;
-    }
-    if (!reason.trim()) {
-      setError("请填写客户可见的调整原因");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await onSubmit(slotId, reason.trim());
-      setSlotId("");
-      setReason("");
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Panel title="协调申请时段">
-      <p className="form-hint">
-        新建议需由客户接受，接受不占名额。已有待核对实收可在确认后复用，无需再次付款。
-      </p>
-      {proposal && (
-        <Notice>
-          {proposal.rejected
-            ? "客户已拒绝，需重新协调"
-            : proposal.confirmed
-              ? "客户已接受，待人工确认结算"
-              : "已有新时段建议待客户确认"}
-          {proposal.proposed && (
-            <span> · {slotBlockLabel(proposal.proposed)}</span>
-          )}
-          {proposal.reason && <span> · 原因：{proposal.reason}</span>}
-        </Notice>
-      )}
-      {error && <Notice type="error">{error}</Notice>}
-      <Field label="建议其他时段">
-        <select
-          value={slotId}
-          onChange={(event) => setSlotId(event.target.value)}
-        >
-          <option value="">请选择可预约时段</option>
-          {available.map((slot) => (
-            <option key={slot.id} value={slot.id}>
-              {slot.date} · {slot.name} · {slot.start}–{slot.end}
-            </option>
-          ))}
-        </select>
-      </Field>
-      {!available.length && (
-        <Notice>当前暂无可建议的开放时段，请联系调度管理员。</Notice>
-      )}
-      <Field label="调整原因（客户可见）">
-        <textarea
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </Field>
-      <Button
-        busy={busy}
-        disabled={!available.length}
-        onClick={() => void submit()}
-      >
-        提出时段建议
-      </Button>
     </Panel>
   );
 }

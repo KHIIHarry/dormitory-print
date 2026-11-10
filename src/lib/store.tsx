@@ -94,7 +94,7 @@ type Store = {
     apply: (s: DataState) => DataState,
     method?: string,
     onResponse?: (result: unknown) => void,
-    onError?: (error: unknown) => void,
+    onError?: (error: unknown, message: string) => boolean | void,
   ) => Promise<boolean>;
   updateOrder: (
     id: string,
@@ -530,10 +530,11 @@ export function Provider({ children }: { children: ReactNode }) {
     apply: (s: DataState) => DataState,
     method = "POST",
     onResponse?: (result: unknown) => void,
-    onError?: (error: unknown) => void,
+    onError?: (error: unknown, message: string) => boolean | void,
   ) => {
     if (!navigator.onLine) {
-      toast("当前离线，联网后再执行此操作");
+      const message = "当前离线，联网后再执行此操作";
+      if (!onError?.(new Error(message), message)) toast(message);
       return false;
     }
     const release = locks.current.acquire(path);
@@ -580,14 +581,14 @@ export function Provider({ children }: { children: ReactNode }) {
       return true;
     } catch (e) {
       if (operationGeneration !== getIdentityGeneration()) return false;
-      onError?.(e);
       const blocked = trashBlockers(e);
       const issue = isUncertainSubmission(e)
         ? "提交结果待核实：请求响应未确认，请先刷新并核对实际业务状态，避免重复操作。"
         : blocked.length
           ? `${(e as Error).message}：${blocked.map((b) => b.label).join("；")}`
           : (e as Error).message;
-      setActionIssues((old) => ({ ...old, [path]: issue }));
+      if (!onError?.(e, issue))
+        setActionIssues((old) => ({ ...old, [path]: issue }));
       if ((e as { status: number }).status === 409) void refresh();
       return false;
     } finally {

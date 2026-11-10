@@ -217,3 +217,33 @@ def test_explicit_smtp_rejection_remains_a_known_retryable_failure(
     mail.process_email_job(db, notice.email_job_id)
     assert notice.status == 'PENDING'
     assert notice.last_error == 'MAIL_SEND_REJECTED'
+
+
+def test_superseded_proposal_notification_cannot_send_or_recover(
+        db, smtp_server, settings_allow_local):
+    from app.growth import notify_delivery_change, recover_delivery_notices, retry_delivery_notice
+    from app.mail import process_email_job
+    from app.core import DomainError
+
+    order, change = delivery_event(db)
+    change.kind = 'RESCHEDULE_PROPOSED'
+    change.status = 'PENDING'
+    seed_mail_config(db, smtp_server[1])
+    notice = notify_delivery_change(db, order, change)
+    assert notice.email_job_id
+    queued = db.get(EmailJob, notice.email_job_id)
+    change.status = 'SUPERSEDED'
+    db.commit()
+
+    process_email_job(db, queued.id)
+    assert queued.status == 'CANCELLED' and queued.protected_payload is None
+    assert notice.status == 'CANCELLED'
+    with pytest.raises(DomainError) as error:
+        retry_delivery_notice(db, notice)
+    assert error.value.code == 'DELIVERY_NOTICE_SUPERSEDED'
+
+    notice.email_job_id = None
+    notice.status = 'PENDING'
+    db.flush()
+    assert recover_delivery_notices(db) == 0
+    assert notice.status == 'CANCELLED'

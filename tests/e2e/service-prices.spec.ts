@@ -189,6 +189,9 @@ test("settings edits and saves delivery in cents with binding per copy", async (
       .getByRole("button", { name: "确认保存当前分区", exact: true })
       .click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    // The aria-hidden exit snapshot retains the background's inert lock until
+    // its animation completes. Wait for removal before editing the next price.
+    await expect(page.locator(".modal-backdrop")).toHaveCount(0);
     expect(
       await page.evaluate(() => (window as any).priceFixture.writes.at(-1)),
     ).toMatchObject({

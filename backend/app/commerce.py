@@ -80,6 +80,12 @@ class SlotProposal(DTO):
     reason:str=Field(min_length=1,max_length=1000)
 
 
+class SlotChange(DTO):
+    expected_version:StrictInt
+    slot_id:str
+    reason:str=Field(min_length=1,max_length=300)
+
+
 class SlotAgreement(DTO):
     expected_version:StrictInt
     slot_id:str
@@ -875,7 +881,8 @@ def change_location(order_id:str,body:LocationInput,db=Depends(get_db),actor:Act
     if not source_campus or location.campus_id!=source_campus:
         raise DomainError('CAMPUS_CHANGE_REQUIRES_RESCHEDULE',
                           '跨校区须同时调整楼栋与配送时段；待确认订单请修订，已结算订单请联系管理员协调',409)
-    effective_slot_id=order.confirmed_slot_id or order.requested_slot_id
+    from .delivery_plan import pending_slot_id
+    effective_slot_id=order.confirmed_slot_id or pending_slot_id(order)
     effective_slot=lock(db,DeliverySlot,effective_slot_id)
     # An existing legacy execution can keep changing buildings within its
     # campus without reopening its unresolved slot to new reservations.
@@ -907,10 +914,12 @@ def update_admin_order(order_id:str,body:AdminOrderPatch,db=Depends(get_db),acto
     return ok(order_view(db,order,actor))
 
 
-@router.post('/admin/orders/{order_id}/slot-proposals',response_model=Envelope[OrderView])
+@router.post('/admin/orders/{order_id}/slot-proposals',response_model=Envelope[OrderView],deprecated=True)
 def propose_slot(order_id:str,body:SlotProposal,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'payment.manage');order=lock(db,Order,order_id,body.expected_version)
     if order.status!='PENDING_CONFIRMATION':raise DomainError('INVALID_TRANSITION','仅待结算订单可确认申请时段',409)
+    if ((order.data or {}).get('slotProposal') or {}).get('confirmed'):
+        raise DomainError('SLOT_CHANGE_REQUIRED', '请直接调整已接受的旧时段', 409)
     slot=lock(db,DeliverySlot,body.slot_id)
     ensure_slot_campus(db,slot,order_campus_id(db,order))
     from .delivery_plan import ensure_slot_accepting
@@ -920,7 +929,7 @@ def propose_slot(order_id:str,body:SlotProposal,db=Depends(get_db),actor:Actor=D
     return ok(order_view(db,order,actor))
 
 
-@router.post('/orders/{order_id}/slot-agreement',response_model=Envelope[OrderView])
+@router.post('/orders/{order_id}/slot-agreement',response_model=Envelope[OrderView],deprecated=True)
 def agree_slot(order_id:str,body:SlotAgreement,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
     proposal=(order.data or {}).get('slotProposal')
@@ -935,11 +944,11 @@ def agree_slot(order_id:str,body:SlotAgreement,db=Depends(get_db),actor:Actor=De
     return ok(order_view(db,order,actor))
 
 
-@router.post('/orders/{order_id}/slot-rejection',response_model=Envelope[OrderView])
+@router.post('/orders/{order_id}/slot-rejection',response_model=Envelope[OrderView],deprecated=True)
 def reject_slot(order_id:str,body:VersionReason,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
     proposal=(order.data or {}).get('slotProposal')
-    if order.status!='PENDING_CONFIRMATION' or not proposal or proposal.get('rejected'):
+    if order.status!='PENDING_CONFIRMATION' or not proposal or proposal.get('rejected') or proposal.get('confirmed'):
         raise DomainError('INVALID_TRANSITION','当前没有可拒绝的待确认时段',409)
     order.data={**order.data,'slotProposal':{**proposal,'confirmed':False,'rejected':True,
         'rejectionReason':body.reason,'rejectedAt':utcnow().isoformat()}}
@@ -1014,9 +1023,10 @@ def settle_order(db,actor,order,body):
 def _complete_settlement(db,actor,order,body,receipt):
     proposal=(order.data or {}).get('slotProposal')
     if proposal and not proposal.get('confirmed'):
-        raise DomainError('SLOT_AGREEMENT_REQUIRED','新时段尚未获客户同意，请先协调并确认',409,
+        raise DomainError('SLOT_AGREEMENT_REQUIRED','旧时段建议尚未处理，请先核对并保存配送时段',409,
                           {'receiptId':receipt.id if receipt else None},commit=bool(receipt))
-    slot_id=proposal['slotId'] if proposal and proposal.get('confirmed') else order.requested_slot_id
+    from .delivery_plan import pending_slot_id
+    slot_id=pending_slot_id(order)
     slot=lock(db,DeliverySlot,slot_id)
     ensure_slot_campus(db,slot,order_campus_id(db,order))
     now=utcnow()
@@ -1027,7 +1037,7 @@ def _complete_settlement(db,actor,order,body,receipt):
         state=slot_acceptance(db,slot,now)
         if state['status']!='OPEN':
             if state['status']=='FULL':
-                raise DomainError('SLOT_CAPACITY_REVIEW_REQUIRED','申请时段已满或关闭，请先协调新时段并由客户确认',409,
+                raise DomainError('SLOT_CAPACITY_REVIEW_REQUIRED','申请时段已满或关闭，请协调并调整配送时段',409,
                     {'receiptId':receipt.id if receipt else None,'slotId':slot.id},commit=bool(receipt))
             code,message=SLOT_ERRORS[state['status']]
             raise DomainError(code,message,409,
@@ -1071,6 +1081,10 @@ def _complete_settlement(db,actor,order,body,receipt):
              'batchName':auto_batch.name if auto_batch else None}
     order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':plan_slot_snapshot(slot,public=False),
                 'settlementSlotSnapshot':plan_slot_snapshot(slot,public=False)}
+    if proposal:
+        data = dict(order.data)
+        data.pop('slotProposal', None)
+        order.data = data
     order.arrangement_version=max(1,int(order.arrangement_version or 0))
     order.arrangement_updated_at=utcnow()
     db.add(Payment(order_id=order.id,receipt_id=receipt.id if receipt else None,amount_cents=body.received_cents,kind=body.settlement_kind,staff_id=actor.staff_id,data={'quoteId':quote.id,'discountCents':quote.discount_cents,**cash_facts,'note':body.note}))
@@ -1102,7 +1116,51 @@ def _complete_settlement(db,actor,order,body,receipt):
     return order
 
 
-@router.post('/admin/orders/{order_id}/arrangement-proposals',response_model=Envelope[OrderView])
+@router.post('/admin/orders/{order_id}/slot-change', response_model=Envelope[OrderView])
+def change_order_slot(order_id: str, body: SlotChange, db=Depends(get_db),
+                      actor: Actor=Depends(actor_dep)):
+    from .delivery_plan import apply_reschedule, ensure_slot_accepting, pending_slot_id
+
+    require_admin(actor)
+    order = lock(db, Order, order_id, body.expected_version)
+    require_admin(actor, 'delivery.manage' if order.settlement_kind else 'payment.manage')
+    reason = body.reason.strip()
+    if not reason:
+        raise DomainError('INVALID_CHANGE_REASON', '请填写时段变更原因', 422,
+                          field_errors={'reason': ['请填写时段变更原因']})
+    previous = order.confirmed_slot_id or pending_slot_id(order)
+    if order.settlement_kind:
+        apply_reschedule(db, actor, order, body.slot_id, reason)
+    else:
+        if (order.status != 'PENDING_CONFIRMATION' or order.deleted_at
+                or order.refund_locked or order.close_at <= utcnow()):
+            raise DomainError('INVALID_TRANSITION', '当前订单不能调整申请时段', 409)
+        slot = lock(db, DeliverySlot, body.slot_id)
+        ensure_slot_campus(db, slot, order_campus_id(db, order))
+        data = dict(order.data or {})
+        proposal = data.pop('slotProposal', None)
+        if previous == slot.id:
+            if not proposal:
+                raise DomainError('SLOT_UNCHANGED', '目标时段与当前申请相同', 409)
+        else:
+            ensure_slot_accepting(db, slot)
+        snapshot = _requested_slot_snapshot(slot)
+        original = data.get('requestedSlotSnapshot')
+        if original and order.requested_slot_id != slot.id:
+            data['previousRequestedSlots'] = [*data.get('previousRequestedSlots', []), original]
+        data['requestedSlotSnapshot'] = snapshot
+        order.requested_slot_id = slot.id
+        order.data = data
+        order.arrangement_version = (order.arrangement_version or 0) + 1
+        order.arrangement_updated_at = utcnow()
+        touch(order)
+    audit(db, actor, 'ORDER_SLOT_CHANGED', 'ORDER', order.id, reason,
+          {'fromSlotId': previous, 'toSlotId': body.slot_id})
+    db.flush()
+    return ok(order_view(db, order, actor))
+
+
+@router.post('/admin/orders/{order_id}/arrangement-proposals',response_model=Envelope[OrderView],deprecated=True)
 def propose_arrangement(order_id:str,body:ArrangementProposal,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'delivery.manage');order=lock(db,Order,order_id,body.expected_version)
     slot=db.get(DeliverySlot,body.slot_id)
@@ -1113,7 +1171,7 @@ def propose_arrangement(order_id:str,body:ArrangementProposal,db=Depends(get_db)
     return ok(order_view(db,order,actor))
 
 
-@router.post('/orders/{order_id}/arrangement-agreement',response_model=Envelope[OrderView])
+@router.post('/orders/{order_id}/arrangement-agreement',response_model=Envelope[OrderView],deprecated=True)
 def agree_arrangement(order_id:str,body:ArrangementAgreement,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
     from .delivery_plan import confirm_reschedule
@@ -1122,7 +1180,7 @@ def agree_arrangement(order_id:str,body:ArrangementAgreement,db=Depends(get_db),
     return ok(order_view(db,order,actor))
 
 
-@router.post('/orders/{order_id}/arrangement-rejection',response_model=Envelope[OrderView])
+@router.post('/orders/{order_id}/arrangement-rejection',response_model=Envelope[OrderView],deprecated=True)
 def reject_arrangement(order_id:str,body:ArrangementRejection,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_AGREE_SLOT')
     from .delivery_plan import reject_reschedule

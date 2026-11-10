@@ -8437,6 +8437,12 @@ button.session-action svg { stroke-width: 1.7; }
   min-height: 1.25em;
   text-align: start;
 }
+.order-slot-change-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.order-slot-change-actions .btn { min-height: 44px; }
 .slot-editor-form { min-width: 0; }
 .slot-editor-form .form-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8450,5 +8456,5 @@ button.session-action svg { stroke-width: 1.7; }
   margin-bottom: 12px;
 }
 @media (max-width: 767px) {
-  .slot-editor-form > .btn { width: 100%; }
+  .slot-editor-actions > .btn { width: 100%; }
 }

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.use({ channel: "chrome", trace: "off" });
 
-test("successive unpaid proposals reuse the returned order version", async ({
+test("successive direct changes reuse the returned order version", async ({
   page,
 }) => {
   page.on("pageerror", (error) =>
@@ -24,7 +24,8 @@ test("successive unpaid proposals reuse the returned order version", async ({
       if(options.method==='POST') {
         f.versions.push(options.body.expectedVersion);
         if(options.body.expectedVersion!==f.order.version) throw new Error('VERSION_CONFLICT');
-        f.order={...f.order,version:f.order.version+1,slotProposal:{slotId:'next',reason:options.body.reason,confirmed:false}};
+        if (!path.endsWith('/slot-change')) throw new Error('WRONG_ENDPOINT');
+        f.order={...f.order,version:f.order.version+1,requestedSlotId:options.body.slotId};
         return {...f.order};
       }
       return {items:[{...f.order}]};
@@ -44,7 +45,7 @@ test("successive unpaid proposals reuse the returned order version", async ({
     import {SlotProposals} from '/src/admin/logistics.tsx';
     import '/src/styles.css';
     window.deliveryFixture={versions:[],order:{id:'pending',pickupCode:'P0001',version:1,status:'PENDING_CONFIRMATION',campusId:'campus-east'}};
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SlotProposals,{slots:[{id:'next',campusId:'campus-east',date:'2030-11-01',name:'下个时段',start:'12:00',end:'13:00',enabled:true,capacity:30}]}));
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SlotProposals,{slots:[{id:'next',campusId:'campus-east',date:'2030-11-01',name:'下个时段',start:'12:00',end:'13:00',enabled:true,capacity:30},{id:'later',campusId:'campus-east',date:'2030-11-02',name:'稍后时段',start:'12:00',end:'13:00',enabled:true,capacity:30}]}));
     </script></body></html>
   `,
     }),
@@ -52,11 +53,15 @@ test("successive unpaid proposals reuse the returned order version", async ({
   await page.goto("/delivery-ui-fixture");
   for (let i = 0; i < 2; i++) {
     await page
-      .getByRole("button", { name: "建议变更时段", exact: true })
+      .getByRole("button", { name: "调整配送时段", exact: true })
       .click();
-    await page.getByLabel("建议时段", { exact: true }).selectOption("next");
-    await page.getByLabel("变更原因", { exact: true }).fill(`调整原因${i}`);
-    await page.getByRole("button", { name: "提交建议", exact: true }).click();
+    await page
+      .getByLabel("配送时段", { exact: true })
+      .selectOption(i === 0 ? "next" : "later");
+    await page.getByLabel("调整原因", { exact: true }).fill(`调整原因${i}`);
+    await page
+      .getByRole("button", { name: "保存配送时段", exact: true })
+      .click();
     if (i === 0) await expect(page.getByRole("dialog")).toHaveCount(0);
   }
   await expect

@@ -13,7 +13,7 @@ import {
   receiptRefundPayload,
   receiptRefundTotals,
   sectionVersions,
-  slotProposalPayload,
+  slotChangePayload,
   staffCapabilityPayload,
   staffGrantableAccountsPath,
   staffGrantPayload,
@@ -148,21 +148,21 @@ describe("后台 V1 实接口对齐", () => {
     });
   });
 
-  it("时段建议只写建议，绝不替客户确认", () => {
+  it("已结算和待结算订单使用相同的直接改期请求", () => {
     const order = { id: "o1", status: "PENDING_CONFIRMATION", version: 5 };
-    const body = slotProposalPayload(order, "slot-1", "客户改期");
+    const body = slotChangePayload(order, "slot-1", "客户改期");
     expect(body).toEqual({
       expectedVersion: 5,
       slotId: "slot-1",
       reason: "客户改期",
     });
     expect(body).not.toHaveProperty("confirmed");
-    expect(() =>
-      slotProposalPayload({ ...order, status: "PAID" }, "slot-1", "x"),
-    ).toThrow("仅待结算订单");
-    expect(() => slotProposalPayload(order, " ", "x")).toThrow("请选择");
-    expect(() => slotProposalPayload(order, "slot-1", " ")).toThrow(
-      "请填写时段变更原因",
+    expect(() => slotChangePayload({ version: 0 }, "slot-1", "x")).toThrow(
+      "订单版本无效",
+    );
+    expect(() => slotChangePayload(order, " ", "x")).toThrow("请选择");
+    expect(() => slotChangePayload(order, "slot-1", " ")).toThrow(
+      "时段变更原因",
     );
   });
 

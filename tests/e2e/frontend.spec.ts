@@ -12,6 +12,8 @@ test("homepage contains print services and no delivery action", async ({
 test("document order reaches contact page without clearing the order", async ({
   page,
 }) => {
+  // Keep the historical demo slot open independently of the machine date.
+  await page.clock.setFixedTime(new Date("2026-10-29T10:00:00+08:00"));
   await page.goto("/u/new");
   await page.getByRole("button", { name: "使用示例文件", exact: true }).click();
   await page.getByRole("button", { name: "使用演示 PDF（12 页）" }).click();
@@ -38,7 +40,7 @@ test("document order reaches contact page without clearing the order", async ({
     .last()
     .click();
   await page
-    .getByRole("button", { name: "10月29日 · 星期四 晚间配送 19:00 – 20:00" })
+    .getByRole("button", { name: /10月29日 · 星期四 晚间配送 19:00 – 20:00/ })
     .click();
   await page.getByRole("checkbox", { name: /我确认本次应付/ }).check();
   await page.getByRole("button", { name: "确认并提交订单" }).click();
@@ -58,8 +60,12 @@ test("unauthed staff route redirects and admin demo renders operational pages", 
   page,
 }) => {
   await page.goto("/manage/packing");
-  await expect(page).toHaveURL(/\/manage\/login/);
-  await page.getByRole("button", { name: "进入管理员演示" }).click();
+  await expect(page).toHaveURL((url) =>
+    url.pathname === "/u/account/login" &&
+    url.searchParams.get("returnTo") === "/manage/packing",
+  );
+  await openDemoWorkspace(page, "管理");
+  await chooseAdminMenu(page, "装袋中心", "订单与生产");
   await expect(
     page.getByRole("heading", { name: "装袋中心", exact: true }),
   ).toBeVisible();
@@ -68,9 +74,8 @@ test("unauthed staff route redirects and admin demo renders operational pages", 
   ).toBeDisabled();
 });
 test("courier cannot skip geolocation", async ({ page }) => {
-  await page.goto("/courier/login");
-  await page.getByRole("button", { name: "进入配送员演示" }).click();
-  await page.getByRole("link", { name: /午后配送 · 西区/ }).click();
+  await openDemoWorkspace(page, "配送");
+  await page.getByRole("link", { name: /午后配送 · 东区/ }).click();
   await page.getByRole("link", { name: /B5T9D/ }).click();
   await page.getByRole("link", { name: "拍照并完成交付" }).click();
   await expect(
@@ -112,6 +117,11 @@ test("checkout login adopts the account automatically and requires a fresh amoun
   ).not.toBeChecked();
 });
 
+async function openDemoWorkspace(page: Page, role: "管理" | "配送") {
+  await page.goto("/preview");
+  await page.getByRole("button", { name: `打开${role}端`, exact: true }).click();
+}
+
 async function chooseAdminMenu(page: Page, label: string, group: string) {
   await page.locator(".admin-sidebar").waitFor({ state: "attached" });
   const drawer = page.getByRole("button", { name: "展开导航", exact: true });
@@ -136,10 +146,7 @@ async function chooseAdminMenu(page: Page, label: string, group: string) {
 test("admin settings siblings have exactly one active sidebar entry", async ({
   page,
 }) => {
-  await page.goto("/manage/login");
-  await page
-    .getByRole("button", { name: "进入管理员演示", exact: true })
-    .click();
+  await openDemoWorkspace(page, "管理");
   const sidebar = page.locator(".admin-sidebar nav");
   for (const [label, group] of [
     ["邮件配置", "系统与团队"],
@@ -170,10 +177,7 @@ test("admin settings siblings have exactly one active sidebar entry", async ({
 test("admin accordion is compact, keyboard operable and closes the previous group", async ({
   page,
 }) => {
-  await page.goto("/manage/login");
-  await page
-    .getByRole("button", { name: "进入管理员演示", exact: true })
-    .click();
+  await openDemoWorkspace(page, "管理");
   await page.locator(".admin-sidebar").waitFor({ state: "attached" });
   const drawer = page.getByRole("button", { name: "展开导航", exact: true });
   const mobile = await drawer.isVisible();
@@ -208,18 +212,15 @@ test("admin accordion is compact, keyboard operable and closes the previous grou
 test("submenu focus frames stay within the animated clip at both ends", async ({
   page,
 }) => {
-  await page.goto("/manage/login");
-  await page
-    .getByRole("button", { name: "进入管理员演示", exact: true })
-    .click();
+  await openDemoWorkspace(page, "管理");
+  await expect(
+    page.getByRole("heading", { name: "下午好，管理员", exact: true }),
+  ).toBeVisible();
+  const drawer = page.getByRole("button", { name: "展开导航", exact: true });
+  if (await drawer.isVisible()) await drawer.click();
+  await page.getByRole("button", { name: "配送管理", exact: true }).click();
+  // Exercise focus at both clip edges without racing a route's title focus.
   for (const label of ["配送调度", "校园地图"]) {
-    await chooseAdminMenu(page, label, "配送管理");
-    const drawer = page.getByRole("button", { name: "展开导航", exact: true });
-    if (
-      (await drawer.isVisible()) &&
-      (await drawer.getAttribute("aria-expanded")) !== "true"
-    )
-      await drawer.click();
     const link = page
       .locator(".admin-sidebar")
       .getByRole("link", { name: label, exact: true });
@@ -235,15 +236,23 @@ test("submenu focus frames stay within the animated clip at both ends", async ({
             0,
             parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset),
           );
-          return (
-            row.left - outset >= clip.left &&
-            row.right + outset <= clip.right &&
-            row.top - outset >= clip.top &&
-            row.bottom + outset <= clip.bottom
-          );
+          return {
+            focusVisible: el.matches(":focus-visible"),
+            hasOutline:
+              style.outlineStyle !== "none" &&
+              parseFloat(style.outlineWidth) > 0,
+            contained:
+              row.left - outset >= clip.left &&
+              row.right + outset <= clip.right &&
+              row.top - outset >= clip.top &&
+              row.bottom + outset <= clip.bottom,
+            row: row.toJSON(),
+            clip: clip.toJSON(),
+            outset,
+          };
         }),
       )
-      .toBe(true);
+      .toMatchObject({ focusVisible: true, hasOutline: true, contained: true });
   }
 });
 

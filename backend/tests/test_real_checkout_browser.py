@@ -275,22 +275,20 @@ def test_real_checkout_upload_ready_and_submit(
         packed = base.run_print_to_packed(api, admin_client, paid)
         assert packed['status'] == 'READY_FOR_DELIVERY', packed
 
-        proposal = api(
-            admin_client, f'/admin/orders/{order.id}/arrangement-proposals',
+        changed = api(
+            admin_client, f'/admin/orders/{order.id}/slot-change',
             {'expectedVersion': packed['version'], 'slotId': slot2.id,
-             'reason': '真实链路验收：客户改到次日时段'},
-            key='real-delivery-propose')
-        assert proposal.status_code == 200, proposal.text
+             'reason': '真实链路验收：微信确认改到次日时段'},
+            key='real-delivery-slot-change')
+        assert changed.status_code == 200, changed.text
 
         customer = _account_client(client_factory, db, account)
         customer_view = api(customer, f'/orders/{order.id}', method='GET')
         assert customer_view.status_code == 200, customer_view.text
-        accepted = api(
-            customer, f'/orders/{order.id}/arrangement-agreement',
-            {'expectedVersion': customer_view.json()['data']['version'],
-             'slotId': slot2.id, 'confirm': True},
-            key='real-delivery-accept')
-        assert accepted.status_code == 200, accepted.text
+        arrangement = customer_view.json()['data']['arrangement']
+        assert arrangement['effective']['id'] == slot2.id
+        assert arrangement['originalConfirmation']['id'] == slot.id
+        assert arrangement['pendingProposal'] is None
         db.expire_all()
         moved = db.get(Order, order.id)
         assert moved.confirmed_slot_id == slot2.id, moved.confirmed_slot_id
@@ -349,10 +347,11 @@ def test_real_checkout_upload_ready_and_submit(
         assert final.status == 'DELIVERED'
         kinds = set(db.scalars(select(DeliveryChange.kind).where(
             DeliveryChange.order_id == order.id)))
-        assert {'RESCHEDULE_PROPOSED', 'RESCHEDULE_CONFIRMED'} <= kinds, kinds
-        notice = db.scalar(select(DeliveryNotice).where(
-            DeliveryNotice.order_id == order.id).order_by(
-            DeliveryNotice.created_at.asc()))
+        assert 'RESCHEDULE_APPLIED' in kinds, kinds
+        assert not ({'RESCHEDULE_PROPOSED', 'RESCHEDULE_CONFIRMED'} & kinds), kinds
+        change_id = db.scalar(select(DeliveryChange.id).where(
+            DeliveryChange.order_id == order.id, DeliveryChange.kind == 'RESCHEDULE_APPLIED'))
+        notice = db.scalar(select(DeliveryNotice).where(DeliveryNotice.change_id == change_id))
         assert notice is not None, 'reschedule did not leave a delivery notice'
         print('REAL_DELIVERY_EVIDENCE ' + json.dumps({
             'orderId': order.id,

@@ -117,6 +117,11 @@ test("relative ranges follow the Shanghai date while custom dates stay fixed", a
   await mountSlots(page);
   const start = page.getByLabel("开始日期", { exact: true });
   const end = page.getByLabel("结束日期", { exact: true });
+  const preset = page.getByLabel("日期范围", { exact: true });
+  await preset.selectOption("today");
+  await expect(start).toHaveValue("2026-11-06");
+  await preset.selectOption("week");
+  await expect(start).toHaveValue("2026-11-02");
   await page.clock.setSystemTime(new Date("2026-11-08T16:00:00Z"));
   await page.clock.runFor(60_000);
   await expect(start).toHaveValue("2026-11-09");

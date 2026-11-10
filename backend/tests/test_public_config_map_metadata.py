@@ -54,7 +54,7 @@ def test_public_config_filters_stored_map_metadata(db, api, client):
     assert data['displayName'] == 'DormPrint'
     assert set(data['prices']) == {
         'bwSingle', 'bwDuplex', 'colorSingle', 'colorDuplex',
-        'photo', 'corner', 'side',
+        'photo', 'corner', 'side', 'delivery',
     }
     # Nested DTO semantics are unchanged and the response round-trips through
     # the strict public model without dropping/adding a field.

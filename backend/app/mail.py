@@ -1061,7 +1061,7 @@ def _purge_payload(job: EmailJob, status: str, error: str | None = None) -> None
     job.data = data
     job.status = status
     touch(job)
-    _sync_delivery_notice(job, 'UNKNOWN' if status == 'UNKNOWN' else 'FAILED')
+    _sync_delivery_notice(job, status if status in ('UNKNOWN', 'CANCELLED') else 'FAILED')
     session = object_session(job)
     if session is not None:
         session.flush()
@@ -1094,6 +1094,13 @@ def process_email_job(db, job_id: str) -> None:
     job = lock(db, EmailJob, job_id)
     if job.status in ('SMTP_ACCEPTED', 'UNKNOWN', 'FAILED', 'EXPIRED', 'CANCELLED'):
         return
+    change_id = (job.data or {}).get('deliveryChangeId')
+    if change_id:
+        from .models import DeliveryChange
+        change = db.get(DeliveryChange, change_id)
+        if change is not None and change.status == 'SUPERSEDED':
+            _purge_payload(job, 'CANCELLED', 'DELIVERY_NOTICE_SUPERSEDED')
+            return
     now = utcnow()
     if job.status in ('RETRY', 'RETRY_PENDING') and job.available_at and job.available_at > now:
         # Root jobs requeue the same durable Job from EmailJob.available_at;

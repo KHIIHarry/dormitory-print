@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 test("checkout waits for current config before preparing and blocks commit when config is invalidated", async ({
   page,
 }) => {
+  await page.clock.install({ time: new Date("2026-10-29T02:00:00Z") });
   const transformed = await (
     await page.request.get("/src/customer/review.tsx")
   ).text();
@@ -18,7 +19,7 @@ test("checkout waits for current config before preparing and blocks commit when 
     const listeners=new Set();
     let store={data,draft:[file],editingOrderId:null,checkoutMemory:{},savedAccessLinks:{},resources:{config:{hasData:false,loading:true,error:''}},pendingActions:{},actionIssues:{},loading:false,refreshing:false,refreshError:'',error:'',authReady:true,role:null};
     const apply=(value,previous)=>typeof value==='function'?value(previous):value;
-    Object.assign(store,{toast:()=>{},refresh:async()=>{},setDraft:()=>{},setEditingOrderId:()=>{},setSavedAccessLinks:()=>{},setData:v=>{store.data=apply(v,store.data)},setCheckoutMemory:v=>{store.checkoutMemory=apply(v,store.checkoutMemory)}});
+    Object.assign(store,{clearActionIssues:()=>{},toast:()=>{},refresh:async()=>{},setDraft:()=>{},setEditingOrderId:()=>{},setSavedAccessLinks:()=>{},setData:v=>{store.data=apply(v,store.data)},setCheckoutMemory:v=>{store.checkoutMemory=apply(v,store.checkoutMemory)}});
     window.reviewFixture={get store(){return store},calls:[],setReady(ready){store={...store,resources:{config:{hasData:ready,loading:!ready,error:''}}};listeners.forEach(f=>f())}};
     export const DEMO=false,ADMIN='/manage'; export const Provider=({children})=>children;
     export const useStore=()=>useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn)},()=>store);
@@ -74,6 +75,8 @@ test("checkout waits for current config before preparing and blocks commit when 
   await page
     .getByRole("button", { name: "我已确认最终打印格式", exact: true })
     .click();
+  await page.locator(".modal-backdrop").waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "东校区", exact: true }).click();
   await page.getByRole("checkbox", { name: /我确认本次应付/ }).check();
   const submit = page.getByRole("button", {
     name: "确认并提交订单",

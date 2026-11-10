@@ -10,7 +10,7 @@ from urllib.parse import quote
 from sqlalchemy import create_engine, text
 
 from app.models import (Campus, DeliveryBatch, DeliveryChange, DeliveryGroup, DeliverySlot,
-                        Location, Order, Preparation, Principal, Quote, utcnow)
+                        Location, Order, Preparation, Principal, utcnow)
 
 
 def test_schema_upgrade_only_binds_provable_campuses_and_keeps_shared_capacity():
@@ -53,8 +53,11 @@ def test_schema_upgrade_only_binds_provable_campuses_and_keeps_shared_capacity()
             connection.execute(Location.__table__.insert().values(id='location', name='东区楼栋', campus_id='east'))
             connection.execute(Preparation.__table__.insert().values(id='preparation', principal_id='principal',
                 expires_at=now+timedelta(days=1)))
-            connection.execute(Quote.__table__.insert().values(id='quote', preparation_id='preparation',
-                price_version=1, expires_at=now+timedelta(days=1), subtotal_cents=10, total_cents=10))
+            connection.execute(text(
+                "INSERT INTO quotes (id, preparation_id, price_version, expires_at, "
+                "subtotal_cents, discount_cents, total_cents, data, version, created_at, updated_at) "
+                "VALUES ('quote', 'preparation', 1, :expires_at, 10, 0, 10, '{}', 1, :now, :now)"
+            ), {'expires_at': now+timedelta(days=1), 'now': now})
             connection.execute(Order.__table__.insert().values(id='order', principal_id='principal',
                 pickup_code='HISTORY', preparation_id='preparation', quote_id='quote', total_cents=10,
                 nickname='测试', phone='13800000000', location_id='location', requested_slot_id='unique',

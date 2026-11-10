@@ -1,4 +1,5 @@
 import { SERVICE_PRICES } from "../lib/service-prices";
+import type { SlotBrief } from "./customer";
 
 /**
  * Local DTOs and request builders for the V1 admin integration.
@@ -653,7 +654,7 @@ export function receiptRefundPayload(
   return { expectedVersion: receipt.version, amountCents, reason: cleanReason };
 }
 
-export type SlotProposal = {
+type LegacySlotProposal = {
   slotId: string;
   reason: string;
   confirmed: boolean;
@@ -665,12 +666,16 @@ export type AdminOrderView = {
   status: string;
   pickupCode?: string | null;
   totalCents?: number;
-  slotProposal?: SlotProposal | null;
+  locationId?: string | null;
+  locationSnapshot?: { campusId?: string | null } | null;
+  campusId?: string | null;
+  slotProposal?: LegacySlotProposal | null;
   slotId?: string | null;
   requestedSlotId?: string | null;
   confirmedSlotId?: string | null;
   arrangement?: {
     status?: string;
+    effective?: SlotBrief | null;
     pendingProposal?: {
       changeId: string;
       proposed?: { slotId?: string; date?: string; name?: string };
@@ -678,21 +683,16 @@ export type AdminOrderView = {
   } | null;
 };
 
-/**
- * Administrators may only propose a slot. The customer has to confirm it with
- * POST /orders/{id}/slot-agreement; no admin code path may set confirmed=true.
- */
-export function slotProposalPayload(
-  order: Pick<AdminOrderView, "version" | "status">,
+export function slotChangePayload(
+  order: Pick<AdminOrderView, "version">,
   slotId: string,
   reason: string,
 ) {
-  if (order.status !== "PENDING_CONFIRMATION")
-    throw new Error("仅待结算订单可申请确认新时段");
   const cleanSlotId = slotId.trim();
-  if (!cleanSlotId) throw new Error("请选择要建议的时段");
+  if (!cleanSlotId) throw new Error("请选择配送时段");
   const cleanReason = reason.trim();
-  if (!cleanReason) throw new Error("请填写时段变更原因");
+  if (!cleanReason || cleanReason.length > 300)
+    throw new Error("请填写 1 到 300 个字符的时段变更原因");
   if (!Number.isSafeInteger(order.version) || order.version < 1)
     throw new Error("订单版本无效，请刷新订单后重试");
   return {
@@ -839,7 +839,7 @@ export const CAPABILITY_CATALOG: {
   {
     key: "payment.manage",
     label: "收款与售后",
-    description: "人工收款、时段建议、售后审核与退款登记",
+    description: "人工收款、时段调整、售后审核与退款登记",
     enforced: true,
   },
   {

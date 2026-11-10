@@ -15,7 +15,8 @@ import {
 
 // The local machine has no matching ms-playwright download; CI keeps the
 // repository default instead of hard-coding a platform-specific browser path.
-const systemChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const systemChrome =
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 test.use(
   existsSync(systemChrome)
     ? { launchOptions: { executablePath: systemChrome } }
@@ -31,6 +32,7 @@ const baseConfig = {
     photo: 200,
     corner: 50,
     side: 100,
+    delivery: 250,
   },
   serviceEnabled: true,
   maxFiles: 10,
@@ -79,6 +81,7 @@ test.describe("V1 admin strict request contracts", () => {
       photo: 200,
       corner: 50,
       side: 100,
+      delivery: 250,
     });
     expect(body).not.toHaveProperty("serviceEnabled");
     expect(body).not.toHaveProperty("wechat");
@@ -202,7 +205,9 @@ test.describe("V1 admin strict request contracts", () => {
         { sheetId: "c2-s1" },
       ],
     } as PrintTaskView;
-    expect(reprintPayload(task, "SHEETS", ["c1-s1", "c1-s1", "c2-s1"], "缺页")).toEqual({
+    expect(
+      reprintPayload(task, "SHEETS", ["c1-s1", "c1-s1", "c2-s1"], "缺页"),
+    ).toEqual({
       expectedVersion: 9,
       mode: "SHEETS",
       sheetIds: ["c1-s1", "c2-s1"],
@@ -245,7 +250,12 @@ test.describe("V1 admin strict request contracts", () => {
 
   test("exports only accept orders or finance kinds", () => {
     expect(
-      exportPayload("FINANCE", { status: "DELIVERED" }, ["orderId", "amountCents"], "对账"),
+      exportPayload(
+        "FINANCE",
+        { status: "DELIVERED" },
+        ["orderId", "amountCents"],
+        "对账",
+      ),
     ).toEqual({
       kind: "FINANCE",
       filters: { status: "DELIVERED" },
@@ -257,14 +267,22 @@ test.describe("V1 admin strict request contracts", () => {
 
   test("staff capability edits keep expected version and reason", () => {
     expect(
-      staffCapabilityPayload({ id: "s-1", version: 5 } as any, ["config.manage"], "授权配置"),
+      staffCapabilityPayload(
+        { id: "s-1", version: 5 } as any,
+        ["config.manage"],
+        "授权配置",
+      ),
     ).toEqual({
       expectedVersion: 5,
       capabilities: ["config.manage"],
       reason: "授权配置",
     });
     expect(() =>
-      staffCapabilityPayload({ id: "s-1", version: 5 } as any, ["config.manage"], ""),
+      staffCapabilityPayload(
+        { id: "s-1", version: 5 } as any,
+        ["config.manage"],
+        "",
+      ),
     ).toThrow(/原因/);
   });
 });
@@ -276,13 +294,23 @@ test("admin settings exposes section, workflow, retention and pause controls", a
   await page.getByRole("button", { name: "打开管理端", exact: true }).click();
   if (test.info().project.name === "mobile") {
     await page.getByRole("button", { name: "展开导航", exact: true }).click();
-    await expect(page.getByRole("button", { name: "展开导航", exact: true })).toHaveAttribute("aria-expanded", "true");
+    await expect(
+      page.getByRole("button", { name: "展开导航", exact: true }),
+    ).toHaveAttribute("aria-expanded", "true");
   }
   await page.getByRole("button", { name: "系统与团队" }).click();
   await page.getByRole("link", { name: "系统配置", exact: true }).click();
   await expect(page.getByRole("heading", { name: "系统配置" })).toBeVisible();
-  for (const label of ["价目", "服务与限制", "打印文件校准", "微信与联系", "公告与营业"]) {
-    await expect(page.getByRole("button", { name: new RegExp(label) })).toBeVisible();
+  for (const label of [
+    "价目",
+    "服务与限制",
+    "打印文件校准",
+    "微信与联系",
+    "公告与营业",
+  ]) {
+    await expect(
+      page.getByRole("button", { name: new RegExp(label) }),
+    ).toBeVisible();
   }
   await page.getByRole("button", { name: /打印文件校准/ }).click();
   const a4Heading = page.getByRole("heading", { name: "A4 文件打印" });

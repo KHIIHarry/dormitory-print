@@ -1,5 +1,5 @@
 import { formatDisplayTime } from "../lib/display-format";
-import { slotCurrentlySelectable } from "../customer/checkout";
+import { slotBlockLabel } from "../v1/customer";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -27,6 +27,7 @@ import { growthRequest } from "../growth/client";
 import { NumberInput } from "../components/number-input";
 import { campusOfOrder, campusesOfBatch, slotsForCampus } from "../lib/campus";
 import { CampusFilter, CampusTag, orderCampusId } from "./campus-filter";
+import { OrderSlotChangeDialog } from "./order-slot-change";
 import {
   SlotDateFilter,
   SlotDateSummary,
@@ -36,7 +37,6 @@ import { batchPrimaryAction, canStartBatch } from "../lib/domain";
 import type { Batch, Campus, DataState, Slot } from "../lib/types";
 import {
   eligibleCouriers,
-  slotProposalPayload,
   type AdminOrderView,
   type CourierDirectoryRow,
 } from "../v1/admin-api";
@@ -1525,6 +1525,7 @@ export function Slots() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [removeSlot, setRemoveSlot] = useState<Slot | null>(null);
   const [removeReason, setRemoveReason] = useState("");
+  const [removeError, setRemoveError] = useState("");
   const [sealSlot, setSealSlot] = useState<Slot | null>(null);
   const [sealPreview, setSealPreview] = useState<any>(null);
   const [sealReason, setSealReason] = useState("");
@@ -1552,7 +1553,19 @@ export function Slots() {
     };
   }, []);
 
+  const slotChanged = () => {
+    toast("配送时段已更新");
+    void reload().catch((error) => setSlotError((error as Error).message));
+  };
+  const originalSlot = useRef<Slot | null>(null);
+  const submitActions = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (formErrors.submit)
+      submitActions.current?.scrollIntoView({ block: "nearest" });
+  }, [formErrors.submit]);
+
   const openEditor = (slot?: Slot) => {
+    originalSlot.current = slot || null;
     setFormErrors({});
     if (!slot) {
       setEdit({
@@ -1585,7 +1598,7 @@ export function Slots() {
     if (!edit.openAt) errors.openAt = "请选择开放下单时间";
     if (!edit.cutoffAt) errors.cutoffAt = "请选择截单时间";
     if (edit.date && edit.start && edit.openAt) {
-      const open = new Date(edit.openAt);
+      const open = new Date(`${edit.openAt}+08:00`);
       const start = new Date(`${edit.date}T${edit.start}:00+08:00`);
       if (
         Number.isFinite(open.getTime()) &&
@@ -1595,8 +1608,8 @@ export function Slots() {
         errors.openAt = "开放下单时间必须早于预计配送开始时间";
     }
     if (edit.cutoffAt) {
-      const cutoff = new Date(edit.cutoffAt);
-      const open = edit.openAt ? new Date(edit.openAt) : null;
+      const cutoff = new Date(`${edit.cutoffAt}+08:00`);
+      const open = edit.openAt ? new Date(`${edit.openAt}+08:00`) : null;
       const start =
         edit.date && edit.start
           ? new Date(`${edit.date}T${edit.start}:00+08:00`)
@@ -1657,7 +1670,23 @@ export function Slots() {
       autoPublish: edit.autoPublish ?? false,
       reason: (edit as any).reason || "",
     };
-    if (edit.id) payload.expectedVersion = (edit as any).version;
+    if (edit.id) {
+      payload.expectedVersion = edit.version;
+      const original = originalSlot.current;
+      if (
+        original &&
+        edit.openAt === toShanghaiInput(original.openAt) &&
+        edit.cutoffAt === toShanghaiInput(original.cutoffAt)
+      ) {
+        delete payload.openAt;
+        delete payload.cutoffAt;
+      } else if (original) {
+        if (edit.openAt === toShanghaiInput(original.openAt))
+          payload.openAt = original.openAt;
+        if (edit.cutoffAt === toShanghaiInput(original.cutoffAt))
+          payload.cutoffAt = original.cutoffAt;
+      }
+    }
     if (
       await act(
         edit.id ? `/admin/slots/${id}` : "/admin/slots",
@@ -1670,12 +1699,10 @@ export function Slots() {
         }),
         edit.id ? "PATCH" : "POST",
         undefined,
-        (error) =>
-          setFormErrors((current) => ({
-            ...current,
-            submit:
-              error instanceof Error ? error.message : "保存失败，请刷新后重试",
-          })),
+        (_error, message) => {
+          setFormErrors((current) => ({ ...current, submit: message }));
+          return true;
+        },
       )
     ) {
       setEdit(null);
@@ -1847,6 +1874,7 @@ export function Slots() {
                           onClick={() => {
                             setRemoveSlot(s);
                             setRemoveReason("");
+                            setRemoveError("");
                           }}
                         >
                           移除
@@ -1880,9 +1908,19 @@ export function Slots() {
           />
         )}
       </Panel>
-      {!DEMO && <SlotProposals slots={slots} buildings={data.buildings} />}
       {!DEMO && (
-        <PaidArrangementProposals slots={slots} buildings={data.buildings} />
+        <SlotProposals
+          slots={slots}
+          buildings={data.buildings}
+          onSaved={slotChanged}
+        />
+      )}
+      {!DEMO && (
+        <PaidArrangementProposals
+          slots={slots}
+          buildings={data.buildings}
+          onSaved={slotChanged}
+        />
       )}
       {!DEMO && <DeliveryRepairPanel />}
       {removeSlot && (
@@ -1897,10 +1935,16 @@ export function Slots() {
               onChange={(event) => setRemoveReason(event.target.value)}
             />
           </Field>
+          {removeError && (
+            <Notice type="error">
+              <span role="alert">{removeError}</span>
+            </Notice>
+          )}
           <Button
             busy={pendingActions[`/admin/slots/${removeSlot.id}`]}
             onClick={async () => {
               const selected = removeSlot;
+              setRemoveError("");
               const ok = await act(
                 `/admin/slots/${selected.id}`,
                 {
@@ -1914,6 +1958,11 @@ export function Slots() {
                   ),
                 }),
                 "DELETE",
+                undefined,
+                (_error, message) => {
+                  setRemoveError(message);
+                  return true;
+                },
               );
               if (!ok) return;
               setSlots((current) =>
@@ -1934,7 +1983,11 @@ export function Slots() {
             {sealSlot.name}
             」的新申请并冻结该时段名单； 不可撤销，需要继续接单请新建时段。
           </Notice>
-          {sealError && <Notice type="error">{sealError}</Notice>}
+          {!sealPreview && sealError && (
+            <Notice type="error">
+              <span role="alert">{sealError}</span>
+            </Notice>
+          )}
           {!sealPreview && sealBusy && <p>正在检查影响范围…</p>}
           {sealPreview && (
             <>
@@ -1964,6 +2017,11 @@ export function Slots() {
                   placeholder="例如：配送运力已满，提前结束接单"
                 />
               </Field>
+              {sealError && (
+                <Notice type="error">
+                  <span role="alert">{sealError}</span>
+                </Notice>
+              )}
               <Button
                 busy={sealBusy}
                 disabled={!!sealPreview.blockers?.length}
@@ -1981,11 +2039,6 @@ export function Slots() {
           onClose={() => setEdit(null)}
         >
           <div className="slot-editor-form">
-            {formErrors.submit && (
-              <Notice type="error">
-                <span role="alert">{formErrors.submit}</span>
-              </Notice>
-            )}
             <Field
               label="配送校区"
               error={formErrors.campusId}
@@ -2124,16 +2177,23 @@ export function Slots() {
             <p className="form-hint">
               请在截单前开启并指派配送员。发布后仍由配送员确认开始。
             </p>
-            <Button
-              busy={
-                pendingActions[
-                  edit?.id ? `/admin/slots/${edit.id}` : "/admin/slots"
-                ]
-              }
-              onClick={save}
-            >
-              保存时段
-            </Button>
+            <div ref={submitActions} className="slot-editor-actions">
+              {formErrors.submit && (
+                <Notice type="error">
+                  <span role="alert">{formErrors.submit}</span>
+                </Notice>
+              )}
+              <Button
+                busy={
+                  pendingActions[
+                    edit?.id ? `/admin/slots/${edit.id}` : "/admin/slots"
+                  ]
+                }
+                onClick={save}
+              >
+                保存时段
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
@@ -2141,32 +2201,52 @@ export function Slots() {
   );
 }
 
-export function PaidArrangementProposals({
-  slots,
-  buildings = [],
-}: {
+type SlotChangeListProps = {
   slots: Slot[];
   buildings?: DataState["buildings"];
+  onSaved?: () => void;
+};
+
+export function PaidArrangementProposals(props: SlotChangeListProps) {
+  return <SlotChangeList {...props} settled />;
+}
+
+export function SlotProposals(props: SlotChangeListProps) {
+  return <SlotChangeList {...props} settled={false} />;
+}
+
+function SlotChangeList({
+  slots,
+  buildings = [],
+  settled,
+  onSaved,
+}: SlotChangeListProps & {
+  settled: boolean;
 }) {
   const [orders, setOrders] = useState<AdminOrderView[]>([]);
   const [target, setTarget] = useState<AdminOrderView | null>(null);
-  const [slotId, setSlotId] = useState("");
-  const [reason, setReason] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const load = async () => {
     setLoading(true);
     setError("");
     try {
       const result = await growthRequest<{ items: AdminOrderView[] }>(
-        "/admin/orders?limit=100",
+        settled
+          ? "/admin/orders?limit=100"
+          : "/admin/orders?status=PENDING_CONFIRMATION&limit=100",
       );
       setOrders(
-        (result.items || []).filter(
-          (order) =>
-            !!order.confirmedSlotId &&
-            !["DELIVERED", "CANCELLED"].includes(order.status),
+        (result.items || []).filter((order) =>
+          settled
+            ? !!order.confirmedSlotId &&
+              ![
+                "DELIVERING",
+                "DELIVERY_EXCEPTION",
+                "DELIVERED",
+                "CANCELLED",
+              ].includes(order.status)
+            : order.status === "PENDING_CONFIRMATION",
         ),
       );
     } catch (cause) {
@@ -2177,339 +2257,85 @@ export function PaidArrangementProposals({
   };
   useEffect(() => {
     void load();
-  }, []);
-  const available = slotsForCampus(
-    slots,
-    orderCampusId(buildings, target as any),
-  ).filter((slot) => slotCurrentlySelectable(slot));
-  useEffect(() => {
-    if (slotId && !available.some((slot) => slot.id === slotId)) setSlotId("");
-  }, [slotId, available]);
-  const submit = async () => {
-    if (!target) return;
-    if (
-      !available.some(
-        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
-      )
-    ) {
-      setError("请选择该订单校区可预约的新时段");
-      return;
-    }
-    if (!reason.trim()) {
-      setError("请填写调整原因");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await growthRequest(
-        `/admin/orders/${encodeURIComponent(target.id)}/arrangement-proposals`,
-        {
-          method: "POST",
-          body: {
-            expectedVersion: target.version,
-            slotId: slotId.trim(),
-            reason: reason.trim(),
-          },
-        },
-      );
-      setTarget(null);
-      await load();
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Panel title="已结算订单的配送安排">
-      <p className="muted">
-        已结算订单改到其他时段需要客户在订单页明确接受；预览与实际生效分离，
-        不会重复扣款或重新报价。
-      </p>
-      {error && <Notice type="error">{error}</Notice>}
-      <div className="button-row">
-        <Button
-          variant="secondary"
-          busy={loading}
-          disabled={busy}
-          onClick={() => void load()}
-        >
-          刷新已结算订单
-        </Button>
-      </div>
-      {!orders.length && !loading && !error && (
-        <Empty title="暂无需要协调的已结算订单" />
-      )}
-      <div className="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>取件码</th>
-              <th>状态</th>
-              <th>当前确认时段</th>
-              <th>待确认提案</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((order) => {
-              const confirmed = slots.find(
-                (s) => s.id === order.confirmedSlotId,
-              );
-              const pending = order.arrangement?.pendingProposal;
-              return (
-                <tr key={order.id}>
-                  <td>{order.pickupCode || order.id.slice(0, 8)}</td>
-                  <td>{order.status}</td>
-                  <td>
-                    {confirmed
-                      ? `${confirmed.date} ${confirmed.name} ${confirmed.start}–${confirmed.end}`
-                      : order.confirmedSlotId}
-                  </td>
-                  <td>
-                    {pending
-                      ? `${pending.proposed?.date || ""} ${pending.proposed?.name || ""} 待客户确认`
-                      : "—"}
-                  </td>
-                  <td>
-                    <button
-                      className="text-button"
-                      onClick={() => {
-                        setTarget(order);
-                        setSlotId("");
-                        setReason("");
-                        setError("");
-                      }}
-                    >
-                      调整配送安排
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {target && (
-        <Modal title="调整配送安排" onClose={() => setTarget(null)}>
-          <Notice>
-            订单 {target.pickupCode || target.id.slice(0, 8)}{" "}
-            已结算。选择其他时段后， 客户需在订单页确认；接受前原安排仍然有效。
-          </Notice>
-          <Field label="新的配送时段">
-            <select value={slotId} onChange={(e) => setSlotId(e.target.value)}>
-              <option value="">请选择时段</option>
-              {available.map((slot) => (
-                <option key={slot.id} value={slot.id}>
-                  {slot.date} · {slot.name} · {slot.start}–{slot.end}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="调整原因（会展示给客户）">
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="例如：原时段运力不足，建议调整到次日中午"
-            />
-          </Field>
-          <Button busy={busy} onClick={submit}>
-            提交待客户确认的安排
-          </Button>
-        </Modal>
-      )}
-    </Panel>
-  );
-}
+  }, [settled]);
 
-export function SlotProposals({
-  slots,
-  buildings = [],
-}: {
-  slots: Slot[];
-  buildings?: DataState["buildings"];
-}) {
-  const [orders, setOrders] = useState<AdminOrderView[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [target, setTarget] = useState<AdminOrderView | null>(null);
-  const [slotId, setSlotId] = useState("");
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-  const available = slotsForCampus(
-    slots,
-    orderCampusId(buildings, target as any),
-  ).filter((slot) => slotCurrentlySelectable(slot));
-  useEffect(() => {
-    if (slotId && !available.some((slot) => slot.id === slotId)) setSlotId("");
-  }, [slotId, available]);
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await growthRequest<{ items: AdminOrderView[] }>(
-        "/admin/orders?status=PENDING_CONFIRMATION&limit=100",
-      );
-      setOrders(result.items || []);
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => {
-    void load();
-  }, []);
-  const propose = async () => {
-    if (!target) return;
-    let body: ReturnType<typeof slotProposalPayload>;
-    if (
-      !available.some(
-        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
-      )
-    ) {
-      setError("请选择该订单校区可预约的时段");
-      return;
-    }
-    try {
-      body = slotProposalPayload(target, slotId, reason);
-    } catch (cause) {
-      setError((cause as Error).message);
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const updated = await growthRequest<AdminOrderView>(
-        `/admin/orders/${encodeURIComponent(target.id)}/slot-proposals`,
-        { method: "POST", body },
-      );
-      setOrders((current) =>
-        current.map((order) => (order.id === target.id ? updated : order)),
-      );
-      setTarget(null);
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const slotLabel = (id?: string | null) => {
-    const slot = slots.find((row) => row.id === id);
-    return slot
-      ? `${slot.date} ${slot.start}–${slot.end} ${slot.name}`
-      : id || "—";
-  };
   return (
-    <Panel title="待结算订单时段建议">
-      <p className="muted">
-        管理员只能提出时段变更建议；必须由客户在订单页确认后才会生效。本页不会替客户同意，也不会改变订单的已确认时段。
-      </p>
+    <Panel title={settled ? "已结算订单的配送时段" : "待结算订单的配送时段"}>
       {error && (
         <Notice type="error">
           <span role="alert">{error}</span>
         </Notice>
       )}
       <div className="button-row">
-        <Button variant="secondary" busy={loading} onClick={load}>
-          刷新待结算订单
+        <Button variant="secondary" busy={loading} onClick={() => void load()}>
+          {settled ? "刷新已结算订单" : "刷新待结算订单"}
         </Button>
       </div>
-      {!loading && !orders.length ? (
-        <Empty title="暂无待结算订单" text="客户确认价格后才会出现在这里。" />
+      {!loading && !error && !orders.length ? (
+        <Empty title={settled ? "暂无可调整的已结算订单" : "暂无待结算订单"} />
       ) : (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>订单</th>
-                <th>当前建议</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id}>
-                  <td>
-                    <b>{order.pickupCode || order.id}</b>
-                  </td>
-                  <td>
-                    {order.slotProposal
-                      ? `${slotLabel(order.slotProposal.slotId)} · 待客户确认`
-                      : "尚未提出"}
-                  </td>
-                  <td>
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setTarget(order);
-                        setSlotId("");
-                        setReason("");
-                        setError("");
-                      }}
-                    >
-                      建议变更时段
-                    </Button>
-                  </td>
+        !!orders.length && (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>订单</th>
+                  <th>当前时段</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {orders.map((order) => {
+                  const id =
+                    order.confirmedSlotId ||
+                    (order.slotProposal?.confirmed
+                      ? order.slotProposal.slotId
+                      : order.requestedSlotId || order.slotId);
+                  const slot = slots.find((item) => item.id === id);
+                  const legacy =
+                    order.slotProposal || order.arrangement?.pendingProposal;
+                  return (
+                    <tr key={order.id}>
+                      <td>
+                        <b>{order.pickupCode || order.id.slice(0, 8)}</b>
+                      </td>
+                      <td>
+                        {slotBlockLabel(order.arrangement?.effective || slot) ||
+                          "—"}
+                        {legacy && <div className="muted">有旧改期建议</div>}
+                      </td>
+                      <td>
+                        <Button
+                          variant="secondary"
+                          onClick={() => setTarget(order)}
+                        >
+                          调整配送时段
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
       {target && (
-        <Modal
-          title={`建议时段 · ${target.pickupCode || target.id}`}
+        <OrderSlotChangeDialog
+          order={target}
+          slots={slots}
+          campusId={orderCampusId(buildings, target)}
           onClose={() => setTarget(null)}
-        >
-          <div className="form-stack">
-            <Field label="建议时段">
-              <select
-                value={slotId}
-                onChange={(event) => setSlotId(event.target.value)}
-              >
-                <option value="">请选择可预约时段</option>
-                {available.map((slot) => (
-                  <option key={slot.id} value={slot.id}>
-                    {slot.date} {slot.start}–{slot.end} {slot.name}（剩余{" "}
-                    {Number(
-                      (slot as Record<string, any>).remaining ?? slot.capacity,
-                    )}
-                    ）
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="变更原因">
-              <textarea
-                rows={3}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                required
-              />
-            </Field>
-            <Notice type="warning">
-              提交后仅写入建议，订单仍为待结算。客户确认前不得安排配送；客户拒绝后需重新建议。
-            </Notice>
-            <div className="form-actions">
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => setTarget(null)}
-              >
-                取消
-              </Button>
-              <Button
-                busy={busy}
-                disabled={!available.length}
-                onClick={propose}
-              >
-                提交建议
-              </Button>
-            </div>
-          </div>
-        </Modal>
+          onSaved={(updated) => {
+            setOrders((current) =>
+              current.map((order) =>
+                order.id === updated.id ? updated : order,
+              ),
+            );
+            setTarget(null);
+            onSaved?.();
+          }}
+        />
       )}
     </Panel>
   );

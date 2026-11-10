@@ -45,30 +45,24 @@ it("reads historical promises from the embedded arrangement when public slots di
   expect(confirmedSlotOf(order)).toEqual(confirmed);
 });
 
-it("shows actionable unpaid slot proposals and hides actions from read-only grants", () => {
-  const Panel = (customerOrders as any).ArrangementPanel;
-  expect(Panel).toBeTypeOf("function");
+it("shows only the latest unpaid slot without customer confirmation actions", () => {
   const order = {
     status: "PENDING_CONFIRMATION",
-    slotProposal: { slotId: "next", reason: "已截单", confirmed: false },
-    arrangement: { status: "REQUESTED", effective: {} },
-  };
-  const props = {
-    order,
-    busy: false,
-    canAgree: true,
-    onAccept: async () => {},
-    onReject: async () => {},
-  };
-  const html = renderToStaticMarkup(createElement(Panel, props));
-  expect(html).toContain("接受新安排");
-  expect(html).toContain("拒绝新安排");
-  expect(html).toContain("已截单");
-  const readonlyHtml = renderToStaticMarkup(
-    createElement(Panel, { ...props, canAgree: false }),
+    slotProposal: { slotId: "next", reason: "旧建议", confirmed: false },
+    arrangement: {
+      status: "REQUESTED",
+      effective: { name: "最新申请时段" },
+      originalRequest: { name: "最初申请时段" },
+    },
+  } as any;
+  const html = renderToStaticMarkup(
+    createElement(customerOrders.ArrangementPanel, { order }),
   );
-  expect(readonlyHtml).not.toContain("接受新安排");
-  expect(readonlyHtml).not.toContain("拒绝新安排");
+  expect(html).toContain("最新申请时段");
+  expect(html).toContain("旧改期建议待管理员处理");
+  expect(html).not.toContain("最初申请时段");
+  expect(html).not.toContain("接受新安排");
+  expect(html).not.toContain("拒绝新安排");
 });
 
 import * as pricing from "../src/growth/pricing";
@@ -157,61 +151,40 @@ it("shows failed and unknown delivery notices without claiming email delivery", 
   expect(readonlyHtml).not.toContain("重试通知");
 });
 
-it("offers payment operators an in-order slot coordination form using only selectable options", () => {
-  const Panel = (adminOrders as any).PendingSlotProposal;
-  expect(Panel).toBeTypeOf("function");
-  const html = renderToStaticMarkup(
-    createElement(Panel, {
-      slots: [
-        {
-          id: "open",
-          name: "可预约",
-          enabled: true,
-          selectable: true,
-          date: "2030-11-01",
-          start: "12:00",
-          end: "13:00",
-        },
-        { id: "closed", name: "已封批", enabled: true, selectable: false },
-      ],
-      proposal: { slotId: "before", confirmed: true },
-      onSubmit: async () => {},
-    }),
-  );
-  expect(html).toContain("可预约");
-  expect(html).not.toContain("已封批");
-  expect(html).toContain("客户已接受");
-  expect(html).toContain("提出时段建议");
-});
-
-it("keeps an accepted unpaid suggestion distinct from a confirmed slot and a rejected one under coordination", () => {
-  const Panel = customerOrders.ArrangementPanel;
-  const base = {
-    order: {
-      status: "PENDING_CONFIRMATION",
-      slotProposal: { slotId: "next", confirmed: true },
-      arrangement: { status: "REQUESTED", effective: {} },
-    } as any,
-    canAgree: true,
-    busy: false,
-    onAccept: async () => {},
-    onReject: async () => {},
+it("shows the original paid window only after the scheduled window changes", () => {
+  const original = {
+    name: "结算时段",
+    date: "2030-11-01",
+    start: "12:00",
+    end: "13:00",
   };
-  const html = renderToStaticMarkup(createElement(Panel, base));
-  expect(html).toContain("已接受时段建议");
-  expect(html).toContain("名额尚未保证");
-  expect(html).not.toContain("接受新安排");
-  const rejectedHtml = renderToStaticMarkup(
-    createElement(Panel, {
-      ...base,
-      order: {
-        ...base.order,
-        slotProposal: { slotId: "next", rejected: true },
+  const order = {
+    status: "PENDING_PRINT",
+    arrangement: {
+      effective: {
+        name: "当前时段",
+        startsAt: "2030-11-01T04:00:00Z",
+        endsAt: "2030-11-01T05:00:00Z",
       },
-    }),
-  );
-  expect(rejectedHtml).toContain("已拒绝时段建议");
-  expect(rejectedHtml).toContain("等待管理员继续协调");
+      originalConfirmation: original,
+      originalRequest: { name: "早期申请" },
+    },
+  } as any;
+  const Panel = customerOrders.ArrangementPanel;
+  const same = renderToStaticMarkup(createElement(Panel, { order }));
+  expect(same).toContain("当前时段");
+  expect(same).not.toContain("原确认时段");
+  order.arrangement.effective = {
+    ...original,
+    name: "改期后",
+    start: "13:00",
+    end: "14:00",
+  };
+  const moved = renderToStaticMarkup(createElement(Panel, { order }));
+  expect(moved).toContain("原确认时段");
+  expect(moved).toContain("结算时段");
+  expect(moved).toContain("改期后");
+  expect(moved).not.toContain("早期申请");
 });
 
 it("renders the effective delivery window and pending status in the order list summary", () => {
@@ -228,9 +201,9 @@ it("renders the effective delivery window and pending status in the order list s
       },
     }),
   );
-  expect(html).toContain("等待你确认");
+  expect(html).toContain("配送时段待管理员协调");
   expect(html).toContain("14:00");
-  expect(html).toContain("运力调整");
+  expect(html).not.toContain("运力调整");
 });
 
 import { MemoryRouter } from "react-router-dom";

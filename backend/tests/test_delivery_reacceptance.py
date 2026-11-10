@@ -376,3 +376,123 @@ def test_sealing_and_settlement_have_one_serial_order(db,admin_client):
         assert db.get(DeliveryBatch,assignment.batch_id).sealed_at is not None
     assert db.get(DeliverySlot,slot_id).occupied==int(result==['OK'])
 
+
+
+@pytest.mark.parametrize('settled', [False, True])
+def test_admin_changes_slot_directly_and_releases_old_slot(db, admin_client, api, settled):
+    from app.commerce import settle_order, ConfirmPayment
+    from app.delivery import admin_slot_update, admin_slot_delete
+    from app.delivery_schemas import SlotUpdate, to_shanghai_date
+    from app.delivery_plan import propose_reschedule
+
+    world = make_world(db)
+    order = submit(db, world)
+    actor = admin_client_actor(admin_client.staff)
+    source = world.slot
+    target = configured_slot(db, offset_hours=44, campus=world.campus)
+    if settled:
+        settle(db, order, actor)
+        previous_assignment = assignment_for(db, order)
+        original = dict(order.data['confirmedSlotSnapshot'])
+        legacy = configured_slot(db, offset_hours=48, campus=world.campus)
+        pending = propose_reschedule(db, actor, order, legacy, '旧建议')
+    total = order.total_cents
+    db.commit()
+    result = api(admin_client, f'/admin/orders/{order.id}/slot-change', {
+        'expectedVersion': order.version, 'slotId': target.id, 'reason': '已在微信协调'})
+    assert result.status_code == 200, result.text
+    db.expire_all()
+    updated = result.json()['data']
+    assert updated['arrangement']['effective']['id'] == target.id
+    assert updated['arrangement']['pendingProposal'] is None
+    assert updated['slotProposal'] is None
+    assert order.total_cents == total
+    assert source.occupied == 0
+    if settled:
+        assert target.occupied == 1
+        assert updated['arrangement']['originalConfirmation'] == original
+        assert not previous_assignment.active
+        assert pending.status == 'SUPERSEDED'
+        assert db.get(DeliveryBatch, assignment_for(db, order).batch_id).slot_id == target.id
+    else:
+        assert target.occupied == 0
+        assert order.requested_slot_id == target.id
+        settle_order(db, actor, order, ConfirmPayment(
+            expected_version=order.version, content_revision=order.content_revision,
+            quote_id=order.quote_id, received_cents=total, settlement_kind='CASH_MANUAL'))
+        assert order.confirmed_slot_id == target.id
+    cutoff = source.cutoff_at - timedelta(minutes=1)
+    new_date = to_shanghai_date(source.starts_at + timedelta(days=1))
+    edited = admin_slot_update(source.id, SlotUpdate(expected_version=source.version,
+        date=new_date, start='15:00', end='16:00',
+        open_at=source.open_at, cutoff_at=cutoff), db=db, actor=actor)
+    assert edited['data']['pendingApplicationCount'] == 0
+    assert edited['data']['batchCount'] == 0
+    if settled:
+        vacated_batch = db.get(DeliveryBatch, previous_assignment.batch_id)
+        assert vacated_batch.starts_at == source.starts_at
+        assert vacated_batch.name.startswith(new_date)
+    assert admin_slot_delete(source.id, db=db, actor=actor)['data']['archived']
+
+
+def test_direct_change_uses_target_batch_eta_and_cancels_empty_published_source(
+        db, admin_client, api):
+    from app.delivery_plan import group_for_slot_campus, regular_batch_for_group
+    from app.models import EmailJob
+
+    world, order, _ = paid_order(db, admin_client)
+    source = db.get(DeliveryBatch, assignment_for(db, order).batch_id)
+    source.status = 'PUBLISHED'
+    email = EmailJob(template_key='COURIER_DISPATCH', status='QUEUED',
+                     business_key=f'courier-dispatch:{source.id}:1',
+                     protected_payload='queued', expires_at=utcnow() + timedelta(hours=1))
+    target = configured_slot(db, offset_hours=44, campus=world.campus)
+    group = group_for_slot_campus(db, target, world.campus)
+    batch = regular_batch_for_group(db, group, target, world.campus)
+    batch.starts_at += timedelta(minutes=15)
+    batch.ends_at += timedelta(minutes=15)
+    db.add(email)
+    db.commit()
+    response = api(admin_client, f'/admin/orders/{order.id}/slot-change', {
+        'expectedVersion': order.version, 'slotId': target.id, 'reason': '已协调更改时间'})
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    assert source.status == 'CANCELLED'
+    assert email.status == 'CANCELLED'
+    assert assignment_for(db, order).batch_id == batch.id
+    arrangement = response.json()['data']['arrangement']
+    assert arrangement['effective']['startsAt'] == batch.starts_at.isoformat()
+    assert arrangement['confirmed']['startsAt'] == target.starts_at.isoformat()
+
+
+def test_direct_change_rejects_open_delivery_exception_without_moving_facts(db, admin_client, api):
+    world, order, _ = paid_order(db, admin_client)
+    target = configured_slot(db, offset_hours=44, campus=world.campus)
+    assignment = assignment_for(db, order)
+    assignment.status = 'EXCEPTION'
+    order.status = 'DELIVERY_EXCEPTION'
+    db.commit()
+    response = api(admin_client, f'/admin/orders/{order.id}/slot-change', {
+        'expectedVersion': order.version, 'slotId': target.id, 'reason': '已协调更改时间'})
+    assert response.status_code == 409, response.text
+    assert response.json()['error']['code'] == 'DELIVERY_EXCEPTION_OPEN'
+    db.expire_all()
+    assert assignment.active and assignment.status == 'EXCEPTION'
+    assert order.confirmed_slot_id == world.slot.id
+    assert world.slot.occupied == 1 and target.occupied == 0
+
+
+def test_admin_can_keep_current_request_and_discard_legacy_proposal(db, admin_client, api):
+    world = make_world(db)
+    order = submit(db, world)
+    target = configured_slot(db, offset_hours=44, campus=world.campus)
+    order.data = {**order.data, 'slotProposal': {'slotId': target.id, 'confirmed': False}}
+    db.commit()
+    result = api(admin_client, f'/admin/orders/{order.id}/slot-change', {
+        'expectedVersion': order.version, 'slotId': world.slot.id, 'reason': '微信确认保留原时段'})
+    assert result.status_code == 200, result.text
+    assert result.json()['data']['slotProposal'] is None
+    db.refresh(order)
+    settle(db, order, admin_client_actor(admin_client.staff))
+    assert order.confirmed_slot_id == world.slot.id
+    assert world.slot.occupied == 1 and target.occupied == 0

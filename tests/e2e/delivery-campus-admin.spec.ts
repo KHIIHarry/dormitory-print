@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 async function fixture(
   page: import("@playwright/test").Page,
-  view: "slots" | "batches" | "proposals" | "detail" | "packing",
+  view: "slots" | "batches" | "proposals" | "paid" | "detail" | "packing",
 ) {
   if (view === "slots")
     await page.clock.install({ time: new Date("2030-11-01T04:00:00Z") });
@@ -24,7 +24,7 @@ async function fixture(
       body: `
     import React from '${reactUrl}';
     export const ADMIN='/admin', DEMO=false;
-    export function useStore(){const [,setTick]=React.useState(0);React.useEffect(()=>{window.fixture.refresh=()=>setTick(v=>v+1)},[]);return {data:window.fixture.data, pendingActions:{}, toast:(message)=>window.fixture.toast=message, act:async(path,body)=>{window.fixture.calls.push({path,body});return true}}}
+    export function useStore(){const [,setTick]=React.useState(0);React.useEffect(()=>{window.fixture.refresh=()=>setTick(v=>v+1)},[]);return {data:window.fixture.data, pendingActions:{}, toast:(message)=>window.fixture.toast=message, act:async(path,body,_update,_method,_success,onError)=>{window.fixture.calls.push({path,body});if(window.fixture.saveError){onError(new Error(window.fixture.saveError),window.fixture.saveError);return false}return true}}}
   `,
     }),
   );
@@ -38,6 +38,12 @@ async function fixture(
       if(path==='/admin/campuses') return {items:window.fixture.campuses};
       if(path==='/admin/slots') return {items:window.fixture.slots};
       if(path.includes('/seal/preview')) return {slot:{version:1},impact:{pendingApplications:0,batchCount:0},blockers:[]};
+      if(path.endsWith('/slot-change')) {
+        window.fixture.calls.push({path,body:options.body});
+        if (window.fixture.changeError) throw new Error(window.fixture.changeError);
+        const order = window.fixture.orders[0];
+        return {...order, version: order.version + 1, requestedSlotId: options.body.slotId};
+      }
       if(path.includes('/admin/orders')) return {items:window.fixture.orders || []};
       if(path==='/admin/couriers') return {items:[{id:'c1',name:'配送员甲',role:'COURIER',enabled:true,status:'ACTIVE'}]};
       if(path==='/admin/packing-tasks') return {tasks:[{id:'internal-packing-id',orderId:'o1',pickupCode:'T8DUW',status:'PACKED',checklistVersion:2,checklist:{blockers:[],items:[{fileId:'internal-file-id',name:'实验报告（终稿）.docx',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'},{fileId:'long-file',name:'verylong'.repeat(23)+'.pdf',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'},{fileId:'missing-file-name',name:'',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'}]}}]};
@@ -56,18 +62,28 @@ async function fixture(
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
     <script type="module">
       import React from '${reactUrl}'; import ReactDOM from '${domUrl}'; import {BrowserRouter,MemoryRouter,Routes,Route} from '${routerUrl}';
-      import {Slots,Batches,SlotProposals,BatchDetail} from '/src/admin/logistics.tsx'; import {PackingCenter} from '/src/admin/production.tsx'; import '/src/styles.css';
+      import {Slots,Batches,SlotProposals,PaidArrangementProposals,BatchDetail} from '/src/admin/logistics.tsx'; import {PackingCenter} from '/src/admin/production.tsx'; import '/src/styles.css';
       const campuses=[{id:'east',name:'东校区',selectionEnabled:true},{id:'west',name:'西校区',selectionEnabled:true}];
       const slots=[{id:'e1',campusId:'east',campusName:'东校区',name:'东时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1},{id:'w1',campusId:'west',campusName:'西校区',name:'西时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1}];
       window.fixture={calls:[],campuses,slots,orders:[{id:'order',pickupCode:'P1',locationId:'building',status:'PENDING_CONFIRMATION',version:1}],data:{campuses:[],slots,buildings:[],orders:[],staff:[],batches:[{id:'legacy',name:'旧空批次',campusId:'old',campusName:'停用校区',status:'PLANNED',date:'2030-11-01',time:'12:00',orderIds:[],version:1}]}};
+      if ('${view}' === 'paid') window.fixture.orders=[{id:'paid-order',pickupCode:'PAID1',locationId:'building',status:'PENDING_PRINT',version:1,confirmedSlotId:'e1',arrangement:{effective:{id:'e1',name:'东时段',startsAt:'2030-11-01T05:30:00Z',endsAt:'2030-11-01T06:30:00Z'}}}];
       if ('${view}' === 'detail') {window.fixture.data.batches=[{id:'source',name:'测试批次',campusId:'east',campusName:'东校区',status:'PLANNED',date:'2030-11-01',time:'12:00 – 13:00',orderIds:['o1'],version:1,allowedActions:['ASSIGN_COURIER']}];window.fixture.data.orders=[{id:'o1',pickupCode:'P1',locationId:'building',status:'PAID',packingStatus:'PACKED'}];window.fixture.data.buildings=[{id:'building',name:'楼栋',campusId:'east'}];}
-      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "packing" ? "React.createElement(PackingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
+      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "paid" ? "React.createElement(PaidArrangementProposals,{slots,buildings:[{id:'building',campusId:'east'}]})" : view === "packing" ? "React.createElement(PackingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
       ReactDOM.createRoot(document.getElementById('root')).render('${view}'==='detail' ? component : React.createElement(BrowserRouter,null,component));
     </script>`,
     }),
   );
   await page.goto("/campus-admin-fixture");
 }
+
+test("current delivery time uses the effective batch window", async ({
+  page,
+}) => {
+  await fixture(page, "paid");
+  const row = page.getByRole("row").filter({ hasText: "PAID1" });
+  await expect(row).toContainText("13:30–14:30");
+  await expect(row).not.toContainText("12:00–13:00");
+});
 
 test("campus filter has a usable control and clear spacing above compact slot rows", async ({
   page,
@@ -157,6 +173,40 @@ test("creates a campus slot and seal identifies its locked campus", async ({
   await expect(page.getByRole("dialog")).not.toContainText("所有校区");
 });
 
+test("blocked slot save keeps the input and shows the error next to save", async ({
+  page,
+}, info) => {
+  await fixture(page, "slots");
+  await page.evaluate(() => {
+    (window as any).fixture.saveError = "该时段仍有有效预约，无法修改时间";
+  });
+  await page
+    .getByRole("row")
+    .filter({ hasText: "东时段" })
+    .getByRole("button", { name: "编辑" })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("时段名称").fill("编辑内容保留");
+  await dialog.getByLabel("开放下单时间").fill("2030-11-01T08:00");
+  await dialog.getByLabel("截单时间").fill("2030-11-01T10:00");
+  const save = dialog.getByRole("button", { name: "保存时段" });
+  await save.click();
+  const error = dialog.getByRole("alert");
+  await expect(error).toHaveText("该时段仍有有效预约，无法修改时间");
+  await expect(error).toBeInViewport();
+  await expect(save).toBeInViewport();
+  await expect(dialog.getByLabel("时段名称")).toHaveValue("编辑内容保留");
+  await dialog.screenshot({ path: info.outputPath("slot-save-error.png") });
+  await page.evaluate(() => {
+    (window as any).fixture.saveError = "";
+  });
+  await save.click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixture.toast)).toBe(
+    "配送时段已保存",
+  );
+});
+
 test("batch creation filters slots and disabled empty batches keep campus identity", async ({
   page,
 }) => {
@@ -180,15 +230,85 @@ test("batch creation filters slots and disabled empty batches keep campus identi
   ]);
 });
 
-test("proposal submission rechecks an elapsed cutoff", async ({ page }) => {
+test("slot change submission rechecks an elapsed cutoff", async ({ page }) => {
   await page.clock.install();
   await fixture(page, "proposals");
-  await page.getByRole("button", { name: "建议变更时段" }).click();
-  await page.getByLabel("建议时段", { exact: true }).selectOption("e1");
-  await page.getByLabel("变更原因").fill("调整时间");
+  await page.getByRole("button", { name: "调整配送时段" }).click();
+  await page.getByLabel("配送时段", { exact: true }).selectOption("e1");
+  await page.getByLabel("调整原因").fill("调整时间");
   await page.clock.fastForward(61000);
-  await page.getByRole("button", { name: "提交建议" }).click();
+  await page.getByRole("button", { name: "保存配送时段" }).click();
   await expect(page.getByText("请选择该订单校区可预约的时段")).toBeVisible();
+});
+
+test("a rejected slot change preserves the form and a successful retry closes it", async ({
+  page,
+}, info) => {
+  await page.clock.install();
+  await fixture(page, "proposals");
+  await page.evaluate(() => {
+    (window as any).fixture.changeError = "目标批次已发布，不能加入";
+  });
+  await page.getByRole("button", { name: "调整配送时段" }).click();
+  const dialog = page.getByRole("dialog");
+  const slot = dialog.getByLabel("配送时段", { exact: true });
+  const reason = dialog.getByLabel("调整原因");
+  const save = dialog.getByRole("button", { name: "保存配送时段" });
+  await slot.selectOption("e1");
+  await reason.fill("已在微信协调");
+  await save.click();
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "目标批次已发布，不能加入",
+  );
+  await expect(dialog.getByRole("alert")).toBeInViewport();
+  await expect(save).toBeInViewport();
+  await expect(slot).toHaveValue("e1");
+  await expect(reason).toHaveValue("已在微信协调");
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const geometry = await dialog.evaluate((panel) => {
+      const bounds = panel.getBoundingClientRect();
+      const buttons = [
+        ...panel.querySelectorAll<HTMLButtonElement>(
+          ".order-slot-change-actions button",
+        ),
+      ];
+      const controls = [
+        ...panel.querySelectorAll<HTMLElement>("select, textarea"),
+      ];
+      return {
+        dialogWidth: bounds.width,
+        documentWidth: document.documentElement.scrollWidth,
+        actionHeights: buttons.map(
+          (button) => button.getBoundingClientRect().height,
+        ),
+        controlsFit: controls.every((control) => {
+          const rect = control.getBoundingClientRect();
+          return rect.left >= bounds.left && rect.right <= bounds.right;
+        }),
+      };
+    });
+    expect(geometry.documentWidth).toBeLessThanOrEqual(width);
+    expect(geometry.dialogWidth).toBeLessThanOrEqual(width);
+    expect(geometry.controlsFit).toBe(true);
+    expect(Math.min(...geometry.actionHeights)).toBeGreaterThanOrEqual(44);
+    if ([390, 1440].includes(width)) {
+      await dialog.screenshot({
+        path: info.outputPath(`order-slot-change-${width}.png`),
+      });
+    }
+  }
+  await dialog.screenshot({
+    path: info.outputPath("order-slot-change-error.png"),
+  });
+  await page.evaluate(() => {
+    (window as any).fixture.changeError = "";
+  });
+  await save.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: "P1" })).toContainText(
+    "东时段",
+  );
 });
 
 test("batch membership refresh invalidates an open operation preview", async ({

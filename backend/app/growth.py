@@ -2354,6 +2354,7 @@ _CHANGE_TYPE_LABELS = {
     'ETA_UPDATED': '配送时间调整',
     'RESCHEDULE_PROPOSED': '配送时段调整（待确认）',
     'RESCHEDULE_CONFIRMED': '配送时段调整（已确认）',
+    'RESCHEDULE_APPLIED': '配送时段已调整',
     'ADDRESS_REVIEW': '配送地址调整',
 }
 
@@ -2504,6 +2505,11 @@ def recover_delivery_notices(db, limit=100):
     for notice in rows:
         order = db.get(Order, notice.order_id)
         change = db.get(DeliveryChange, notice.change_id) if notice.change_id else None
+        if change is not None and change.status == 'SUPERSEDED':
+            notice.status = 'CANCELLED'
+            notice.last_error = ''
+            touch(notice)
+            continue
         if order is None or not _delivery_notice_event_exists(db, notice, change):
             notice.status = 'FAILED'
             notice.last_error = 'DELIVERY_EVENT_MISSING'
@@ -2516,7 +2522,7 @@ def recover_delivery_notices(db, limit=100):
 
 def _delivery_notice_event_exists(db, notice, change):
     if notice.kind != 'ORDER_DELIVERED':
-        return change is not None
+        return change is not None and change.status != 'SUPERSEDED'
     proof_id = (notice.data or {}).get('proofId')
     proof = db.get(DeliveryProof, proof_id) if proof_id else None
     return proof is not None and proof.order_id == notice.order_id
@@ -2546,6 +2552,8 @@ def retry_delivery_notice(db, notice):
         return notice
     order = db.get(Order, notice.order_id)
     change = db.get(DeliveryChange, notice.change_id) if notice.change_id else None
+    if notice.status == 'CANCELLED' or (change is not None and change.status == 'SUPERSEDED'):
+        raise DomainError('DELIVERY_NOTICE_SUPERSEDED', '旧改期建议已失效，通知已取消', 409)
     if order is None or not _delivery_notice_event_exists(db, notice, change):
         raise DomainError('NOT_FOUND', '配送变更记录不存在', 404)
     if notice.email_job_id:

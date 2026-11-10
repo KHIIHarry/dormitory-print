@@ -78,7 +78,7 @@ export type AfterSaleList = {
   nextCursor?: string | null;
 };
 
-type SlotBrief = {
+export type SlotBrief = {
   campusId?: string | null;
   campusName?: string | null;
   id?: string;
@@ -99,7 +99,19 @@ type V1Order = Order & {
   confirmedSlot?: SlotBrief | null;
   requestedSlotSnapshot?: SlotBrief | null;
   confirmedSlotSnapshot?: SlotBrief | null;
-  slotProposal?: SlotBrief | null;
+  slotProposal?: {
+    confirmed?: boolean;
+    rejected?: boolean;
+    proposed?: SlotBrief;
+  } | null;
+  arrangement?: {
+    status?: string;
+    effective?: SlotBrief | null;
+    confirmed?: SlotBrief | null;
+    originalRequest?: SlotBrief | null;
+    originalConfirmation?: SlotBrief | null;
+    pendingProposal?: unknown;
+  } | null;
   requestedSlotId?: string | null;
   confirmedSlotId?: string | null;
   slotStatus?: string | null;
@@ -1278,24 +1290,69 @@ export function confirmedSlotOf(order: Order) {
   );
 }
 
-export function slotBlockLabel(
-  slot: SlotBrief | null | undefined,
-  fallback?: string,
-) {
-  if (!slot && !fallback) return "";
-  if (!slot) return fallback || "";
-  const date = slot.date || "";
-  return [
-    slot.campusName,
-    date,
-    slot.weekday,
-    slot.name,
-    slot.startsAt && slot.endsAt
-      ? `${formatDisplayTime(slot.startsAt)}–${formatDisplayTime(slot.endsAt)}`
-      : slot.start && slot.end
-        ? `${slot.start}–${slot.end}`
-        : "",
-  ]
+function slotWindowKey(slot?: SlotBrief | null) {
+  if (slot?.startsAt && slot.endsAt) {
+    const start = Date.parse(slot.startsAt);
+    const end = Date.parse(slot.endsAt);
+    if (Number.isFinite(start) && Number.isFinite(end))
+      return `${start}/${end}`;
+  }
+  if (slot?.date && slot.start && slot.end) {
+    return slotWindowKey({
+      startsAt: `${slot.date}T${slot.start}:00+08:00`,
+      endsAt: `${slot.date}T${slot.end}:00+08:00`,
+    });
+  }
+  return "";
+}
+
+export function deliveryWindowOf(order: Order, fallback?: SlotBrief) {
+  const value = order as V1Order;
+  const arrangement = value.arrangement;
+  const unpaid = order.status === "PENDING_CONFIRMATION";
+  const current = unpaid
+    ? (value.slotProposal?.confirmed ? value.slotProposal.proposed : null) ||
+      arrangement?.effective ||
+      requestedSlotOf(order) ||
+      fallback
+    : arrangement?.effective || confirmedSlotOf(order) || fallback;
+  const original = unpaid ? null : arrangement?.originalConfirmation;
+  const currentKey = slotWindowKey(current);
+  const originalKey = slotWindowKey(original);
+  return {
+    unpaid,
+    current,
+    previous:
+      currentKey && originalKey && currentKey !== originalKey ? original : null,
+    hasLegacyProposal: !!(
+      arrangement?.pendingProposal ||
+      (unpaid && value.slotProposal && !value.slotProposal.confirmed)
+    ),
+  };
+}
+
+const slotClock = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+const slotDate = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Shanghai",
+});
+
+export function slotBlockLabel(slot?: SlotBrief | null) {
+  if (!slot) return "";
+  const start = new Date(slot.startsAt || "");
+  const end = new Date(slot.endsAt || "");
+  let date = slot.date;
+  let time = slot.start && slot.end ? `${slot.start}–${slot.end}` : "";
+  if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
+    date = slotDate.format(start);
+    const endDate = slotDate.format(end);
+    time = `${slotClock.format(start)}–${endDate === date ? "" : endDate + " "}${slotClock.format(end)}`;
+  }
+  return [slot.campusName, date, slot.weekday, slot.name, time]
     .filter(Boolean)
     .join(" ");
 }

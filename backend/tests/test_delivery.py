@@ -1017,7 +1017,7 @@ def test_slot_delete_archives_unused_or_historical_slots_instead_of_hard_delete(
     # Live order references block; a delivered historical order does not.
     slot = create_slot(api, client, name='已交付历史时段')
     order = make_ready_order(db)
-    order.requested_slot_id = slot['id']
+    order.confirmed_slot_id = slot['id']
     db.commit()
     blocked = api(client, f"/admin/slots/{slot['id']}", method='DELETE')
     assert blocked.status_code == 409, blocked.text

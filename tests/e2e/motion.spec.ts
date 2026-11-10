@@ -255,6 +255,17 @@ test("leaving a pending upload retains a retryable item and old response cannot 
   const hold = new Promise<void>((r) => (release = r));
   let calls = 0;
   await realApi(page, {
+    // Exercise the supported legacy upload path, whose retries share an
+    // idempotency key. Resumable sessions have separate contract coverage.
+    "/public/config": async (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            ...fixture.config,
+            features: { ...fixture.config.features, resumableUploads: false },
+          },
+        },
+      }),
     "/assets": async (route) => {
       calls++;
       keys.push(route.request().headers()["idempotency-key"]);
@@ -271,7 +282,7 @@ test("leaving a pending upload retains a retryable item and old response cannot 
   await page.goto("http://127.0.0.1:5175/u/new");
   await expect(
     page.getByRole("button", { name: "选择文件", exact: true }),
-  ).not.toHaveAttribute("aria-disabled", "true");
+  ).toBeEnabled();
   await page
     .locator("input[type=file]")
     .setInputFiles("public/assets/icon-512.png");

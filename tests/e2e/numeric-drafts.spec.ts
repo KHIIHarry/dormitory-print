@@ -136,6 +136,8 @@ async function adminShell(page: Page) {
       };
     if (path === "/admin/config") data = config;
     if (path === "/admin/slots") data = { items: [] };
+    if (path === "/admin/campuses")
+      data = { items: [{ id: "east", name: "东校区", selectionEnabled: true }] };
     if (path === "/public/slots") data = { items: [] };
     await route.fulfill({
       contentType: "application/json",
@@ -159,11 +161,13 @@ test("delivery slot capacity can be cleared and re-entered, and blank is rejecte
   await expect(capacity).toHaveValue("45");
   await page.getByLabel("配送日期", { exact: true }).fill("2026-12-01");
   await page.getByLabel("时段名称", { exact: true }).fill("晚间配送");
-  await page.getByLabel("开始时间", { exact: true }).fill("19:00");
-  await page.getByLabel("结束时间", { exact: true }).fill("20:00");
+  await page.getByLabel("预计配送开始", { exact: true }).fill("19:00");
+  await page.getByLabel("预计配送结束", { exact: true }).fill("20:00");
+  await page.getByLabel("开放下单时间", { exact: true }).fill("2026-12-01T08:00");
+  await page.getByLabel("截单时间", { exact: true }).fill("2026-12-01T18:00");
   await capacity.fill("");
   await page.getByRole("button", { name: "保存时段", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText(
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
     "预约容量必须是 1 到 100000 之间的整数",
   );
 });

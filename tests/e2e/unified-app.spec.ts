@@ -240,6 +240,23 @@ test.describe("unified DormPrint app", () => {
     writeFileSync(uWorker, worker);
     writeFileSync(otherWorker, worker);
     try {
+      for (const script of ["/other/sw.js", "/u/sw.js"]) {
+        await expect
+          .poll(
+            async () => {
+              const response = await page.request.get(script);
+              return (
+                response.ok() &&
+                /javascript/.test(response.headers()["content-type"] || "") &&
+                (await response.text()) === worker
+              );
+            },
+            {
+              message: `Vite serves the worker fixture as JavaScript at ${script}`,
+            },
+          )
+          .toBe(true);
+      }
       await page.goto("/other/");
       await page.evaluate(async () => {
         await navigator.serviceWorker.register("/other/sw.js", {
@@ -303,6 +320,48 @@ test.describe("one customer login (real API contract, not backend acceptance)", 
   let base = "http://127.0.0.1:5202";
   let server: ChildProcess | null = null;
   let startedHere = false;
+  const publicConfig = {
+    serviceEnabled: true,
+    announcement: "",
+    prices: {
+      bwSingle: 50,
+      bwDuplex: 80,
+      colorSingle: 150,
+      colorDuplex: 250,
+      photo: 300,
+      corner: 100,
+      side: 150,
+    },
+    wechat: "dormprint",
+    phone: "13800138000",
+    qrUrl: "",
+    photoWidthMm: 127,
+    photoHeightMm: 89,
+    margins: { top: 3, bottom: 3, left: 3, right: 3 },
+    maxFiles: 10,
+    maxMb: 50,
+    bindingApproved: true,
+    quoteMinutes: 15,
+    unpaidTimeoutMinutes: 60,
+    formats: [
+      "pdf",
+      "doc",
+      "docx",
+      "ppt",
+      "pptx",
+      "xls",
+      "xlsx",
+      "jpg",
+      "png",
+      "heic",
+    ],
+    features: {
+      resumableUploads: true,
+      serverDrafts: true,
+      afterSales: true,
+      selfDeletionRequest: true,
+    },
+  };
 
   test.beforeAll(async () => {
     const port = test.info().project.name === "mobile" ? 5203 : 5202;
@@ -376,37 +435,6 @@ test.describe("one customer login (real API contract, not backend acceptance)", 
       capabilities: ["mail.manage"],
     };
     const courierFetches: string[] = [];
-    const publicConfig = {
-      serviceEnabled: true,
-      announcement: "",
-      prices: {
-        bwSingle: 50,
-        bwDuplex: 80,
-        colorSingle: 150,
-        colorDuplex: 250,
-        photo: 300,
-        corner: 100,
-        side: 150,
-      },
-      wechat: "dormprint",
-      phone: "13800138000",
-      qrUrl: "",
-      photoWidthMm: 127,
-      photoHeightMm: 89,
-      margins: { top: 3, bottom: 3, left: 3, right: 3 },
-      maxFiles: 10,
-      maxMb: 50,
-      bindingApproved: true,
-      quoteMinutes: 15,
-      unpaidTimeoutMinutes: 60,
-      formats: ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "jpg", "png", "heic"],
-      features: {
-        resumableUploads: true,
-        serverDrafts: true,
-        afterSales: true,
-        selfDeletionRequest: true,
-      },
-    };
 
     await page.route("**/api/v1/**", async (route) => {
       const request = route.request();
@@ -590,7 +618,7 @@ test.describe("one customer login (real API contract, not backend acceptance)", 
       if (path === "/customer/session") return send(customerSession);
       if (path === "/customer/account") return send(account);
       if (path === "/customer/account/sessions") return send({ items: [] });
-      if (path === "/public/config") return send({});
+      if (path === "/public/config") return send(publicConfig);
       return send({ items: [] });
     });
 

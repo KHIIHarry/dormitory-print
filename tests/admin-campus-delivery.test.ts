@@ -34,10 +34,11 @@ describe("admin delivery campus scope", () => {
   });
 });
 
-it("shows only the order campus in the proposal form", async () => {
+it("shows only the order campus in the slot change form", async () => {
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const { PendingSlotProposal } = await import("../src/admin/orders");
+  const { OrderSlotChangeForm } =
+    await import("../src/admin/order-slot-change");
   const base = {
     enabled: true,
     selectable: true,
@@ -48,13 +49,15 @@ it("shows only the order campus in the proposal form", async () => {
     capacity: 10,
   };
   const html = renderToStaticMarkup(
-    createElement(PendingSlotProposal, {
+    createElement(OrderSlotChangeForm, {
       campusId: "e",
       slots: [
         { ...base, id: "e1", name: "东校区时段", campusId: "e" },
         { ...base, id: "w1", name: "西校区时段", campusId: "w" },
       ],
-      onSubmit: async () => {},
+      order: { id: "order", status: "PENDING_CONFIRMATION", version: 1 },
+      onClose: () => {},
+      onSaved: () => {},
     }),
   );
   expect(html).toContain("东校区时段");
@@ -64,9 +67,10 @@ it("shows only the order campus in the proposal form", async () => {
 it("does not offer a slot whose cutoff has elapsed", async () => {
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const { PendingSlotProposal } = await import("../src/admin/orders");
+  const { OrderSlotChangeForm } =
+    await import("../src/admin/order-slot-change");
   const html = renderToStaticMarkup(
-    createElement(PendingSlotProposal, {
+    createElement(OrderSlotChangeForm, {
       campusId: "e",
       slots: [
         {
@@ -82,7 +86,9 @@ it("does not offer a slot whose cutoff has elapsed", async () => {
           capacity: 10,
         },
       ],
-      onSubmit: async () => {},
+      order: { id: "order", status: "PENDING_CONFIRMATION", version: 1 },
+      onClose: () => {},
+      onSaved: () => {},
     }),
   );
   expect(html).not.toContain("过期时段");

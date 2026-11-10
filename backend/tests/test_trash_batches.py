@@ -34,7 +34,8 @@ def act_as(app):
 
 
 def create_batch(api, client, courier):
-    starts_at = utcnow() + timedelta(hours=-1)
+    # Match make_ready_order's sealed window across Shanghai/UTC date boundaries.
+    starts_at = utcnow().replace(hour=3, minute=0, second=0, microsecond=0)
     ends_at = starts_at + timedelta(hours=3)
     response = api(client, '/admin/batches', {
         'campusId': api(client, '/public/map', method='GET').json()['data']['campuses'][0]['id'],

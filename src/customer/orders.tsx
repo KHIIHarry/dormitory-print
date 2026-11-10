@@ -37,7 +37,6 @@ import {
   Truck,
 } from "lucide-react";
 import { DEMO, useStore } from "../lib/store";
-import { growthRequest } from "../growth/client";
 import { money, now } from "../lib/api";
 import {
   Badge,
@@ -60,8 +59,7 @@ import type { Order } from "../lib/types";
 import {
   AfterSalesPanel,
   autoCloseNotice,
-  confirmedSlotOf,
-  requestedSlotOf,
+  deliveryWindowOf,
   slotBlockLabel,
 } from "../v1/customer";
 const statusFilters = [
@@ -391,7 +389,6 @@ export function OrderDetail() {
   const [pdf, setPdf] = useState<PrintFile | null>(null);
   const [edit, setEdit] = useState(false);
   const [cancel, setCancel] = useState(false);
-  const [arrangementBusy, setArrangementBusy] = useState(false);
   const [building, setBuilding] = useState("");
   const [reason, setReason] = useState("");
   const nav = useNavigate();
@@ -420,42 +417,6 @@ export function OrderDetail() {
   const location = currentLocation;
   const slot = data.slots.find((s) => s.id === order.slotId);
   const batch = data.batches.find((b) => b.id === order.batchId);
-  const v1Order = order as Order & {
-    requestedSlotId?: string | null;
-    confirmedSlotId?: string | null;
-  };
-  const brief = (id?: string | null) => {
-    const match = data.slots.find((s) => s.id === id);
-    return match
-      ? {
-          id: match.id,
-          campusId: match.campusId,
-          campusName: match.campusName,
-          name: match.name,
-          date: match.date,
-          weekday: match.weekday,
-          start: match.start,
-          end: match.end,
-        }
-      : null;
-  };
-  const requestedSlot =
-    requestedSlotOf(order) ||
-    brief(v1Order.requestedSlotId || order.slotId) ||
-    (slot
-      ? {
-          id: slot.id,
-          campusId: slot.campusId,
-          campusName: slot.campusName,
-          name: slot.name,
-          date: slot.date,
-          weekday: slot.weekday,
-          start: slot.start,
-          end: slot.end,
-        }
-      : null);
-  const confirmedSlot =
-    confirmedSlotOf(order) || brief(v1Order.confirmedSlotId);
   const unpaidTimeoutMinutes = (
     data.config as unknown as { unpaidTimeoutMinutes?: number | null }
   ).unpaidTimeoutMinutes;
@@ -587,62 +548,7 @@ export function OrderDetail() {
               </div>
             ))}
           </Panel>
-          <ArrangementPanel
-            order={order}
-            busy={arrangementBusy}
-            canAgree={can("ORDER_AGREE_SLOT")}
-            onAccept={async (slotId) => {
-              if (DEMO) {
-                toast("演示模式：已接受新的配送安排");
-                return;
-              }
-              setArrangementBusy(true);
-              try {
-                await growthRequest(
-                  `/orders/${encodeURIComponent(order.id)}/${order.status === "PENDING_CONFIRMATION" && (order as any).slotProposal ? "slot-agreement" : "arrangement-agreement"}`,
-                  {
-                    method: "POST",
-                    body: {
-                      expectedVersion: order.version,
-                      slotId,
-                      confirm: true,
-                    },
-                  },
-                );
-                toast("已确认新的配送安排");
-                await refresh();
-              } catch (error) {
-                toast((error as Error).message);
-              } finally {
-                setArrangementBusy(false);
-              }
-            }}
-            onReject={async () => {
-              if (DEMO) {
-                toast("演示模式：已拒绝新的配送安排");
-                return;
-              }
-              setArrangementBusy(true);
-              try {
-                await growthRequest(
-                  `/orders/${encodeURIComponent(order.id)}/${order.status === "PENDING_CONFIRMATION" && (order as any).slotProposal ? "slot-rejection" : "arrangement-rejection"}`,
-                  {
-                    method: "POST",
-                    body: {
-                      expectedVersion: order.version,
-                      reason: "客户暂不接受新的配送时间",
-                    },
-                  },
-                );
-                toast("已拒绝新安排，管理员会继续协调");
-                await refresh();
-              } catch (error) {
-                toast((error as Error).message);
-              } finally {
-                setArrangementBusy(false);
-              }
-            }}
-          />
+          <ArrangementPanel order={order} fallback={slot} />
           <Panel title="配送与联系信息">
             <dl className="detail-dl">
               <div>
@@ -660,21 +566,6 @@ export function OrderDetail() {
                       修改楼栋
                     </button>
                   )}
-                </dd>
-              </div>
-              <div>
-                <dt>申请时段</dt>
-                <dd>
-                  {slotBlockLabel(requestedSlot) || "暂无预约"}
-                  <span className="v1-slot-state">申请，未保证名额</span>
-                </dd>
-              </div>
-              <div>
-                <dt>确认时段</dt>
-                <dd>
-                  {confirmedSlot
-                    ? slotBlockLabel(confirmedSlot)
-                    : "待人工确认收款后占用容量"}
                 </dd>
               </div>
               <div>
@@ -924,126 +815,41 @@ const ARRANGEMENT_LABELS: Record<string, string> = {
   ASSIGNED_NOT_DISPATCHED: "已安排，等待出发",
   READY_TO_DEPART: "已准备，等待出发",
   DELIVERING: "配送中",
-  WAITING_CUSTOMER: "等待你确认新的配送安排",
+  WAITING_CUSTOMER: "配送时段待管理员协调",
+  NEEDS_COORDINATION: "配送时段待管理员协调",
   CANCELLED: "订单已取消",
   DELIVERED: "已送达",
 };
 
-function arrangementWindow(snapshot: any) {
-  if (!snapshot) return "";
-  const date = snapshot.date || "";
-  const name = snapshot.name || "";
-  const start = snapshot.startsAt
-    ? formatDisplayTime(snapshot.startsAt)
-    : snapshot.start || "";
-  const end = snapshot.endsAt
-    ? formatDisplayTime(snapshot.endsAt)
-    : snapshot.end || "";
-  return [date, name, start && end ? `${start} – ${end}` : start]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 export function ArrangementPanel({
   order,
-  busy,
-  onAccept,
-  onReject,
-  canAgree,
+  fallback,
 }: {
   order: Order;
-  busy: boolean;
-  canAgree: boolean;
-  onAccept: (slotId: string) => Promise<void>;
-  onReject: () => Promise<void>;
+  fallback?: import("../lib/types").Slot;
 }) {
-  const arrangement = (order as any).arrangement;
-  if (!arrangement) return null;
-  const unpaid = (order as any).slotProposal;
-  const unpaidPending =
-    order.status === "PENDING_CONFIRMATION" &&
-    unpaid &&
-    !unpaid.confirmed &&
-    !unpaid.rejected;
-  const pending =
-    arrangement.pendingProposal ||
-    (unpaidPending
-      ? { proposed: unpaid.proposed || unpaid, reason: unpaid.reason }
-      : null);
-  const pendingSlot = pending?.proposed || {};
-  const effective = arrangement.effective || arrangement.confirmed;
+  const { unpaid, current, previous, hasLegacyProposal } = deliveryWindowOf(
+    order,
+    fallback,
+  );
+  const label = slotBlockLabel(current);
   return (
-    <Panel title="最新配送安排">
+    <Panel title="配送时段">
       <dl className="detail-dl">
         <div>
-          <dt>当前状态</dt>
-          <dd>
-            {ARRANGEMENT_LABELS[arrangement.status] || arrangement.status}
-          </dd>
+          <dt>{unpaid ? "申请时段" : "当前配送时段"}</dt>
+          <dd>{label || "待管理员安排"}</dd>
         </div>
-        <div>
-          <dt>当前安排</dt>
-          <dd>{arrangementWindow(effective) || "待管理员安排"}</dd>
-        </div>
-        <div>
-          <dt>原申请时段</dt>
-          <dd>{arrangementWindow(arrangement.originalRequest) || "暂无"}</dd>
-        </div>
-        {arrangement.reason && (
+        {previous && (
           <div>
-            <dt>调整说明</dt>
-            <dd>{arrangement.reason}</dd>
-          </div>
-        )}
-        {arrangement.updatedAt && (
-          <div>
-            <dt>更新时间</dt>
-            <dd>{formatDisplayTime(arrangement.updatedAt)}</dd>
+            <dt>原确认时段</dt>
+            <dd>{slotBlockLabel(previous)}</dd>
           </div>
         )}
       </dl>
-      {order.status === "PENDING_CONFIRMATION" && unpaid?.confirmed && (
-        <Notice>
-          已接受时段建议 {arrangementWindow(unpaid.proposed || unpaid)}
-          ；仍需管理员确认收款，名额尚未保证。
-        </Notice>
-      )}
-      {order.status === "PENDING_CONFIRMATION" && unpaid?.rejected && (
-        <Notice>
-          已拒绝时段建议，等待管理员继续协调。
-          {unpaid.reason && <span>原调整原因：{unpaid.reason}</span>}
-        </Notice>
-      )}
-      {pending && (
-        <>
-          <Notice>
-            管理员建议调整到 {arrangementWindow(pendingSlot)}。
-            {unpaidPending
-              ? "接受后仍需管理员在截单前确认收款，名额尚未保证。"
-              : "接受后才会更新确认时段。"}
-            拒绝后管理员会继续与你协调。
-            {pending.reason && <span>原因：{pending.reason}</span>}
-          </Notice>
-          {canAgree && (
-            <div className="button-row">
-              <Button
-                busy={busy}
-                onClick={() =>
-                  void onAccept(pendingSlot.slotId || pendingSlot.id)
-                }
-              >
-                接受新安排
-              </Button>
-              <Button
-                variant="secondary"
-                busy={busy}
-                onClick={() => void onReject()}
-              >
-                拒绝新安排
-              </Button>
-            </div>
-          )}
-        </>
+      {unpaid && <p className="form-hint">管理员确认收款后占用名额。</p>}
+      {hasLegacyProposal && (
+        <Notice>有一条旧改期建议待管理员处理，请以当前显示的时段为准。</Notice>
       )}
     </Panel>
   );
@@ -1052,13 +858,11 @@ export function ArrangementPanel({
 export function OrderArrangementSummary({ order }: { order: Order }) {
   const arrangement = (order as any).arrangement;
   if (!arrangement) return null;
+  const slotLabel = slotBlockLabel(deliveryWindowOf(order).current);
   return (
     <p className="form-hint">
       {ARRANGEMENT_LABELS[arrangement.status] || arrangement.status}
-      {arrangementWindow(arrangement.effective) && (
-        <span> · {arrangementWindow(arrangement.effective)}</span>
-      )}
-      {arrangement.reason && <span> · {arrangement.reason}</span>}
+      {slotLabel && <span> · {slotLabel}</span>}
     </p>
   );
 }
