@@ -1742,10 +1742,10 @@ function ServerPackingCenter() {
                 </span>
               </p>
               <p className="muted">
-                清单版本 {task.checklistVersion} · 装袋任务 {task.id}
+                共 {task.checklist.items.length} 个文件
               </p>
               <div className="packing-checks">
-                {task.checklist.items.map((item) => (
+                {task.checklist.items.map((item, index) => (
                   <label className="packing-check" key={item.fileId}>
                     <input
                       type="checkbox"
@@ -1764,7 +1764,7 @@ function ServerPackingCenter() {
                       }
                     />
                     <div>
-                      <b>{item.name || item.fileId}</b>
+                      <b>{item.name?.trim() || `文件 ${index + 1}`}</b>
                       <small>
                         {item.printStatus === "COMPLETED" ? "打印已完成" : "等待打印"} ·{" "}
                         {item.bindingStatus === "NOT_REQUIRED"

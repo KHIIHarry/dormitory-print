@@ -164,6 +164,7 @@ export type BatchProofPayload = {
   placementNote: string;
 };
 export type CourierBatchView = {
+  publicationWithdrawnAt?: string | null;
   id: string;
   name: string;
   status: string;
@@ -256,7 +257,10 @@ export function batchOrderBlockers(
   if (!assignmentId) blockers.push("缺少真实配送执行ID，请刷新");
   else if (assignmentId === batchId)
     blockers.push("不能使用批次ID作为配送执行ID");
-  if (!Number.isSafeInteger(order.assignment?.version) || (order.assignment?.version ?? 0) < 1)
+  if (
+    !Number.isSafeInteger(order.assignment?.version) ||
+    (order.assignment?.version ?? 0) < 1
+  )
     blockers.push("缺少有效配送执行版本，请刷新");
   if (order.assignment?.status && order.assignment.status !== "STARTED")
     blockers.push("配送执行尚未开始");
@@ -340,7 +344,11 @@ export function buildBatchProofPayload(input: BatchProofInput): {
     }
     assignmentIds.add(assignmentId);
     const assignmentVersion = order.assignment?.version;
-    if (typeof assignmentVersion !== "number" || !Number.isSafeInteger(assignmentVersion) || assignmentVersion < 1) {
+    if (
+      typeof assignmentVersion !== "number" ||
+      !Number.isSafeInteger(assignmentVersion) ||
+      assignmentVersion < 1
+    ) {
       errors.push(`${label} 缺少有效配送执行版本，请刷新`);
       continue;
     }

@@ -476,6 +476,48 @@ def test_eta_reschedule_updates_undelivered_assignment_and_keeps_batch_status(
     assert change is not None and change.status == 'APPLIED'
 
 
+def test_first_auto_batch_courier_assignment_needs_no_reason(db, api, client, act_as, staff_factory):
+    from app.models import AuditLog
+
+    world = make_world(db)
+    admin = staff_factory(role='ADMIN', capabilities=['payment.manage', 'delivery.manage'])
+    order = submit(db, world)
+    settle(db, order, admin_client_actor(admin))
+    act_as(admin)
+    batch = db.scalar(select(DeliveryBatch).where(DeliveryBatch.slot_id == world.slot.id))
+    path = f'/admin/batches/{batch.id}'
+    courier = staff_factory(role='COURIER')
+    replacement = staff_factory(role='COURIER')
+    payload = {'expectedVersion': batch.version, 'courierId': courier.id}
+
+    mixed = api(client, path, {**payload, 'name': '同时改名'}, method='PATCH')
+    assert mixed.status_code == 422, mixed.text
+    assigned = api(client, path, payload, method='PATCH')
+    assert assigned.status_code == 200, assigned.text
+    current = assigned.json()['data']
+    assert current['name'] == batch.name and current['courierId'] == courier.id
+    db.expire_all()
+    assignment = db.scalar(select(DeliveryAssignment).where(
+        DeliveryAssignment.order_id == order.id, DeliveryAssignment.active.is_(True)))
+    assert assignment.courier_id == courier.id
+    log = db.scalar(select(AuditLog).where(
+        AuditLog.target_id == batch.id, AuditLog.action == 'BATCH_COURIER_ASSIGNED'))
+    assert log is not None and log.actor_id == admin.id and log.data['courierId'] == courier.id
+
+    change = {'expectedVersion': current['version'], 'courierId': replacement.id}
+    rejected = api(client, path, {**change, 'reason': '   '}, method='PATCH')
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()['error']['code'] == 'BATCH_EDIT_REASON_REQUIRED'
+    reassigned = api(client, path, {**change, 'reason': '值班交接'}, method='PATCH')
+    assert reassigned.status_code == 200, reassigned.text
+    cleared = api(client, path, {'expectedVersion': reassigned.json()['data']['version'],
+                                 'courierId': None, 'reason': '等待重新安排'}, method='PATCH')
+    assert cleared.status_code == 200, cleared.text
+    assert 'ASSIGN_COURIER' not in cleared.json()['data']['allowedActions']
+    assert api(client, path, {'expectedVersion': cleared.json()['data']['version'],
+                              'courierId': courier.id}, method='PATCH').status_code == 422
+
+
 def test_batch_publish_requires_seal_for_slot_linked_auto_batch(db, api, client, act_as, staff_factory):
     world = make_world(db, capacity=4)
     admin = staff_factory(role='ADMIN', capabilities=['payment.manage', 'delivery.manage'])

@@ -64,6 +64,7 @@ type CourierState = {
   calls: Call[];
   batchStatus: "PUBLISHED" | "DELIVERING";
   batchVersion: number;
+  publicationWithdrawnAt?: string;
   orders: Record<string, unknown>[];
   batchProofStatus: number;
   singleProofStatus: number;
@@ -130,6 +131,7 @@ const batch = (state: CourierState) => ({
   status: state.batchStatus,
   orderIds: ["ORD-1", "ORD-2"],
   version: state.batchVersion,
+  publicationWithdrawnAt: state.publicationWithdrawnAt,
 });
 
 function courierOrder(
@@ -519,6 +521,40 @@ test("submits one shared-photo atomic batch request with per-order assignment id
         /\/courier\/orders\/.+\/proof$/.test(call.path),
     ),
   ).toBe(false);
+});
+
+test("batch proof discards a draft after withdrawal and restart between refreshes", async ({
+  page,
+}) => {
+  const state = initialState();
+  await boot(page, state);
+  await page.getByRole("button", { name: "批量送达本楼栋" }).click();
+  await page
+    .locator('input[type="file"].batch-proof-file')
+    .setInputFiles("public/assets/icon-512.png");
+  await expect(page.getByAltText("批量交付照片预览")).toBeVisible();
+  await page.getByRole("button", { name: "获取当前位置" }).click();
+  const note = page.locator(".batch-proof textarea").last();
+  await note.fill("上一轮放置备注");
+
+  state.publicationWithdrawnAt = "2026-10-30T11:00:00Z";
+  state.batchVersion = 9;
+  state.orders = [
+    courierOrder("ORD-1", "asg-new-1", "DELIVERING", { version: 6 }),
+    courierOrder("ORD-2", "asg-new-2", "DELIVERING", { version: 6 }),
+  ];
+  await page.getByRole("button", { name: "确认批量送达（2 单）" }).click();
+  await expect(
+    page.getByText("该批次已重新安排，请重新填写本次送达凭证"),
+  ).toBeVisible();
+  await expect(note).toHaveValue("");
+  await expect(page.getByAltText("批量交付照片预览")).toHaveCount(0);
+  expect(
+    state.calls.filter(
+      (call) =>
+        call.method === "POST" && call.path.includes("/delivery-proofs/"),
+    ),
+  ).toHaveLength(0);
 });
 
 test("a refused batch keeps every field and never falls back to single proofs", async ({

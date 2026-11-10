@@ -1174,6 +1174,21 @@ def test_result_can_resolve_open_attempt_during_refund_review(db):
     assert attempt_row.reason == '退款核实：未出纸'
 
 
+def test_packing_queue_shows_original_names_for_current_and_legacy_files(db):
+    seed = _seed(db, file_count=2)
+    current, legacy = seed.files
+    current.data = {'name': '实验报告（终稿）.docx'}
+    legacy.data = {}
+    db.get(Asset, legacy.asset_id).name = '历史上传资料.pdf'
+    db.commit()
+
+    queue = production.list_packing_tasks(seed.order.id, db=db, actor=seed.actor)
+    items = queue['data']['tasks'][0]['checklist']['items']
+    assert {item['fileId']: item['name'] for item in items} == {
+        current.id: '实验报告（终稿）.docx', legacy.id: '历史上传资料.pdf',
+    }
+
+
 def test_packing_requires_every_file_and_task(db):
     seed = _seed(db, file_count=2)
     _attempt_and_complete(db, seed, seed.tasks[0])

@@ -1,10 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test.use({ channel: "chrome" });
-
 async function fixture(
   page: import("@playwright/test").Page,
-  view: "slots" | "batches" | "proposals" | "detail",
+  view: "slots" | "batches" | "proposals" | "detail" | "packing",
 ) {
   if (view === "slots")
     await page.clock.install({ time: new Date("2030-11-01T04:00:00Z") });
@@ -41,7 +39,8 @@ async function fixture(
       if(path==='/admin/slots') return {items:window.fixture.slots};
       if(path.includes('/seal/preview')) return {slot:{version:1},impact:{pendingApplications:0,batchCount:0},blockers:[]};
       if(path.includes('/admin/orders')) return {items:window.fixture.orders || []};
-      if(path==='/admin/couriers') return {items:[]};
+      if(path==='/admin/couriers') return {items:[{id:'c1',name:'配送员甲',role:'COURIER',enabled:true,status:'ACTIVE'}]};
+      if(path==='/admin/packing-tasks') return {tasks:[{id:'internal-packing-id',orderId:'o1',pickupCode:'T8DUW',status:'PACKED',checklistVersion:2,checklist:{blockers:[],items:[{fileId:'internal-file-id',name:'实验报告（终稿）.docx',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'},{fileId:'long-file',name:'verylong'.repeat(23)+'.pdf',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'},{fileId:'missing-file-name',name:'',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'}]}}]};
       return {};
     }
   `,
@@ -57,12 +56,12 @@ async function fixture(
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
     <script type="module">
       import React from '${reactUrl}'; import ReactDOM from '${domUrl}'; import {BrowserRouter,MemoryRouter,Routes,Route} from '${routerUrl}';
-      import {Slots,Batches,SlotProposals,BatchDetail} from '/src/admin/logistics.tsx'; import '/src/styles.css';
+      import {Slots,Batches,SlotProposals,BatchDetail} from '/src/admin/logistics.tsx'; import {PackingCenter} from '/src/admin/production.tsx'; import '/src/styles.css';
       const campuses=[{id:'east',name:'东校区',selectionEnabled:true},{id:'west',name:'西校区',selectionEnabled:true}];
       const slots=[{id:'e1',campusId:'east',campusName:'东校区',name:'东时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1},{id:'w1',campusId:'west',campusName:'西校区',name:'西时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1}];
       window.fixture={calls:[],campuses,slots,orders:[{id:'order',pickupCode:'P1',locationId:'building',status:'PENDING_CONFIRMATION',version:1}],data:{campuses:[],slots,buildings:[],orders:[],staff:[],batches:[{id:'legacy',name:'旧空批次',campusId:'old',campusName:'停用校区',status:'PLANNED',date:'2030-11-01',time:'12:00',orderIds:[],version:1}]}};
-      if ('${view}' === 'detail') {window.fixture.data.batches=[{id:'source',name:'测试批次',campusId:'east',campusName:'东校区',status:'PLANNED',date:'2030-11-01',time:'12:00',orderIds:['o1'],version:1}];window.fixture.data.orders=[{id:'o1',pickupCode:'P1',locationId:'building',status:'PAID',packingStatus:'PACKED'}];window.fixture.data.buildings=[{id:'building',name:'楼栋',campusId:'east'}];}
-      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
+      if ('${view}' === 'detail') {window.fixture.data.batches=[{id:'source',name:'测试批次',campusId:'east',campusName:'东校区',status:'PLANNED',date:'2030-11-01',time:'12:00 – 13:00',orderIds:['o1'],version:1,allowedActions:['ASSIGN_COURIER']}];window.fixture.data.orders=[{id:'o1',pickupCode:'P1',locationId:'building',status:'PAID',packingStatus:'PACKED'}];window.fixture.data.buildings=[{id:'building',name:'楼栋',campusId:'east'}];}
+      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "packing" ? "React.createElement(PackingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
       ReactDOM.createRoot(document.getElementById('root')).render('${view}'==='detail' ? component : React.createElement(BrowserRouter,null,component));
     </script>`,
     }),
@@ -121,23 +120,34 @@ test("campus filter has a usable control and clear spacing above compact slot ro
 
 test("creates a campus slot and seal identifies its locked campus", async ({
   page,
-}) => {
+}, info) => {
   await fixture(page, "slots");
   await page.getByRole("button", { name: "新建时段" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("配送校区").selectOption("east");
+  const autoPublish = dialog.getByRole("checkbox", { name: "截单后自动发布" });
+  await expect(autoPublish).not.toBeChecked();
   await dialog.getByLabel("配送日期").fill("2030-11-02");
   await dialog.getByLabel("时段名称").fill("新东时段");
   await dialog.getByLabel("预计配送开始").fill("12:00");
   await dialog.getByLabel("预计配送结束").fill("13:00");
   await dialog.getByLabel("开放下单时间").fill("2030-11-01T08:00");
   await dialog.getByLabel("截单时间").fill("2030-11-02T10:00");
+  await autoPublish.check();
+  await dialog.screenshot({
+    path: info.outputPath("slot-auto-publication.png"),
+  });
   await dialog.getByRole("button", { name: "保存时段" }).click();
   await expect
     .poll(() =>
       page.evaluate(() => (window as any).fixture.calls[0]?.body.campusId),
     )
     .toBe("east");
+  expect(
+    await page.evaluate(
+      () => (window as any).fixture.calls[0]?.body.autoPublish,
+    ),
+  ).toBe(true);
   await page
     .getByRole("row")
     .filter({ hasText: "东时段" })
@@ -204,4 +214,161 @@ test("batch membership refresh invalidates an open operation preview", async ({
     page.getByRole("button", { name: "确认执行移出订单" }),
   ).toHaveCount(0);
   await expect(dialog.getByText("没有可选择的订单")).toBeVisible();
+});
+
+test("first courier assignment omits the reason unless other fields change", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fixture(page, "detail");
+  await page.getByRole("button", { name: "编辑批次 / 指派配送员" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("配送员", { exact: true }).selectOption("c1");
+  await expect(dialog.getByLabel("修改原因")).toHaveCount(0);
+  await dialog.getByLabel("批次名称").fill("同时修改名称");
+  await expect(dialog.getByLabel("修改原因")).toBeVisible();
+  await dialog.getByRole("button", { name: "保存批次信息" }).click();
+  await expect(dialog.getByText("请填写修改原因")).toBeVisible();
+  await dialog.getByLabel("批次名称").fill("测试批次");
+  await expect(dialog.getByLabel("修改原因")).toHaveCount(0);
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await dialog.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        offset: scrollX,
+        left: box.left + parseFloat(style.paddingLeft),
+        right: box.right - parseFloat(style.paddingRight),
+        controls: Array.from(
+          element.querySelectorAll(".field input, .field select"),
+          (control) => {
+            const rect = control.getBoundingClientRect();
+            const field = control.closest(".field")!.getBoundingClientRect();
+            return {
+              left: rect.left,
+              right: rect.right,
+              height: rect.height,
+              fieldLeft: field.left,
+              fieldRight: field.right,
+              fontSize: parseFloat(getComputedStyle(control).fontSize),
+            };
+          },
+        ),
+      };
+    });
+    expect(layout.pageWidth).toBeLessThanOrEqual(width + 1);
+    expect(layout.offset).toBe(0);
+    for (const control of layout.controls) {
+      expect(control.left).toBeGreaterThanOrEqual(
+        Math.max(layout.left, control.fieldLeft) - 1,
+      );
+      expect(control.right).toBeLessThanOrEqual(
+        Math.min(layout.right, control.fieldRight) + 1,
+      );
+      expect(control.height).toBeGreaterThanOrEqual(44);
+      if (width < 768) expect(control.fontSize).toBeGreaterThanOrEqual(16);
+    }
+    if (width === 390 || width === 1440)
+      await dialog.screenshot({
+        path: info.outputPath(`first-courier-assignment-${width}.png`),
+      });
+  }
+  await dialog.getByRole("button", { name: "指派配送员", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).fixture.calls[0]))
+    .toEqual({
+      path: "/admin/batches/source",
+      body: { courierId: "c1", expectedVersion: 1 },
+    });
+});
+
+test("packing checklist shows names and wraps long files inside the card", async ({
+  page,
+}, info) => {
+  await fixture(page, "packing");
+  const card = page.locator(".packing-card");
+  await expect(card.getByText("实验报告（终稿）.docx")).toBeVisible();
+  await expect(card.getByText("文件 3", { exact: true })).toBeVisible();
+  await expect(card).not.toContainText(/internal-packing-id|missing-file-name/);
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bounds = await card.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const contentRight = box.right - parseFloat(style.paddingRight);
+      const names = Array.from(element.querySelectorAll(".packing-check b"));
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        offset: scrollX,
+        contentRight,
+        nameRight: Math.max(
+          ...names.map((name) => name.getBoundingClientRect().right),
+        ),
+      };
+    });
+    expect(bounds.pageWidth).toBeLessThanOrEqual(width + 1);
+    expect(bounds.offset).toBe(0);
+    expect(bounds.nameRight).toBeLessThanOrEqual(bounds.contentRight + 1);
+    if (width === 390 || width === 1440)
+      await card.screenshot({
+        path: info.outputPath(`packing-names-${width}.png`),
+      });
+  }
+});
+
+test("withdrawing a started batch requires confirmation and sends its version", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fixture(page, "detail");
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.data.batches = [
+      {
+        ...fixture.data.batches[0],
+        status: "DELIVERING",
+        version: 5,
+        allowedActions: ["WITHDRAW_PUBLICATION"],
+      },
+    ];
+    fixture.refresh();
+  });
+  await page.getByRole("button", { name: "撤回发布", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "撤回发布" });
+  const confirm = dialog.getByRole("button", { name: "确认撤回" });
+  await expect(confirm).toBeDisabled();
+  await dialog
+    .getByRole("checkbox", { name: "我已确认所有资料尚未交给客户" })
+    .check();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bounds = await dialog.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const text = element.querySelector("textarea")!.getBoundingClientRect();
+      const padding = getComputedStyle(element);
+      return {
+        scroll: document.documentElement.scrollWidth,
+        left: text.left,
+        right: text.right,
+        contentLeft: box.left + parseFloat(padding.paddingLeft),
+        contentRight: box.right - parseFloat(padding.paddingRight),
+      };
+    });
+    expect(bounds.scroll).toBeLessThanOrEqual(width + 1);
+    expect(bounds.left).toBeGreaterThanOrEqual(bounds.contentLeft - 1);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.contentRight + 1);
+    if (width === 390 || width === 1440)
+      await dialog.screenshot({
+        path: info.outputPath(`withdraw-publication-${width}.png`),
+      });
+  }
+  await confirm.click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).fixture.calls[0]))
+    .toEqual({
+      path: "/admin/batches/source/withdraw-publication",
+      body: { expectedVersion: 5, confirmNoHandover: true, reason: "" },
+    });
 });

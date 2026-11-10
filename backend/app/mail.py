@@ -1078,6 +1078,16 @@ def purge_expired_payloads(db, limit: int = 200) -> int:
     return len(rows)
 
 
+def cancel_queued_courier_dispatch(db, batch_id: str) -> None:
+    rows = db.scalars(select(EmailJob).where(
+        EmailJob.template_key == 'COURIER_DISPATCH',
+        EmailJob.business_key.startswith(f'courier-dispatch:{batch_id}:', autoescape=True),
+        EmailJob.status.in_(('QUEUED', 'RETRY', 'RETRY_PENDING'))
+    ).order_by(EmailJob.id).with_for_update()).all()
+    for job in rows:
+        _purge_payload(job, 'CANCELLED', 'BATCH_PUBLICATION_WITHDRAWN')
+
+
 def process_email_job(db, job_id: str) -> None:
     """Send one queued job. Transaction ownership stays with the caller."""
     purge_expired_payloads(db, limit=50)

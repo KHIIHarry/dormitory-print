@@ -284,12 +284,19 @@ class BatchUpdate(DTO):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     courier_id: str | None = None
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000,
+                               description='仅首次指派配送员且未改动其他批次信息时可省略')
 
 
 class BatchVersionInput(DTO):
     expected_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=2000)
+
+
+class BatchWithdrawPublication(DTO):
+    expected_version: int = Field(ge=1)
+    confirm_no_handover: bool = False
+    reason: str | None = Field(default=None, max_length=300)
 
 
 class SlotDeleteInput(DTO):
@@ -341,6 +348,7 @@ class SlotInput(DTO):
     cutoff_at: datetime | None = None
     capacity: int = Field(ge=1, le=100000)
     enabled: bool = True
+    auto_publish: bool = False
     reason: str | None = Field(default=None, max_length=2000)
 
     @field_validator('date')
@@ -381,6 +389,7 @@ class SlotUpdate(DTO):
     cutoff_at: datetime | None = None
     capacity: int | None = Field(default=None, ge=1, le=100000)
     enabled: bool | None = None
+    auto_publish: bool | None = None
     reason: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode='after')
@@ -654,6 +663,7 @@ class SlotView(DTO):
     occupied: int
     remaining: int
     enabled: bool
+    auto_publish: bool = False
     selectable: bool
     acceptance_status: str = 'OPEN'
     blockers: list[BlockerView] = Field(default_factory=list)
@@ -718,6 +728,9 @@ class BatchView(DTO):
     reason: str
     version: int
     published_at: datetime | None = None
+    published_automatically: bool = False
+    publication_withdrawn_at: datetime | None = None
+    auto_publish_blocked_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 

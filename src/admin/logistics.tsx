@@ -251,6 +251,11 @@ export function Batches() {
                 {extra.sealedAt && <span className="badge">已封批</span>}
               </div>
               <h2>{b.name}</h2>
+              {b.status === "PLANNED" && b.autoPublishBlockedReason && (
+                <p className="muted">
+                  自动发布未完成。{b.autoPublishBlockedReason}
+                </p>
+              )}
               <div className="batch-campus">
                 {batchCampuses(b).length ? (
                   batchCampuses(b).map((item) => (
@@ -358,6 +363,15 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
   const [time, setTime] = useState(batch?.time || "");
   const [courier, setCourier] = useState(batch?.courierId || "");
   const [reason, setReason] = useState("");
+  const [reasonError, setReasonError] = useState("");
+  const nameChanged = !!batch && name !== batch.name;
+  const windowChanged = !!batch && (date !== batch.date || time !== batch.time);
+  const canAssignFirst =
+    batch &&
+    !batch.courierId &&
+    (batch.allowedActions?.includes("ASSIGN_COURIER") ||
+      (DEMO && batch.status === "PLANNED"));
+  const assignmentOnly = canAssignFirst && !nameChanged && !windowChanged;
   return (
     <Modal title={batch ? "编辑配送批次" : "新建配送批次"} onClose={onClose}>
       <Field label="批次名称">
@@ -457,11 +471,15 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
             或具备配送权限的管理员。
           </Notice>
         )}
-      {batch && (
-        <Field label="修改原因">
+      {batch && !assignmentOnly && (
+        <Field label="修改原因" error={reasonError}>
           <textarea
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            maxLength={2000}
+            onChange={(e) => {
+              setReason(e.target.value);
+              setReasonError("");
+            }}
           />
         </Field>
       )}
@@ -478,10 +496,13 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
             (!batch && !slotId) ||
             !date ||
             !time ||
-            !courier ||
-            (batch && !reason.trim())
+            !courier
           ) {
-            toast("请完整填写批次信息和修改原因");
+            toast("请完整填写批次信息并选择配送员");
+            return;
+          }
+          if (batch && !assignmentOnly && !reason.trim()) {
+            setReasonError("请填写修改原因");
             return;
           }
           const id = batch?.id || crypto.randomUUID();
@@ -489,15 +510,11 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
             await act(
               batch ? `/admin/batches/${id}` : "/admin/batches",
               {
-                name,
-                ...(batch
-                  ? date !== batch.date || time !== batch.time
-                    ? { date, time }
-                    : {}
-                  : { slotId }),
+                ...(!batch || nameChanged ? { name } : {}),
+                ...(batch ? (windowChanged ? { date, time } : {}) : { slotId }),
                 courierId: courier,
                 expectedVersion: batch?.version,
-                reason,
+                ...(!assignmentOnly ? { reason: reason.trim() } : {}),
               },
               (s) => ({
                 ...s,
@@ -532,21 +549,105 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
               batch ? "PATCH" : "POST",
             )
           ) {
-            toast(batch ? "批次信息已更新" : "配送批次已创建");
+            toast(
+              assignmentOnly
+                ? "已指派配送员"
+                : batch
+                  ? "批次信息已更新"
+                  : "配送批次已创建",
+            );
             onClose();
           }
         }}
       >
-        {batch ? "保存批次信息" : "创建批次"}
+        {assignmentOnly ? "指派配送员" : batch ? "保存批次信息" : "创建批次"}
       </Button>
     </Modal>
   );
 }
+function WithdrawPublication({
+  batch,
+  onClose,
+}: {
+  batch: Batch;
+  onClose: () => void;
+}) {
+  const { act, toast, pendingActions } = useStore();
+  const [confirmed, setConfirmed] = useState(false);
+  const [reason, setReason] = useState("");
+  const [issue, setIssue] = useState("");
+  const started = batch.status === "DELIVERING";
+  const path = `/admin/batches/${batch.id}/withdraw-publication`;
+  return (
+    <Modal title="撤回发布" onClose={onClose}>
+      <Notice type="warning">
+        撤回后，配送员需停止本批次配送。名单和配送员会保留，重新配送时请手动发布。
+        {started && "请先联系配送员停止交付。"}
+      </Notice>
+      {started && (
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(event) => setConfirmed(event.target.checked)}
+          />
+          我已确认所有资料尚未交给客户
+        </label>
+      )}
+      <Field label="撤回原因（选填）">
+        <textarea
+          value={reason}
+          maxLength={300}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </Field>
+      {issue && (
+        <Notice type="error">
+          <span role="alert">{issue}</span>
+        </Notice>
+      )}
+      <Button
+        className="full"
+        variant="danger"
+        busy={pendingActions[path]}
+        disabled={started && !confirmed}
+        onClick={async () => {
+          setIssue("");
+          const ok = await act(
+            path,
+            {
+              expectedVersion: batch.version,
+              confirmNoHandover: confirmed,
+              reason: reason.trim(),
+            },
+            (state) => state,
+            "POST",
+            undefined,
+            (error) =>
+              setIssue(
+                error instanceof Error
+                  ? error.message
+                  : "撤回失败，请刷新后重试",
+              ),
+          );
+          if (ok) {
+            toast("已撤回发布");
+            onClose();
+          }
+        }}
+      >
+        确认撤回
+      </Button>
+    </Modal>
+  );
+}
+
 export function BatchDetail() {
   const { id } = useParams();
   const { data, act, toast, pendingActions } = useStore();
   const batch = data.batches.find((b) => b.id === id);
   const [edit, setEdit] = useState(false);
+  const [withdrawal, setWithdrawal] = useState<Batch | null>(null);
   const [mode, setMode] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [target, setTarget] = useState("");
@@ -880,11 +981,22 @@ export function BatchDetail() {
                   : "开始配送"}
               </Button>
             )}
+            {batch.allowedActions?.includes("WITHDRAW_PUBLICATION") && (
+              <Button
+                variant="danger-outline"
+                onClick={() => setWithdrawal(batch)}
+              >
+                撤回发布
+              </Button>
+            )}
           </div>
         }
       />
       <div className="batch-detail-summary">
         <Badge status={batch.status} />
+        {batch.publishedAutomatically && (
+          <span className="badge">自动发布</span>
+        )}
         {(batch as Record<string, any>).isRegular && (
           <span className="badge">自动归集</span>
         )}
@@ -913,6 +1025,14 @@ export function BatchDetail() {
           </b>
         </span>
       </div>
+      {batch.status === "PLANNED" && batch.publicationWithdrawnAt && (
+        <Notice>本批次已撤回，恢复配送时请手动发布。</Notice>
+      )}
+      {batch.status === "PLANNED" && batch.autoPublishBlockedReason && (
+        <Notice type="warning">
+          自动发布未完成。{batch.autoPublishBlockedReason}
+        </Notice>
+      )}
       {(batch as Record<string, any>).isRegular &&
         batch.status === "PLANNED" &&
         !(batch as Record<string, any>).sealedAt && (
@@ -1090,6 +1210,12 @@ export function BatchDetail() {
         </p>
       </Panel>
       {edit && <BatchForm batch={batch} onClose={() => setEdit(false)} />}{" "}
+      {withdrawal && (
+        <WithdrawPublication
+          batch={withdrawal}
+          onClose={() => setWithdrawal(null)}
+        />
+      )}
       {mode && (
         <Modal
           title={preview ? `确认影响 · ${labels[mode]}` : labels[mode]}
@@ -1515,6 +1641,7 @@ export function Slots() {
         timeZone: "Asia/Shanghai",
       }).format(new Date(edit.date + "T12:00:00+08:00")),
       enabled: edit.enabled ?? true,
+      autoPublish: edit.autoPublish ?? false,
       capacity: edit.capacity,
     } as Slot;
     const payload: Record<string, unknown> = {
@@ -1527,6 +1654,7 @@ export function Slots() {
       cutoffAt: edit.cutoffAt,
       capacity: edit.capacity,
       enabled: edit.enabled ?? true,
+      autoPublish: edit.autoPublish ?? false,
       reason: (edit as any).reason || "",
     };
     if (edit.id) payload.expectedVersion = (edit as any).version;
@@ -1541,6 +1669,13 @@ export function Slots() {
             : [...state.slots, slot],
         }),
         edit.id ? "PATCH" : "POST",
+        undefined,
+        (error) =>
+          setFormErrors((current) => ({
+            ...current,
+            submit:
+              error instanceof Error ? error.message : "保存失败，请刷新后重试",
+          })),
       )
     ) {
       setEdit(null);
@@ -1689,6 +1824,7 @@ export function Slots() {
                           : ""}
                       </small>
                       {s.sealReason && <small>原因：{s.sealReason}</small>}
+                      {s.autoPublish && <small>截单后自动发布</small>}
                     </td>
                     <td>
                       <div className="button-row slot-actions">
@@ -1845,6 +1981,11 @@ export function Slots() {
           onClose={() => setEdit(null)}
         >
           <div className="slot-editor-form">
+            {formErrors.submit && (
+              <Notice type="error">
+                <span role="alert">{formErrors.submit}</span>
+              </Notice>
+            )}
             <Field
               label="配送校区"
               error={formErrors.campusId}
@@ -1970,6 +2111,19 @@ export function Slots() {
               />
               人工开启接单（关闭后停止该校区时段的新申请，不取消已有配送）
             </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={edit.autoPublish ?? false}
+                onChange={(event) =>
+                  setEdit({ ...edit, autoPublish: event.target.checked })
+                }
+              />
+              截单后自动发布
+            </label>
+            <p className="form-hint">
+              请在截单前开启并指派配送员。发布后仍由配送员确认开始。
+            </p>
             <Button
               busy={
                 pendingActions[

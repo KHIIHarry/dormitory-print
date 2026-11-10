@@ -190,6 +190,7 @@ export type Slot = {
   start: string;
   end: string;
   enabled: boolean;
+  autoPublish?: boolean;
   capacity: number;
   openAt?: string | null;
   cutoffAt?: string | null;
@@ -213,6 +214,10 @@ export type Batch = {
   courierId: string;
   status: string;
   orderIds: string[];
+  allowedActions?: string[];
+  publishedAutomatically?: boolean;
+  publicationWithdrawnAt?: string | null;
+  autoPublishBlockedReason?: string | null;
   reason?: string;
   version: number;
 };

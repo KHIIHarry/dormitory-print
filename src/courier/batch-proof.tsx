@@ -268,6 +268,20 @@ export function BatchProof({
       setErrors([submissionErrorText(error)]);
       return;
     }
+    if (
+      (fresh.batch.publicationWithdrawnAt ?? null) !==
+      (detail?.batch.publicationWithdrawnAt ?? null)
+    ) {
+      removePhoto();
+      setPosition(null);
+      setNote("");
+      setSkipPhoto(false);
+      setPhotoReason("");
+      setAdminReason("");
+      setBusy(false);
+      setErrors(["该批次已重新安排，请重新填写本次送达凭证"]);
+      return;
+    }
     const freshOrders = fresh.orders.filter(
       (order) =>
         order.locationId === buildingId &&

@@ -19,6 +19,7 @@ celery_app.conf.update(task_default_queue='dormprint',task_acks_late=True,worker
     broker_connection_retry_on_startup=True,task_serializer='json',accept_content=['json'],result_serializer='json',
     timezone='UTC',beat_schedule={'file-outbox':{'task':'dormprint.files','schedule':2.0,'options':{'queue':'files'}},
         'business-outbox':{'task':'dormprint.business','schedule':2.0,'options':{'queue':'business'}},
+        'delivery-publication':{'task':'dormprint.delivery-publication','schedule':5.0,'options':{'queue':'business'}},
         'maintenance':{'task':'dormprint.maintenance','schedule':30.0,'options':{'queue':'business'}}})
 logger=logging.getLogger('dormprint.jobs')
 
@@ -204,6 +205,30 @@ def maintenance():
         result=maintenance_sweep(session)
         result['accountDeletions']=run_due_deletions(session)
         return result
+
+
+@celery_app.task(name='dormprint.delivery-publication')
+def publish_due_delivery_batches():
+    _database()
+    from .delivery import auto_publish_batch, due_auto_publish_batch_ids
+    with SessionLocal() as session:
+        batch_ids = due_auto_publish_batch_ids(session)
+    result = dict.fromkeys(('published', 'blocked', 'skipped', 'failed'), 0)
+    for batch_id in batch_ids:
+        try:
+            with SessionLocal.begin() as session:
+                outcome = auto_publish_batch(session, batch_id)
+            result[outcome] += 1
+        except DomainError as error:
+            if error.code in ('NOT_FOUND', 'BATCH_CHANGED', 'VERSION_CONFLICT'):
+                result['skipped'] += 1
+            else:
+                result['failed'] += 1
+                logger.error('delivery_auto_publish_failed batch_id=%s code=%s', batch_id, error.code)
+        except Exception as error:
+            result['failed'] += 1
+            logger.error('delivery_auto_publish_failed batch_id=%s class=%s', batch_id, type(error).__name__)
+    return result
 
 
 if __name__=='__main__':

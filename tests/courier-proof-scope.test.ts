@@ -1,8 +1,19 @@
 import { expect, it, vi } from "vitest";
-const context = vi.hoisted(() => ({ id: "a", generation: 1, role: "COURIER" }));
+const context = vi.hoisted(() => ({
+  id: "a",
+  generation: 1,
+  role: "COURIER",
+  assignmentId: "first-execution",
+}));
 vi.mock("../src/lib/store", () => ({
   DEMO: true,
-  useStore: () => ({ role: context.role }),
+  useStore: () => ({
+    role: context.role,
+    data: {
+      orders: [{ id: "a", deliveryAssignmentId: context.assignmentId }],
+      batches: [{ courierId: "staff-2", orderIds: ["a"] }],
+    },
+  }),
 }));
 vi.mock("../src/growth/identity", () => ({
   useIdentity: () => ({ generation: context.generation }),
@@ -12,7 +23,7 @@ vi.mock("react-router-dom", async (original) => ({
   useParams: () => ({ id: context.id }),
 }));
 import { DeliveryProof } from "../src/courier/pages";
-it("remounts all proof inputs and pending operations on route or identity change, but keeps the same form during ordinary renders", () => {
+it("remounts proof inputs when the order, account or delivery execution changes", () => {
   const original = DeliveryProof();
   expect(DeliveryProof().key).toBe(original.key);
   context.id = "b";
@@ -22,6 +33,10 @@ it("remounts all proof inputs and pending operations on route or identity change
   expect(DeliveryProof().key).not.toBe(original.key);
   context.generation = 1;
   context.role = "ADMIN";
+  expect(DeliveryProof().key).not.toBe(original.key);
+  context.role = "COURIER";
+  expect(DeliveryProof().key).toBe(original.key);
+  context.assignmentId = "new-execution-after-withdrawal";
   expect(DeliveryProof().key).not.toBe(original.key);
 });
 import {
@@ -103,10 +118,17 @@ it("builds one atomic batch payload with per-order real assignment ids and one s
 });
 it("blocks a partial delivery view without its current assignment version", () => {
   const partial = order("o-1", "asg-1", { assignment: null });
-  expect(batchOrderBlockers(partial, "batch-1", "building-1").join("；")).toContain("配送执行版本");
+  expect(
+    batchOrderBlockers(partial, "batch-1", "building-1").join("；"),
+  ).toContain("配送执行版本");
   const result = buildBatchProofPayload({
-    batchId: "batch-1", buildingId: "building-1", orders: [partial], selectedIds: [partial.id],
-    photoAssetId: "asset-1", position: freshPosition, nowMs,
+    batchId: "batch-1",
+    buildingId: "building-1",
+    orders: [partial],
+    selectedIds: [partial.id],
+    photoAssetId: "asset-1",
+    position: freshPosition,
+    nowMs,
   });
   expect(result.payload).toBeNull();
   expect(result.errors.join("；")).toContain("配送执行版本");

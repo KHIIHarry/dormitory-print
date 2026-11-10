@@ -67,6 +67,7 @@ from .delivery_schemas import (
     BatchUpdate,
     BatchVersionInput,
     BatchView,
+    BatchWithdrawPublication,
     CampusCreateInput,
     CampusListView,
     CampusMapPublishInput,
@@ -288,6 +289,7 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
         'occupied': slot.occupied,
         'remaining': remaining,
         'enabled': slot.enabled,
+        'autoPublish': admin and (slot.data or {}).get('autoPublish') is True,
         'selectable': state['selectable'],
         'acceptanceStatus': state['status'],
         'blockers': state['blockers'],
@@ -302,10 +304,35 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
     }
 
 
+def _can_assign_first_courier(batch: DeliveryBatch, assignments: list[DeliveryAssignment]) -> bool:
+    if batch.status != 'PLANNED' or batch.courier_id or batch.deleted_at:
+        return False
+    data = batch.data or {}
+    # Older edits record the preceding courier in the batch history, including
+    # edits that cleared the assignment before the durable flag existed.
+    return not (data.get('hasAssignedCourier') or data.get('publishedAt')
+                or any((entry.get('before') or {}).get('courierId')
+                       for entry in (data.get('history') or []))
+                or any(assignment.courier_id for assignment in assignments))
+
+
+def _batch_has_delivered(db, batch: DeliveryBatch) -> bool:
+    if (batch.data or {}).get('firstDeliveredAt'):
+        return True
+    # Include inactive executions and superseded proofs so a rework cannot
+    # make a previously fulfilled batch eligible for withdrawal.
+    return db.scalar(select(DeliveryAssignment.id)
+                     .outerjoin(DeliveryProof, DeliveryProof.assignment_id == DeliveryAssignment.id)
+                     .where(DeliveryAssignment.batch_id == batch.id,
+                            (DeliveryAssignment.status == 'DELIVERED') | DeliveryProof.id.is_not(None))
+                     .limit(1)) is not None
+
+
 def _batch_view(db, batch: DeliveryBatch) -> dict:
     assignments = _active_batch_assignments(db, batch.id)
     courier = db.get(Staff, batch.courier_id) if batch.courier_id else None
-    published_at = (batch.data or {}).get('publishedAt')
+    data = batch.data or {}
+    published_at = data.get('publishedAt')
     slot_id = _batch_slot_id(batch)
     slot_snapshot = (batch.data or {}).get('slotSnapshot') or {}
     slot = db.get(DeliverySlot, slot_id) if slot_id else None
@@ -334,6 +361,8 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
     actions = []
     if batch.deleted_at is None and batch.status in ('PLANNED', 'POSTPONED'):
         actions.extend(['ADD', 'REMOVE', 'TRANSFER', 'SPLIT', 'MERGE', 'RESCHEDULE', 'CANCEL', 'DELETE'])
+        if _can_assign_first_courier(batch, assignments):
+            actions.append('ASSIGN_COURIER')
         if sealed and batch.courier_id and assignments:
             actions.append('PUBLISH')
         if batch.status == 'POSTPONED':
@@ -342,6 +371,8 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
         actions.extend(['START', 'RESCHEDULE'])
     elif batch.status == 'DELIVERING':
         actions.append('RESCHEDULE')
+    if batch.deleted_at is None and batch.status in ('PUBLISHED', 'DELIVERING') and not _batch_has_delivered(db, batch):
+        actions.append('WITHDRAW_PUBLICATION')
     return {
         'id': batch.id,
         'name': batch.name,
@@ -372,6 +403,9 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
         'reason': batch.reason,
         'version': batch.version,
         'publishedAt': published_at if isinstance(published_at, str) else None,
+        'publishedAutomatically': data.get('publishedAutomatically') is True,
+        'publicationWithdrawnAt': data.get('publicationWithdrawnAt'),
+        'autoPublishBlockedReason': data.get('autoPublishBlockedReason'),
         'createdAt': batch.created_at.isoformat(),
         'updatedAt': batch.updated_at.isoformat(),
     }
@@ -928,6 +962,13 @@ def _validate_slot_capacity(slot: DeliverySlot, capacity: int) -> None:
                           {'occupied': slot.occupied})
 
 
+def _require_future_auto_publish_cutoff(cutoff: datetime | None) -> None:
+    if cutoff is None or cutoff <= utcnow():
+        message = '请在截单前开启自动发布，已截单的批次可手动发布'
+        raise DomainError('AUTO_PUBLISH_CUTOFF_PASSED', message, 422,
+                          field_errors={'autoPublish': [message]})
+
+
 @router.post('/admin/slots', response_model=Envelope[SlotView])
 def admin_slot_create(payload: SlotInput, db=Depends(get_db),
                       actor: Actor = Depends(actor_dep)):
@@ -941,17 +982,20 @@ def admin_slot_create(payload: SlotInput, db=Depends(get_db),
                           field_errors={'openAt': ['请填写开放下单时间'],
                                         'cutoffAt': ['请填写截单时间']})
     open_at, cutoff_at = acceptance
+    if payload.auto_publish:
+        _require_future_auto_publish_cutoff(cutoff_at)
     starts_at, ends_at = payload.window()
     slot = DeliverySlot(campus_id=campus.id, date=payload.date, name=payload.name, starts_at=starts_at,
                         ends_at=ends_at, open_at=open_at, cutoff_at=cutoff_at,
                         capacity=payload.capacity,
                         occupied=0, enabled=payload.enabled,
-                        data={'createdBy': actor.id,
+                        data={'createdBy': actor.id, 'autoPublish': payload.auto_publish,
                               'history': []})
     db.add(slot)
     db.flush()
     audit(db, actor, 'DELIVERY_SLOT_CREATED', 'DELIVERY_SLOT', slot.id,
-          reason=payload.reason or '', data={'date': slot.date, 'capacity': slot.capacity, 'campusId': slot.campus_id})
+          reason=payload.reason or '', data={'date': slot.date, 'capacity': slot.capacity,
+                                             'campusId': slot.campus_id, 'autoPublish': payload.auto_publish})
     return ok(_slot_view(db, slot, utcnow(), admin=True))
 
 
@@ -983,10 +1027,13 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
         if referenced:
             raise DomainError('SLOT_CAMPUS_LOCKED', '时段已被业务引用，不能更换校区', 409)
         slot.campus_id = payload.campus_id
-    history = list((slot.data or {}).get('history') or [])
+    data = deepcopy(slot.data or {})
+    history = list(data.get('history') or [])
+    previous_auto_publish = data.get('autoPublish') is True
+    auto_publish = previous_auto_publish if payload.auto_publish is None else payload.auto_publish
     before = {'campusId': previous_campus_id, 'date': slot.date, 'name': slot.name, 'start': to_shanghai_hhmm(slot.starts_at),
               'end': to_shanghai_hhmm(slot.ends_at), 'capacity': slot.capacity,
-              'enabled': slot.enabled, 'version': slot.version}
+              'enabled': slot.enabled, 'autoPublish': previous_auto_publish, 'version': slot.version}
     window_supplied = (payload.date is not None or payload.start is not None
                        or payload.end is not None)
     acceptance_supplied = payload.open_at is not None or payload.cutoff_at is not None
@@ -1046,20 +1093,24 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
         slot.capacity = payload.capacity
     if payload.enabled is not None:
         slot.enabled = payload.enabled
+    if auto_publish and (not previous_auto_publish or acceptance_changed):
+        _require_future_auto_publish_cutoff(slot.cutoff_at)
     changed = before != {'campusId': slot.campus_id, 'date': slot.date, 'name': slot.name,
                          'start': to_shanghai_hhmm(slot.starts_at),
                          'end': to_shanghai_hhmm(slot.ends_at),
                          'capacity': slot.capacity, 'enabled': slot.enabled,
-                         'version': slot.version}
+                         'autoPublish': auto_publish, 'version': slot.version}
     if changed:
         history.append({'before': before, 'at': utcnow().isoformat(), 'by': actor.id,
                         'reason': payload.reason or ''})
-    data = deepcopy(slot.data or {})
+    data['autoPublish'] = auto_publish
     data['history'] = history[-50:]
     slot.data = data
     touch(slot)
     audit(db, actor, 'DELIVERY_SLOT_UPDATED', 'DELIVERY_SLOT', slot.id,
-          reason=payload.reason or '', data={'changed': changed, 'campusId': slot.campus_id, 'previousCampusId': previous_campus_id})
+          reason=payload.reason or '', data={'changed': changed, 'campusId': slot.campus_id,
+                                             'previousCampusId': previous_campus_id,
+                                             'autoPublish': auto_publish, 'previousAutoPublish': previous_auto_publish})
     return ok(_slot_view(db, slot, utcnow(), admin=True))
 
 
@@ -1319,9 +1370,8 @@ def admin_batch_update(batch_id: str, payload: BatchUpdate, db=Depends(get_db),
         db, batch_id, payload.expected_version, active_only=True)
     if batch.status in ('DELIVERING', 'COMPLETED', 'CANCELLED'):
         raise DomainError('INVALID_TRANSITION', '当前批次状态不能编辑', 409, {'status': batch.status})
-    before = _batch_view(db, batch)
-    if payload.name is not None:
-        batch.name = payload.name
+    name_changed = payload.name is not None and payload.name != batch.name
+    window_changed = False
     window_fields = {'date', 'time', 'starts_at', 'ends_at'} & payload.model_fields_set
     if window_fields:
         if {'starts_at', 'ends_at'} & window_fields:
@@ -1332,36 +1382,53 @@ def admin_batch_update(batch_id: str, payload: BatchUpdate, db=Depends(get_db),
             window_changed = (to_shanghai_date(starts_at) != to_shanghai_date(batch.starts_at)
                               or to_shanghai_window(starts_at, ends_at)
                               != to_shanghai_window(batch.starts_at, batch.ends_at))
-        if window_changed:
-            if (batch.slot_id or (batch.data or {}).get('slotId') or assignments):
-                raise DomainError(
-                    'CHANGE_PREVIEW_REQUIRED',
-                    '该批次已有配送安排或订单，请通过“调整配送安排”预览并提交', 409,
-                    {'batchId': batch.id})
-            batch.starts_at, batch.ends_at = starts_at, ends_at
-    if 'courier_id' in payload.model_fields_set:
-        if payload.courier_id and _valid_courier(db, payload.courier_id) is None:
+        if window_changed and (batch.slot_id or (batch.data or {}).get('slotId') or assignments):
+            raise DomainError(
+                'CHANGE_PREVIEW_REQUIRED',
+                '该批次已有配送安排或订单，请通过“调整配送安排”预览并提交', 409,
+                {'batchId': batch.id})
+    next_courier = (payload.courier_id or None) if 'courier_id' in payload.model_fields_set else batch.courier_id
+    courier_changed = next_courier != batch.courier_id
+    first_assignment = bool(next_courier and courier_changed and _can_assign_first_courier(batch, assignments))
+    assignment_only = first_assignment and not (name_changed or window_changed)
+    reason = (payload.reason or '').strip()
+    if not reason and not assignment_only:
+        raise DomainError('BATCH_EDIT_REASON_REQUIRED', '请填写修改原因', 422,
+                          field_errors={'reason': ['请填写修改原因']})
+    before = _batch_view(db, batch)
+    if name_changed:
+        batch.name = payload.name
+    if window_changed:
+        batch.starts_at, batch.ends_at = starts_at, ends_at
+    if courier_changed:
+        if next_courier and _valid_courier(db, next_courier) is None:
             raise DomainError('COURIER_INVALID', '配送员不可用', 422)
-        batch.courier_id = payload.courier_id or None
+        batch.courier_id = next_courier
+        now = utcnow().isoformat()
         for assignment in assignments:
             if assignment.status == 'DELIVERED':
                 continue
             assignment.courier_id = batch.courier_id
-            assignment.data = {**(assignment.data or {}),
-                               'reassignedAt': utcnow().isoformat(),
-                               'reassignedBy': actor.id,
-                               'reassignmentReason': payload.reason}
+            change = ({'assignedAt': now, 'assignedBy': actor.id} if first_assignment else
+                      {'reassignedAt': now, 'reassignedBy': actor.id, 'reassignmentReason': reason})
+            assignment.data = {**(assignment.data or {}), **change}
             touch(assignment)
-    batch.reason = payload.reason
+    if reason:
+        batch.reason = reason
     data = deepcopy(batch.data or {})
+    if courier_changed:
+        data['hasAssignedCourier'] = True
     history = list(data.get('history') or [])
-    history.append({'action': 'EDIT', 'before': before, 'at': utcnow().isoformat(),
-                    'by': actor.id, 'reason': payload.reason})
+    history.append({'action': 'ASSIGN_COURIER' if assignment_only else 'EDIT', 'before': before,
+                    'at': utcnow().isoformat(), 'by': actor.id, 'reason': reason})
     data['history'] = history[-50:]
     batch.data = data
     touch(batch)
-    _audit_batch(db, actor, batch, 'BATCH_UPDATED', payload.reason,
-                 {'fields': sorted(payload.model_fields_set - {'expected_version', 'reason'})})
+    audit_data = {'fields': sorted(payload.model_fields_set - {'expected_version', 'reason'})}
+    if courier_changed:
+        audit_data.update(previousCourierId=before['courierId'], courierId=batch.courier_id)
+    _audit_batch(db, actor, batch, 'BATCH_COURIER_ASSIGNED' if assignment_only else 'BATCH_UPDATED',
+                 reason, audit_data)
     return ok(_batch_view(db, batch))
 
 
@@ -1473,6 +1540,12 @@ def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(ge
                         actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
     batch, orders, _assignments = _lock_batch_context(db, batch_id, payload.expected_version)
+    _publish_batch(db, actor, batch, orders, (payload.reason or '').strip())
+    return ok(_batch_view(db, batch))
+
+
+def _publish_batch(db, actor: Actor, batch: DeliveryBatch, orders: dict[str, Order],
+                   reason: str = '', *, automatic: bool = False) -> None:
     if batch.deleted_at or batch.status not in ('PLANNED', 'POSTPONED'):
         raise DomainError('INVALID_TRANSITION', '只有规划中或已延期的批次可以发布', 409,
                           {'status': batch.status})
@@ -1500,14 +1573,117 @@ def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(ge
     data = deepcopy(batch.data or {})
     data['publishedAt'] = utcnow().isoformat()
     data['publishedBy'] = actor.id
-    if payload.reason:
-        data['publishReason'] = payload.reason
+    data['publishedAutomatically'] = automatic
+    data.pop('autoPublishBlockedReason', None)
+    if reason:
+        data['publishReason'] = reason
     batch.data = data
-    batch.reason = payload.reason or batch.reason
+    batch.reason = reason or batch.reason
     touch(batch)
-    _audit_batch(db, actor, batch, 'BATCH_PUBLISHED', payload.reason or '')
+    _audit_batch(db, actor, batch, 'BATCH_PUBLISHED', reason, {'automatic': automatic})
     from .growth import notify_courier_dispatch
     notify_courier_dispatch(db, batch)
+
+
+def due_auto_publish_batch_ids(db, *, limit: int = 30) -> list[str]:
+    now = utcnow()
+    slot_reference = func.coalesce(
+        DeliveryBatch.slot_id,
+        func.nullif(DeliveryBatch.data['slotId'].as_string(), ''),
+        func.nullif(DeliveryBatch.data['slot_id'].as_string(), ''),
+        func.nullif(DeliveryBatch.data['slotSnapshot']['id'].as_string(), ''))
+    window_ended = (DeliverySlot.ends_at <= now) | (DeliveryBatch.ends_at <= now)
+    return list(db.scalars(select(DeliveryBatch.id)
+                           .join(DeliverySlot, DeliverySlot.id == slot_reference)
+                           .where(DeliverySlot.data['autoPublish'].as_boolean().is_(True),
+                                  DeliverySlot.data['archivedAt'].as_string().is_(None),
+                                  DeliverySlot.cutoff_at <= now,
+                                  DeliveryBatch.status == 'PLANNED', DeliveryBatch.deleted_at.is_(None),
+                                  DeliveryBatch.data['publishedAt'].as_string().is_(None),
+                                  DeliveryBatch.data['publicationWithdrawnAt'].as_string().is_(None),
+                                  DeliveryBatch.data['autoPublishBlockedReason'].as_string().is_(None))
+                           .order_by(window_ended, DeliverySlot.cutoff_at, DeliveryBatch.id).limit(limit)))
+
+
+def auto_publish_batch(db, batch_id: str) -> str:
+    batch, orders, assignments = _lock_batch_context(db, batch_id)
+    slot_id = _batch_slot_id(batch)
+    slot = db.get(DeliverySlot, slot_id) if slot_id else None
+    data = batch.data or {}
+    now = utcnow()
+    if (batch.deleted_at or batch.status != 'PLANNED' or data.get('publishedAt')
+            or data.get('publicationWithdrawnAt') or data.get('autoPublishBlockedReason')
+            or slot is None or _slot_archived(slot) or (slot.data or {}).get('autoPublish') is not True
+            or slot.cutoff_at is None or slot.cutoff_at > now):
+        return 'skipped'
+
+    actor = Actor(staff_id='system:delivery-auto-publish')
+    try:
+        if now >= min(slot.ends_at, batch.ends_at):
+            raise DomainError('AUTO_PUBLISH_WINDOW_ENDED', '配送窗口已结束，请核对后手动安排', 409)
+        if ((get_config(db, 'workflow').data or {}).get('pauses') or {}).get('delivery'):
+            raise DomainError('DELIVERY_PAUSED', '配送已暂停，请恢复后手动发布', 409)
+        if not assignments:
+            raise DomainError('BATCH_EMPTY', '批次没有配送订单，请核对后手动发布', 409)
+        with db.begin_nested():
+            _publish_batch(db, actor, batch, orders, automatic=True)
+    except DomainError as error:
+        batch.data = {**data, 'autoPublishBlockedReason': error.message}
+        touch(batch)
+        _audit_batch(db, actor, batch, 'BATCH_AUTO_PUBLISH_BLOCKED', error.message, {'code': error.code})
+        return 'blocked'
+    return 'published'
+
+
+@router.post('/admin/batches/{batch_id}/withdraw-publication', response_model=Envelope[BatchView])
+def admin_batch_withdraw_publication(batch_id: str, payload: BatchWithdrawPublication,
+                                     db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor, 'delivery.manage')
+    batch, orders, assignments = _lock_batch_context(db, batch_id, payload.expected_version)
+    if _batch_has_delivered(db, batch):
+        raise DomainError('BATCH_HAS_DELIVERED', '已有订单确认送达，不能撤回发布', 409)
+    if batch.status not in ('PUBLISHED', 'DELIVERING'):
+        raise DomainError('INVALID_TRANSITION', '只有已发布或配送中的批次可以撤回发布', 409)
+    started = batch.status == 'DELIVERING'
+    if started and not payload.confirm_no_handover:
+        raise DomainError('HANDOVER_CONFIRMATION_REQUIRED', '请确认所有资料尚未交给客户', 422,
+                          field_errors={'confirmNoHandover': ['请确认所有资料尚未交给客户']})
+
+    now = utcnow().isoformat()
+    reason = (payload.reason or '').strip()
+    data = dict(batch.data or {})
+    previous = {key: data.pop(key, None) for key in (
+        'publishedAt', 'publishedBy', 'publishedAutomatically', 'publishReason', 'startedAt', 'startedBy')}
+    batch.data = {**data, 'publicationWithdrawnAt': now}
+    batch.status = 'PLANNED'
+    touch(batch)
+    for assignment in assignments:
+        if assignment.status != 'STARTED':
+            continue
+        assignment_data = dict(assignment.data or {})
+        assignment_data.pop('startedAt', None)
+        assignment_data.pop('startedBy', None)
+        assignment.data = {**(assignment.data or {}), 'publicationWithdrawnAt': now}
+        _deactivate_assignment(db, assignment, actor, reason)
+        # Keep membership and courier while retiring the old execution scope.
+        db.add(DeliveryAssignment(
+            order_id=assignment.order_id, batch_id=batch.id, courier_id=assignment.courier_id,
+            status='PLANNED', active=True, address_review=assignment.address_review,
+            data={**assignment_data, 'replacesAssignmentId': assignment.id}))
+        order = orders[assignment.order_id]
+        if order.status == 'DELIVERING':
+            order.status = 'READY_FOR_DELIVERY'
+            order_data = dict(order.data or {})
+            order_data.pop('delivery', None)
+            order.data = order_data
+            touch(order)
+            audit(db, actor, 'DELIVERY_START_WITHDRAWN', 'ORDER', order.id,
+                  reason=reason, data={'batchId': batch.id, 'assignmentId': assignment.id})
+    _audit_batch(db, actor, batch, 'BATCH_PUBLICATION_WITHDRAWN', reason,
+                 {'before': previous, 'confirmNoHandover': payload.confirm_no_handover})
+    from .mail import cancel_queued_courier_dispatch
+    cancel_queued_courier_dispatch(db, batch.id)
+    db.flush()
     return ok(_batch_view(db, batch))
 
 
@@ -2439,6 +2615,9 @@ def _record_delivery_proof(
     db.add(proof)
     db.flush()
 
+    if not (batch.data or {}).get('firstDeliveredAt'):
+        batch.data = {**(batch.data or {}), 'firstDeliveredAt': now.isoformat()}
+        touch(batch)
     assignment.status = 'DELIVERED'
     assignment.data = {**(assignment.data or {}), 'deliveredAt': now.isoformat(),
                        'proofId': proof.id, 'deliveredBy': actor.id}
@@ -2519,8 +2698,8 @@ def courier_proof(order_id: str, payload: DeliveryProofInput, db=Depends(get_db)
         if asset.assignment_id:
             if asset.assignment_id != assignment.id:
                 raise DomainError('PHOTO_NOT_IN_SCOPE', '交付照片不属于当前配送执行', 403)
-        elif asset.staff_id != actor.staff_id:
-            raise DomainError('PHOTO_NOT_IN_SCOPE', '交付照片不属于当前账号', 403)
+        elif (batch.data or {}).get('publicationWithdrawnAt') or asset.staff_id != actor.staff_id:
+            raise DomainError('PHOTO_NOT_IN_SCOPE', '交付照片不属于本次配送执行', 403)
         if asset.expires_at is not None and asset.expires_at <= utcnow():
             raise DomainError('PHOTO_INVALID', '交付照片已过期', 422)
     if payload.position is not None:
@@ -2562,7 +2741,7 @@ def _batch_building_key(assignment: DeliveryAssignment) -> str:
     return assignment.order_id
 
 
-def _validate_batch_photo(db, actor: Actor, batch_id: str, photo_asset_id: str | None,
+def _validate_batch_photo(db, actor: Actor, batch: DeliveryBatch, photo_asset_id: str | None,
                           assignments: list[DeliveryAssignment]) -> Asset | None:
     """Authorize one shared photo against the selected assignment group.
 
@@ -2590,11 +2769,11 @@ def _validate_batch_photo(db, actor: Actor, batch_id: str, photo_asset_id: str |
     if isinstance(assignment_ids, list):
         markers.update(str(value) for value in assignment_ids if value)
     scoped_batch = data.get('batchId') or data.get('deliveryBatchId')
-    if scoped_batch and scoped_batch != batch_id:
+    if scoped_batch and scoped_batch != batch.id:
         raise DomainError('PHOTO_NOT_IN_SCOPE', '交付照片属于其他配送批次', 403)
     if markers and not markers.issubset(selected):
         raise DomainError('PHOTO_NOT_IN_SCOPE', '交付照片包含本次选择之外的配送执行', 403)
-    if not markers and not scoped_batch:
+    if not markers and (not scoped_batch or (batch.data or {}).get('publicationWithdrawnAt')):
         raise DomainError('PHOTO_NOT_IN_SCOPE', '交付照片未绑定本次配送范围', 403)
 
     selected_couriers = {assignment.courier_id for assignment in assignments}
@@ -2716,7 +2895,7 @@ def courier_batch_proofs(batch_id: str, payload: BatchDeliveryProofInput,
                 raise DomainError('LOCATION_INVALID', '设备定位不符合新鲜度或精度要求', 422,
                                   {'orderId': order.id, 'blockers': errors})
 
-    _validate_batch_photo(db, actor, batch.id, payload.photo_asset_id,
+    _validate_batch_photo(db, actor, batch, payload.photo_asset_id,
                           [assignment for _, assignment in selected])
 
     proofs: list[DeliveryProof] = []
@@ -2840,7 +3019,13 @@ def admin_exceptions(status: str | None = None, order_id: str | None = None,
                      type: str | None = None, db=Depends(get_db),
                      actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    query = select(BusinessException)
+    withdrawn_execution = select(DeliveryAssignment.id).where(
+        DeliveryAssignment.id == BusinessException.data['assignmentId'].as_string(),
+        DeliveryAssignment.active.is_(False),
+        DeliveryAssignment.data['publicationWithdrawnAt'].as_string().is_not(None)).exists()
+    query = select(BusinessException).where(
+        ~((BusinessException.type == 'LOCATION_EXCEPTION') & (BusinessException.status == 'OPEN')
+          & withdrawn_execution))
     if status:
         query = query.where(BusinessException.status == status)
     if order_id:

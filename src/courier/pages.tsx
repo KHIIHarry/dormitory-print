@@ -109,6 +109,9 @@ export function CourierHome() {
         >
           <div className="courier-batch-heading">
             <Badge status={b.status} />
+            {b.status === "PLANNED" && b.publicationWithdrawnAt && (
+              <span className="badge">发布已撤回</span>
+            )}
             {(b as Record<string, any>).isRegular && (
               <span className="badge">自动归集</span>
             )}
@@ -159,6 +162,9 @@ export function CourierBatch() {
     (b) =>
       b.id === id && (role === "ADMIN" || !DEMO || b.courierId === "staff-2"),
   );
+  useEffect(() => {
+    if (batch?.status !== "DELIVERING") setProofBuilding(null);
+  }, [batch?.status]);
   if (!batch)
     return (
       <Empty
@@ -210,9 +216,11 @@ export function CourierBatch() {
             ? "批次已发布，确认后整批开始配送；开始后才能提交交付。"
             : batch.status === "POSTPONED"
               ? "批次已延期，请等待管理员重新发布配送计划。"
-              : (batch as Record<string, any>).sealedAt
-                ? "名单已封批但尚未发布，请等待管理员发布配送计划。"
-                : "名单仍在随确认收款更新，封批并发布后才能开始配送。"}
+              : batch.status === "PLANNED" && batch.publicationWithdrawnAt
+                ? "管理员已撤回发布。请停止本批次配送并等待重新发布。"
+                : (batch as Record<string, any>).sealedAt
+                  ? "名单已封批但尚未发布，请等待管理员发布配送计划。"
+                  : "名单仍在随确认收款更新，封批并发布后才能开始配送。"}
       </Notice>
       {role === "ADMIN" && !adminCapable ? (
         <Notice>
@@ -287,9 +295,9 @@ export function CourierBatch() {
                 </div>
               </Link>
             ))}
-            {proofBuilding === buildingId ? (
+            {batch.status === "DELIVERING" && proofBuilding === buildingId ? (
               <BatchProof
-                key={`${batch.id}:${buildingId}`}
+                key={`${batch.id}:${buildingId}:${batch.publicationWithdrawnAt || ""}`}
                 batchId={batch.id}
                 buildingId={buildingId}
                 buildingName={buildingName(buildingId)}
@@ -335,6 +343,11 @@ export function CourierOrder() {
         返回配送批次
       </Link>
       <PageHeading title="配送订单" action={<Badge status={order.status} />} />
+      {batch?.status === "PLANNED" && batch.publicationWithdrawnAt && (
+        <Notice type="warning">
+          管理员已撤回发布。请停止配送并等待重新发布。
+        </Notice>
+      )}
       <Panel className="courier-detail">
         <small>请核对塑封袋上的提取码</small>
         <strong className="courier-pickup-code">{order.pickupCode}</strong>
@@ -411,8 +424,13 @@ export function CourierOrder() {
 export function DeliveryProof() {
   const { id } = useParams();
   const { generation } = useIdentity();
-  const { role } = useStore();
-  return <DeliveryProofForm key={proofScope(id, generation, role)} />;
+  const { role, order } = useAssignment();
+  const assignment = order?.deliveryAssignmentId || order?.assignment?.id || "";
+  return (
+    <DeliveryProofForm
+      key={`${proofScope(id, generation, role)}:${assignment}`}
+    />
+  );
 }
 function DeliveryProofForm() {
   const { order, batch, data, role, act, toast, setData, refresh } =

@@ -1780,10 +1780,17 @@
             "title": "Name"
           },
           "reason": {
-            "maxLength": 2000,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "仅首次指派配送员且未改动其他批次信息时可省略",
+            "title": "Reason"
           },
           "startsAt": {
             "anyOf": [
@@ -1810,8 +1817,7 @@
           }
         },
         "required": [
-          "expectedVersion",
-          "reason"
+          "expectedVersion"
         ],
         "title": "BatchUpdate",
         "type": "object"
@@ -1859,6 +1865,17 @@
             },
             "title": "Assignmentids",
             "type": "array"
+          },
+          "autoPublishBlockedReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autopublishblockedreason"
           },
           "campusId": {
             "anyOf": [
@@ -1959,6 +1976,18 @@
             "title": "Preparedcount",
             "type": "integer"
           },
+          "publicationWithdrawnAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publicationwithdrawnat"
+          },
           "publishedAt": {
             "anyOf": [
               {
@@ -1970,6 +1999,11 @@
               }
             ],
             "title": "Publishedat"
+          },
+          "publishedAutomatically": {
+            "default": false,
+            "title": "Publishedautomatically",
+            "type": "boolean"
           },
           "reason": {
             "title": "Reason",
@@ -2079,6 +2113,38 @@
           "updatedAt"
         ],
         "title": "BatchView",
+        "type": "object"
+      },
+      "BatchWithdrawPublication": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmNoHandover": {
+            "default": false,
+            "title": "Confirmnohandover",
+            "type": "boolean"
+          },
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "expectedVersion"
+        ],
+        "title": "BatchWithdrawPublication",
         "type": "object"
       },
       "BenefitsPolicyDTO": {
@@ -15854,6 +15920,11 @@
       "SlotInput": {
         "additionalProperties": false,
         "properties": {
+          "autoPublish": {
+            "default": false,
+            "title": "Autopublish",
+            "type": "boolean"
+          },
           "campusId": {
             "minLength": 1,
             "title": "Campusid",
@@ -16146,6 +16217,17 @@
       "SlotUpdate": {
         "additionalProperties": false,
         "properties": {
+          "autoPublish": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autopublish"
+          },
           "campusId": {
             "anyOf": [
               {
@@ -16313,6 +16395,11 @@
           "archived": {
             "default": false,
             "title": "Archived",
+            "type": "boolean"
+          },
+          "autoPublish": {
+            "default": false,
+            "title": "Autopublish",
             "type": "boolean"
           },
           "batchCount": {
@@ -21135,6 +21222,103 @@
           }
         },
         "summary": "Batch Start"
+      }
+    },
+    "/admin/batches/{batch_id}/withdraw-publication": {
+      "post": {
+        "operationId": "admin_batch_withdraw_publication_api_v1_admin_batches__batch_id__withdraw_publication_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchWithdrawPublication"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BatchView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Batch Withdraw Publication"
       }
     },
     "/admin/binding-tasks": {

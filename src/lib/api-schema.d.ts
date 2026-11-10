@@ -262,6 +262,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/batches/{batch_id}/withdraw-publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Batch Withdraw Publication */
+        post: operations["admin_batch_withdraw_publication_api_v1_admin_batches__batch_id__withdraw_publication_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/binding-tasks": {
         parameters: {
             query?: never;
@@ -4260,8 +4277,11 @@ export interface components {
             expectedVersion: number;
             /** Name */
             name?: string | null;
-            /** Reason */
-            reason: string;
+            /**
+             * Reason
+             * @description 仅首次指派配送员且未改动其他批次信息时可省略
+             */
+            reason?: string | null;
             /** Startsat */
             startsAt?: string | null;
             /** Time */
@@ -4280,6 +4300,8 @@ export interface components {
             allowedActions?: string[];
             /** Assignmentids */
             assignmentIds: string[];
+            /** Autopublishblockedreason */
+            autoPublishBlockedReason?: string | null;
             /** Campusid */
             campusId?: string | null;
             /** Campusname */
@@ -4323,8 +4345,15 @@ export interface components {
              * @default 0
              */
             preparedCount: number;
+            /** Publicationwithdrawnat */
+            publicationWithdrawnAt?: string | null;
             /** Publishedat */
             publishedAt?: string | null;
+            /**
+             * Publishedautomatically
+             * @default false
+             */
+            publishedAutomatically: boolean;
             /** Reason */
             reason: string;
             /**
@@ -4371,6 +4400,18 @@ export interface components {
             updatedAt: string;
             /** Version */
             version: number;
+        };
+        /** BatchWithdrawPublication */
+        BatchWithdrawPublication: {
+            /**
+             * Confirmnohandover
+             * @default false
+             */
+            confirmNoHandover: boolean;
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
+            reason?: string | null;
         };
         /** BenefitsPolicyDTO */
         BenefitsPolicyDTO: {
@@ -9235,6 +9276,11 @@ export interface components {
         };
         /** SlotInput */
         SlotInput: {
+            /**
+             * Autopublish
+             * @default false
+             */
+            autoPublish: boolean;
             /** Campusid */
             campusId: string;
             /** Capacity */
@@ -9332,6 +9378,8 @@ export interface components {
         };
         /** SlotUpdate */
         SlotUpdate: {
+            /** Autopublish */
+            autoPublish?: boolean | null;
             /** Campusid */
             campusId?: string | null;
             /** Capacity */
@@ -9371,6 +9419,11 @@ export interface components {
              * @default false
              */
             archived: boolean;
+            /**
+             * Autopublish
+             * @default false
+             */
+            autoPublish: boolean;
             /**
              * Batchcount
              * @default 0
@@ -11408,6 +11461,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_BatchOperationResultView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_batch_withdraw_publication_api_v1_admin_batches__batch_id__withdraw_publication_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchWithdrawPublication"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_BatchView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */

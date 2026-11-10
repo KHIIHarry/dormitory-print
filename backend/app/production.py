@@ -27,6 +27,7 @@ from app.core import (
 from app.db import get_db
 from app.models import (
     Artifact,
+    Asset,
     BindingTask,
     BusinessException,
     Order,
@@ -784,7 +785,7 @@ def order_production_view(db, order: Order) -> dict:
                 'printTaskIds': [task.id for task in tasks],
             }
         )
-    checklist = _checklist_dto(state)
+    checklist = _checklist_dto(db, state)
     return {
         'actualStartedAt': _iso(order.actual_started_at),
         'deliveryBlocked': bool(state['delivery_block']),
@@ -854,8 +855,20 @@ def _can_pack(order: Order, state: dict) -> bool:
     )
 
 
-def _checklist_dto(state: dict) -> ProductionChecklistDTO:
+def _checklist_dto(db, state: dict) -> ProductionChecklistDTO:
     payload = state['checklist']
+    names = {}
+    missing_names = []
+    for file in state['files']:
+        name = _json_dict(file.data).get('name')
+        if isinstance(name, str) and name.strip():
+            names[file.id] = name
+        else:
+            missing_names.append(file)
+    if missing_names:
+        asset_names = dict(db.execute(select(Asset.id, Asset.name).where(
+            Asset.id.in_({file.asset_id for file in missing_names}))).all())
+        names.update({file.id: asset_names.get(file.asset_id, '') for file in missing_names})
     return ProductionChecklistDTO(
         version=payload['version'],
         generated_at=_iso(utcnow()),
@@ -863,7 +876,7 @@ def _checklist_dto(state: dict) -> ProductionChecklistDTO:
         items=[
             ChecklistItemDTO(
                 file_id=item['fileId'],
-                name=item.get('clientFileId', ''),
+                name=names.get(item['fileId'], ''),
                 kind=item.get('kind', 'DOCUMENT'),
                 binding_type=item.get('bindingType', 'NONE'),
                 print_status=item.get('printStatus', 'PENDING'),
@@ -988,7 +1001,7 @@ def _packing_dto(db, order: Order, packing: PackingTask) -> PackingTaskDTO:
         status=packing.status,
         checklist_version=order.content_revision,
         order_status=order.status,
-        checklist=_checklist_dto(state),
+        checklist=_checklist_dto(db, state),
         version=packing.version,
     )
 
