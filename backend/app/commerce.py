@@ -114,7 +114,7 @@ class ConfirmPayment(DTO):
     content_revision:StrictInt
     quote_id:str
     received_cents:StrictInt=Field(ge=0,le=2147483647)
-    settlement_kind:Literal['CASH_MANUAL','ZERO_PAYABLE']
+    settlement_kind:Literal['CASH_MANUAL','ZERO_PAYABLE','WAIVED_MANUAL']
     payment_difference_accepted:StrictBool=False
     note:str=Field(default='',max_length=1000)
     receipt_id:str|None=None
@@ -968,7 +968,10 @@ def settle_order(db,actor,order,body):
     require_admin(actor,'payment.manage')
     if order.content_revision!=body.content_revision or order.quote_id!=body.quote_id:
         raise DomainError('VERSION_CONFLICT','内容或报价已变化，请重新核对',409)
-    if (order.total_cents>0 and body.received_cents>0
+    waived=body.settlement_kind=='WAIVED_MANUAL'
+    if waived and (order.total_cents<=0 or body.received_cents!=0 or body.receipt_id is not None):
+        raise DomainError('PAYMENT_AMOUNT_MISMATCH','人工免单仅适用于应收大于0且未收到款项的订单',409)
+    if (order.total_cents>0 and (body.received_cents>0 or waived)
             and body.received_cents!=order.total_cents and not body.payment_difference_accepted):
         raise DomainError('PAYMENT_DIFFERENCE_CONFIRMATION_REQUIRED',
                           '实收与应收不同，请明确接受本次收款差额后完成结算',409)
@@ -978,13 +981,14 @@ def settle_order(db,actor,order,body):
         if receipt.order_id!=order.id or receipt.status!='UNMATCHED':raise DomainError('RECEIPT_UNAVAILABLE','该收款记录不可分配',409)
         refunded=db.scalar(select(func.coalesce(func.sum(ReceiptAdjustment.amount_cents),0)).where(ReceiptAdjustment.receipt_id==receipt.id))
         if receipt.amount_cents-refunded!=body.received_cents:raise DomainError('RECEIPT_AMOUNT_MISMATCH','待核对收款净额与本次分配金额不一致',409)
-    elif body.received_cents>0:
+    elif body.received_cents>0 or waived:
         existing_receipts=list(db.scalars(select(Receipt.id).where(
             Receipt.order_id==order.id,Receipt.status=='UNMATCHED')))
         if existing_receipts:
             raise DomainError('RECEIPT_REVIEW_REQUIRED','已有待核对实收，请选择原收款记录完成核对，勿重复记款',409,
                               {'receiptIds':existing_receipts})
-        receipt=_receipt(db,order,actor,body.received_cents,body.note)
+        if body.received_cents>0:
+            receipt=_receipt(db,order,actor,body.received_cents,body.note)
     if order.status!='PENDING_CONFIRMATION' or order.close_at<=utcnow() or order.settlement_kind:
         if receipt and not order.settlement_kind:
             receipt.data={**receipt.data,'refundRequired':True,'reasonCode':'CLOSED_ORDER'}
@@ -992,7 +996,7 @@ def settle_order(db,actor,order,body):
         raise DomainError('INVALID_TRANSITION','订单当前不能重复结算',409)
     valid_cash=order.total_cents>0 and body.received_cents>0 and body.settlement_kind=='CASH_MANUAL'
     valid_zero=order.total_cents==0 and body.received_cents==0 and body.settlement_kind=='ZERO_PAYABLE'
-    if not (valid_cash or valid_zero):
+    if not (valid_cash or valid_zero or waived):
         if receipt:
             db.add(BusinessException(order_id=order.id,type='PAYMENT_MISMATCH',reason='实收与订单应付不一致，待人工核对',blocks_production=True))
         raise DomainError('PAYMENT_AMOUNT_MISMATCH','正数应收须登记正数实收；零元结算仅适用于应收与实收均为0的订单',409,{'receiptId':receipt.id if receipt else None},commit=bool(receipt))
@@ -1096,7 +1100,12 @@ def _complete_settlement(db,actor,order,body,receipt):
             BusinessException.status.in_(('OPEN','IN_PROGRESS')))):
         failure.status='RESOLVED';touch(failure)
     batch_note=f'已归入配送批次「{auto_batch.name}」' if auto_batch else '开始安排生产，配送时段已确认'
-    add_history(order,'零元结算已人工确认' if body.settlement_kind=='ZERO_PAYABLE' else '线下收款已人工确认',batch_note)
+    settlement_title={
+        'CASH_MANUAL':'线下收款已人工确认',
+        'ZERO_PAYABLE':'零元结算已人工确认',
+        'WAIVED_MANUAL':'免单已确认',
+    }
+    add_history(order,settlement_title[body.settlement_kind],batch_note)
     touch(order)
     from .production import refresh_production
     db.flush();refresh_production(db,order)

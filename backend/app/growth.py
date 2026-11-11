@@ -1233,7 +1233,7 @@ def _remaining_qualified_service_cents(db, order: Order, service: str,
     allocations = {item.get('lineKey'): int(item.get('amountCents') or 0)
                    for item in (view.get('discountAllocations') or [])}
     cash = int(order.cash_received_cents or 0)
-    settled = order.settlement_kind in ('CASH_MANUAL', 'ZERO_PAYABLE')
+    settled = order.settlement_kind in ('CASH_MANUAL', 'ZERO_PAYABLE', 'WAIVED_MANUAL')
     if settled and refunded_total >= cash and (cash > 0 or refunded_total == 0):
         return 0
     remaining = {line.get('key'): int(line.get('quantity') or 0) for line in lines}
@@ -1350,7 +1350,7 @@ def on_refund(db, order: Order, refund: Refund) -> Coupon | None:
         Refund.order_id == order.id)) or 0
     refunded_total = max(int(order.refunded_cents or 0), int(summed))
     cash = int(order.cash_received_cents or 0)
-    settled = order.settlement_kind in ('CASH_MANUAL', 'ZERO_PAYABLE')
+    settled = order.settlement_kind in ('CASH_MANUAL', 'ZERO_PAYABLE', 'WAIVED_MANUAL')
     # A zero-payable order has no cash to return, but a recorded full-order
     # cancellation still triggers the Q01 compensation for the used coupon.
     full = settled and (refunded_total >= cash if cash > 0 else True)
@@ -2306,8 +2306,7 @@ def notify_payment_success(db, order):
     variables = {
         'brandName': _mail_brand(db),
         'orderCode': str(getattr(order, 'pickup_code', '') or ''),
-        'paidAmount': _money(getattr(order, 'cash_received_cents', 0)
-                             or getattr(order, 'total_cents', 0)),
+        'paidAmount': _money(order.cash_received_cents),
         'orderLink': _order_link(order),
     }
     return _queue(db, 'PAYMENT_SUCCESS', account.email, variables,

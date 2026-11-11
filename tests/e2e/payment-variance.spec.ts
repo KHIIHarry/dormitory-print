@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-test.use({ channel: "chrome" });
-
 // Mount the real detail/form component with a deterministic store; API cash
 // persistence, permissions and transaction behavior are covered in PostgreSQL.
 async function fixture(page: Page, legacyReceipt = false, exports = false) {
@@ -168,6 +166,31 @@ test("reconciles a historical mismatch using its existing cash receipt", async (
     receiptId: "receipt",
     paymentDifferenceAccepted: true,
   });
+});
+
+test("shows a distinct confirmation for a zero receipt on a positive quote", async ({
+  page,
+}, info) => {
+  await fixture(page);
+  await page.getByRole("button", { name: "确认线下收款", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("实际收到金额（元）").fill("0");
+  await expect(dialog.getByRole("status")).toHaveText("差额：-¥10.00");
+  const submit = dialog.getByRole("button", { name: "已核对，确认免单" });
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: "确认免单并结算" }).check();
+  await submit.scrollIntoViewIfNeeded();
+  await dialog.screenshot({ path: info.outputPath("manual-waiver.png") });
+  await submit.click();
+  await expect(dialog).toHaveCount(0);
+  expect(
+    await page.evaluate(() => (window as any).fixture.calls[0].body),
+  ).toMatchObject({
+    receivedCents: 0,
+    settlementKind: "WAIVED_MANUAL",
+    paymentDifferenceAccepted: true,
+  });
+  await expect(page.getByText("免单已确认", { exact: true })).toBeVisible();
 });
 
 test("finance export defaults include real cash and variance without stale order-only fields", async ({

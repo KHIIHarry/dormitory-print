@@ -371,6 +371,49 @@ test("rapid admin query A to B to A replaces obsolete flight and settles without
     page.locator(".admin-content tbody").getByText("R8F2A", { exact: true }),
   ).toBeVisible();
 });
+test("sets and clears priority through the versioned order endpoint", async ({
+  page,
+}) => {
+  let order = { ...fixture.orders[0], version: 3, priority: false };
+  const writes: unknown[] = [];
+  await realApi(page, {
+    "/auth/me": (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            id: "order-admin",
+            role: "ADMIN",
+            name: "订单管理员",
+            capabilities: ["orders.manage"],
+          },
+        },
+      }),
+    "/admin/config": (route) =>
+      route.fulfill({ json: { data: fixture.config } }),
+    "/admin/orders": (route) =>
+      route.fulfill({ json: { data: { items: [order] } } }),
+    [`/admin/orders/${order.id}`]: (route) => {
+      const request = route.request();
+      expect(request.method()).toBe("PATCH");
+      const body = request.postDataJSON();
+      writes.push(body);
+      order = { ...order, priority: body.priority, version: order.version + 1 };
+      return route.fulfill({ json: { data: order } });
+    },
+  });
+  await page.goto(`http://127.0.0.1:5175/manage/orders/${order.id}`);
+  const setPriority = page.getByRole("button", { name: "设为优先" });
+  const clearPriority = page.getByRole("button", { name: "取消优先" });
+  await setPriority.click();
+  await expect(clearPriority).toBeVisible();
+  await page.reload();
+  await clearPriority.click();
+  await expect(setPriority).toBeVisible();
+  expect(writes).toEqual([
+    { expectedVersion: 3, priority: true },
+    { expectedVersion: 4, priority: false },
+  ]);
+});
 test("identity invalidation disables upload until current configuration is obtained", async ({
   page,
 }) => {

@@ -506,17 +506,21 @@ export function validateDemoOrderAction(path: string, input: unknown) {
     fail("订单报价或状态已变化，请重新核对", "VERSION_CONFLICT", 409);
   if (order.blockers?.some((blocker) => blocker.code !== "PAYMENT_MISMATCH"))
     fail("订单有风控阻断，请先人工核对", "ORDER_BLOCKED", 409);
+  const waived = body.settlementKind === "WAIVED_MANUAL";
   if (
     !Number.isSafeInteger(body.receivedCents) ||
     body.receivedCents > 2147483647 ||
     !(
       (order.totalCents > 0 && body.receivedCents > 0 && body.settlementKind === "CASH_MANUAL") ||
-      (order.totalCents === 0 && body.receivedCents === 0 && body.settlementKind === "ZERO_PAYABLE")
+      (order.totalCents === 0 && body.receivedCents === 0 && body.settlementKind === "ZERO_PAYABLE") ||
+      (order.totalCents > 0 && body.receivedCents === 0 && waived && body.receiptId == null)
     )
   )
     fail("结算类型或实收金额无效");
   if (body.receivedCents !== order.totalCents && body.paymentDifferenceAccepted !== true)
     fail("请确认接受本次收款差额", "PAYMENT_DIFFERENCE_CONFIRMATION_REQUIRED", 409);
+  if (waived && order.unmatchedReceipts?.length)
+    fail("请先处理待核对实收，再确认免单", "RECEIPT_REVIEW_REQUIRED", 409);
   const coupon = couponFor(order);
   if (
     coupon &&

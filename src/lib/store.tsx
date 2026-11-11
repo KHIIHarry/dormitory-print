@@ -613,17 +613,16 @@ export function Provider({ children }: { children: ReactNode }) {
       method = "PATCH";
     } else if (action === "cancel") {
       payload.reason = patch.note;
-    } else if (["note", "priority", "review-address"].includes(action)) {
+    } else if (action === "priority") {
+      path = `/admin/orders/${id}`;
+      method = "PATCH";
+      payload.priority = patch.priority;
+    } else if (["note", "review-address"].includes(action)) {
       path = `/admin/corrections`;
       Object.assign(payload, {
         targetType: "ORDER",
         targetId: id,
-        action:
-          action === "review-address"
-            ? "REVIEW_ADDRESS"
-            : action === "priority"
-              ? "SET_PRIORITY"
-              : "SET_NOTE",
+        action: action === "review-address" ? "REVIEW_ADDRESS" : "SET_NOTE",
         reason: patch.note || action,
         actionPayload: patch,
       });

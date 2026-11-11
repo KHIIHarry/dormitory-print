@@ -409,6 +409,8 @@ export function AdminOrderDetail() {
   } catch {
     // A difference is shown only for a valid cash amount; submit explains invalid input.
   }
+  const confirmingWaiver =
+    order.totalCents > 0 && paymentDifference === -order.totalCents;
   const confirm = async () => {
     let settlement: ReturnType<typeof settlementWithReceipt>;
     try {
@@ -436,6 +438,11 @@ export function AdminOrderDetail() {
       toast((e as Error).message);
       return;
     }
+    const settlementCopy = {
+      CASH_MANUAL: { history: "线下付款已确认", toast: "收款已确认" },
+      ZERO_PAYABLE: { history: "人工零元结算已确认", toast: "零元结算已确认" },
+      WAIVED_MANUAL: { history: "免单已确认", toast: "免单已确认" },
+    }[settlement.settlementKind];
     setBusy(true);
     const ok = await act(
       `/admin/orders/${id}/confirm-payment`,
@@ -469,10 +476,7 @@ export function AdminOrderDetail() {
                 version: o.version + 1,
                 history: [
                   {
-                    title:
-                      settlement.settlementKind === "ZERO_PAYABLE"
-                        ? "人工零元结算已确认"
-                        : "线下付款已确认",
+                    title: settlementCopy.history,
                     time: new Date().toLocaleString("zh-CN"),
                     description:
                       settlement.settlementKind === "ZERO_PAYABLE"
@@ -501,11 +505,7 @@ export function AdminOrderDetail() {
     setBusy(false);
     if (ok) {
       setPayment(false);
-      toast(
-        settlement.settlementKind === "ZERO_PAYABLE"
-          ? "零元结算已确认，订单进入待打印"
-          : "收款已确认，订单进入待打印",
-      );
+      toast(`${settlementCopy.toast}，订单进入待打印`);
     }
   };
   return (
@@ -528,15 +528,18 @@ export function AdminOrderDetail() {
             >
               内部备注
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() =>
-                updateOrder(order.id, { priority: !order.priority }, "priority")
-              }
-            >
-              <Star size={16} />
-              {order.priority ? "取消优先" : "设为优先"}
-            </Button>
+            {(staff?.capabilities?.includes("*") ||
+              staff?.capabilities?.includes("orders.manage")) && (
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  updateOrder(order.id, { priority: !order.priority }, "priority")
+                }
+              >
+                <Star size={16} />
+                {order.priority ? "取消优先" : "设为优先"}
+              </Button>
+            )}
             {order.status === "DELIVERING" && (
               <Link
                 className="btn secondary"
@@ -914,7 +917,9 @@ export function AdminOrderDetail() {
           <Notice>
             {order.totalCents === 0
               ? "本单优惠后应付0元，无需转账。请人工核对优惠快照并确认零元结算。"
-              : "请在微信中核对实际收款。此操作不会发起任何线上支付。"}
+              : confirmingWaiver
+                ? "免单后保留原应收，实收记为 0 元。"
+                : "请在微信中核对实际收款。此操作不会发起任何线上支付。"}
           </Notice>
           <dl className="detail-dl">
             <div>
@@ -1003,7 +1008,7 @@ export function AdminOrderDetail() {
                     setPaymentDifferenceAccepted(event.target.checked)
                   }
                 />
-                <span>接受差额并结算</span>
+                <span>{confirmingWaiver ? "确认免单并结算" : "接受差额并结算"}</span>
               </label>
             </>
           )}
@@ -1037,7 +1042,9 @@ export function AdminOrderDetail() {
               ? "正在确认…"
               : order.totalCents === 0
                 ? "已核对，确认零元结算"
-                : "已核对，确认实际收款"}
+                : confirmingWaiver
+                  ? "已核对，确认免单"
+                  : "已核对，确认实际收款"}
           </Button>
         </Modal>
       )}

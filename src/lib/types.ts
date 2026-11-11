@@ -96,7 +96,7 @@ export type Order = {
   ownerPrincipalId?: string;
   checkoutAuthKind?: "ANONYMOUS" | "REGISTERED" | "ORDER_ACCESS";
   settlement?: {
-    settlementKind: "CASH_MANUAL" | "ZERO_PAYABLE";
+    settlementKind: import("./api-schema").components["schemas"]["ConfirmPayment"]["settlementKind"];
     cashReceivedCents: number;
     discountCents: number;
     confirmedAt: string;

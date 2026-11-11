@@ -3917,7 +3917,8 @@
           "settlementKind": {
             "enum": [
               "CASH_MANUAL",
-              "ZERO_PAYABLE"
+              "ZERO_PAYABLE",
+              "WAIVED_MANUAL"
             ],
             "title": "Settlementkind",
             "type": "string"

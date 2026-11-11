@@ -5088,7 +5088,7 @@ export interface components {
              * Settlementkind
              * @enum {string}
              */
-            settlementKind: "CASH_MANUAL" | "ZERO_PAYABLE";
+            settlementKind: "CASH_MANUAL" | "ZERO_PAYABLE" | "WAIVED_MANUAL";
         };
         /** Contact */
         Contact: {

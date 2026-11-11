@@ -103,6 +103,59 @@ def test_variance_cannot_waive_a_positive_payable(db, api, admin_client, amount,
     assert db.get(Order, order.id).settlement_kind is None
 
 
+def test_explicit_waiver_preserves_payable_and_releases_order_for_fulfillment(db, api, admin_client):
+    from app.delivery import _order_blockers
+
+    world = make_world(db)
+    order = submit(db, world)
+    payable = order.total_cents
+    path = f'/admin/orders/{order.id}/confirm-payment'
+    body = payment_body(order, 0, settlementKind='WAIVED_MANUAL', note='管理员确认免单')
+    unconfirmed = api(admin_client, path, body)
+    assert unconfirmed.status_code == 409, unconfirmed.text
+    assert unconfirmed.json()['error']['code'] == 'PAYMENT_DIFFERENCE_CONFIRMATION_REQUIRED'
+
+    body['paymentDifferenceAccepted'] = True
+    response = api(admin_client, path, body, key='confirmed-waiver')
+    assert response.status_code == 200, response.text
+    data = response.json()['data']
+    assert data['status'] == 'PENDING_PRINT'
+    assert data['totalCents'] == payable
+    assert data['settlement']['settlementKind'] == 'WAIVED_MANUAL'
+    assert data['settlement']['cashReceivedCents'] == 0
+    assert data['settlement']['paymentDifferenceCents'] == -payable
+    assert data['settlement']['paymentDifferenceAccepted'] is True
+    assert data['settlement']['note'] == body['note']
+    replay = api(admin_client, path, body, key='confirmed-waiver')
+    assert replay.status_code == 200, replay.text
+
+    db.expire_all()
+    order = db.get(Order, order.id)
+    assert db.get(Quote, order.quote_id).total_cents == payable
+    assert db.scalar(select(func.count()).select_from(Receipt)) == 0
+    payment = db.scalars(select(Payment)).one()
+    assert payment.kind == 'WAIVED_MANUAL' and payment.amount_cents == 0
+    assert db.get(DeliverySlot, world.slot.id).occupied == 1
+    assert 'PAYMENT_REQUIRED' not in {item['code'] for item in _order_blockers(db, order)}
+    audit = db.scalar(select(AuditLog).where(AuditLog.action == 'PAYMENT_CONFIRMED'))
+    assert audit.data['paymentDifferenceCents'] == -payable
+    assert audit.actor_id == admin_client.staff.id
+
+
+def test_waiver_requires_reconciling_any_unmatched_receipt(db, api, admin_client):
+    order = submit(db, make_world(db))
+    receipt = Receipt(order_id=order.id, amount_cents=order.total_cents, staff_id=admin_client.staff.id)
+    db.add(receipt)
+    db.commit()
+    response = api(admin_client, f'/admin/orders/{order.id}/confirm-payment', payment_body(
+        order, 0, settlementKind='WAIVED_MANUAL', paymentDifferenceAccepted=True))
+    assert response.status_code == 409, response.text
+    assert response.json()['error']['code'] == 'RECEIPT_REVIEW_REQUIRED'
+    db.expire_all()
+    assert db.get(Receipt, receipt.id).status == 'UNMATCHED'
+    assert db.get(Order, order.id).settlement_kind is None
+
+
 def test_delivery_does_not_trust_an_unacknowledged_or_inconsistent_difference(db, api, admin_client):
     from app.delivery import _payment_confirmed
     order = submit(db, make_world(db))

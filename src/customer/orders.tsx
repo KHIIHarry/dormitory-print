@@ -337,7 +337,9 @@ export function Contact() {
             <span>
               {order.settlement.settlementKind === "ZERO_PAYABLE"
                 ? "零元结算已确认，正在安排打印"
-                : "收款已确认，正在安排打印"}
+                : order.settlement.settlementKind === "WAIVED_MANUAL"
+                  ? "免单已确认，正在安排打印"
+                  : "收款已确认，正在安排打印"}
             </span>
           </div>
         ) : (

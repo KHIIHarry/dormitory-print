@@ -491,10 +491,15 @@ def _proof_for_assignment(db, assignment_id: str) -> DeliveryProof | None:
 def _payment_confirmed(order: Order) -> bool:
     if order.settlement_kind == 'ZERO_PAYABLE':
         return order.total_cents == 0 and order.cash_received_cents == 0
-    if order.settlement_kind != 'CASH_MANUAL' or order.total_cents <= 0 or order.cash_received_cents <= 0:
+    if order.total_cents <= 0:
         return False
-    if order.cash_received_cents == order.total_cents:
-        return True
+    if order.settlement_kind == 'CASH_MANUAL':
+        if order.cash_received_cents <= 0:
+            return False
+        if order.cash_received_cents == order.total_cents:
+            return True
+    elif order.settlement_kind != 'WAIVED_MANUAL' or order.cash_received_cents != 0:
+        return False
     settlement = (order.data or {}).get('settlement') or {}
     return (settlement.get('paymentDifferenceAccepted') is True
             and settlement.get('settlementKind') == order.settlement_kind

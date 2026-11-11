@@ -68,6 +68,15 @@ it.each(["9.80", "10.50"])(
   },
 );
 
+it("requires explicit approval to waive a positive payable without recording cash", () => {
+  expect(() => settlementInput(1685, "0", false)).toThrow("免单");
+  expect(settlementInput(1685, "0.00", false, true)).toEqual({
+    receivedCents: 0,
+    settlementKind: "WAIVED_MANUAL",
+    paymentDifferenceAccepted: true,
+  });
+});
+
 it("preserves normal and zero settlements without declaring a difference", () => {
   expect(settlementInput(1000, "10", false, true)).toEqual({
     receivedCents: 1000,
@@ -78,7 +87,6 @@ it("preserves normal and zero settlements without declaring a difference", () =>
     settlementKind: "ZERO_PAYABLE",
   });
   expect(() => settlementInput(0, "0", false, true)).toThrow();
-  expect(() => settlementInput(1000, "0", true, true)).toThrow();
   expect(() => settlementInput(0, "1", true, true)).toThrow();
 });
 
@@ -161,4 +169,9 @@ it("enforces the same acknowledgement and zero rules in demo actions", () => {
       paymentDifferenceAccepted: true,
     }),
   ).toThrow();
+  const waiver = { ...body, receivedCents: 0, settlementKind: "WAIVED_MANUAL" };
+  expect(() => validateDemoOrderAction(path, waiver)).toThrow();
+  expect(() =>
+    validateDemoOrderAction(path, { ...waiver, paymentDifferenceAccepted: true }),
+  ).not.toThrow();
 });

@@ -101,7 +101,7 @@ def delivery_repair_preview(db) -> dict:
 
     paid_unassigned = []
     for order in orders.values():
-        if (order.settlement_kind not in ('CASH_MANUAL', 'ZERO_PAYABLE')
+        if (order.settlement_kind not in ('CASH_MANUAL', 'ZERO_PAYABLE', 'WAIVED_MANUAL')
                 or order.deleted_at is not None or order.status in ('DELIVERED', 'CANCELLED')):
             continue
         current = by_order[order.id]
