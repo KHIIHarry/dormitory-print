@@ -178,7 +178,6 @@ function courierOrder(
     allowedActions:
       status === "DELIVERING" ? ["SUBMIT_PROOF", "REPORT_EXCEPTION"] : [],
     blockers: [],
-    history: [],
     ...overrides,
   };
 }
@@ -741,4 +740,7 @@ test("single proof waits for the server DTO and uses the real assignment id", as
   await expect(
     page.getByRole("heading", { name: "交付凭证", exact: true }),
   ).toBeVisible();
+  await expect(page).toHaveURL(appUrl("/courier/orders/ORD-1"));
+  await expect(page.getByText("门口鞋柜", { exact: true })).toBeVisible();
+  await expect(page.locator(".app-error")).toHaveCount(0);
 });

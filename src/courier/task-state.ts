@@ -531,7 +531,7 @@ export function applyConfirmedOrder<
     status: OrderStatus;
     version: number;
     proof?: Proof;
-    history: { title: string; time: string; description: string }[];
+    history?: { title: string; time: string; description: string }[];
     allowedActions?: string[];
     blockers?: { code: string; message: string }[];
   },
@@ -561,7 +561,7 @@ export function applyConfirmedOrder<
         time: proof.deliveredAt,
         description: proof.placementNote,
       },
-      ...order.history,
+      ...(order.history ?? []),
     ],
   };
 }

@@ -53,13 +53,21 @@ import {
   type ReproMode,
   type SheetView,
 } from "../v1/admin-api";
+
+function printSidesLabel({ sides, flip }: Pick<PrintTaskView, "sides" | "flip">) {
+  if (sides !== "DUPLEX") return "单面";
+  if (flip === "LONG_EDGE") return "双面（长边翻转）";
+  if (flip === "SHORT_EDGE") return "双面（短边翻转）";
+  return "双面（翻转方向未记录）";
+}
+
 function taskDescription(f: PrintFile) {
   return f.kind === "PHOTO"
     ? `5 寸照片 · ${f.photo.copies} 张`
     : f.segments
         .map(
           (s) =>
-            `第 ${s.range} 页 · ${s.colorMode === "BW" ? "黑白" : "彩色"} · ${s.sides === "DUPLEX" ? "双面" : "单面"} · ${s.copies} 份`,
+            `第 ${s.range} 页 · ${s.colorMode === "BW" ? "黑白" : "彩色"} · ${printSidesLabel(s)} · ${s.copies} 份`,
         )
         .join(" / ");
 }
@@ -439,13 +447,7 @@ function DemoPrintTask() {
               <li>
                 <Check size={15} />
                 {segment?.colorMode === "COLOR" ? "彩色" : "黑白"} /{" "}
-                {segment?.sides === "DUPLEX" ? "双面" : "单面"}
-              </li>
-              <li>
-                <Check size={15} />
-                {segment?.flip === "SHORT_EDGE"
-                  ? "短边翻转"
-                  : "长边翻转（双面时）"}
+                {segment ? printSidesLabel(segment) : "单面"}
               </li>
               <li>
                 <Check size={15} />
@@ -962,7 +964,7 @@ function ServerQueueState({
 }
 
 function taskPaperLabel(task: PrintTaskView) {
-  return `${task.copies} 份 · ${task.sides === "DUPLEX" ? "双面" : "单面"} · ${
+  return `${task.copies} 份 · ${printSidesLabel(task)} · ${
     task.colorMode === "BW" ? "黑白" : "彩色"
   } · ${task.sheetCount} 张纸`;
 }
@@ -1326,7 +1328,13 @@ function ServerPrintTask() {
       <div className="print-view-layout">
         <Panel title="服务端任务">
           <div className="print-settings" aria-label="打印设置">
-            {[`${task.copies} 份`, task.sides === "DUPLEX" ? "双面" : "单面", task.colorMode === "BW" ? "黑白" : "彩色", `${task.sheetCount} 张纸`, `打印页码 ${task.pageRange || "整文件"}`].map((value, index) => <span key={index}>{value}</span>)}
+            {[
+              `${task.copies} 份`,
+              printSidesLabel(task),
+              task.colorMode === "BW" ? "黑白" : "彩色",
+              `${task.sheetCount} 张纸`,
+              `打印页码 ${task.pageRange || "整文件"}`,
+            ].map((value) => <span key={value}>{value}</span>)}
           </div>
           <dl className="courier-facts print-task-facts">
             <div>

@@ -7,6 +7,7 @@ export default defineConfig({
     "native-month.spec.ts",
     "delivery-proof-details.spec.ts",
     "service-prices.spec.ts",
+    "print-task-flip.spec.ts",
   ],
   use: {
     baseURL: "http://localhost:5173",
