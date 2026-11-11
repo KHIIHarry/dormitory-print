@@ -3887,6 +3887,11 @@ select.campus-filter:focus {
   margin: 0;
   padding: 0;
 }
+.admin-file .file-info strong {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .task-line {
   display: flex;
   align-items: center;
@@ -5553,7 +5558,7 @@ select.campus-filter:focus {
     font-size: 21px;
   }
   .admin-content .detail-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .admin-content .detail-grid > aside {
     display: grid;

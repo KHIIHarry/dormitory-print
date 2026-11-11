@@ -1,7 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
 type Surface = "admin" | "courier";
-type Scenario = "photo" | "exceptions" | "missing" | "pending";
+type Scenario = "photo" | "exceptions" | "missing" | "pending" | "unconfirmed";
+
+const orderFileNames = [
+  "报告.docx",
+  "免费_PDF打印版_AIGC检测报告_[商务数据分析期中课程论文+示例24111].pdf",
+  `${"ResearchReport2026".repeat(12)}.pdf`,
+];
 
 async function mount(
   page: Page,
@@ -52,14 +58,15 @@ async function mount(
     <script type="module">
       import React from '${react}';import ReactDOM from '${dom}';import {MemoryRouter,Routes,Route} from '${router}';
       import {AdminOrderDetail} from '/src/admin/orders.tsx';import {CourierOrder} from '/src/courier/pages.tsx';
-      import {createDemo} from '/src/lib/demo.ts';import '/src/styles.css';
+      import {createDemo,makeFile} from '/src/lib/demo.ts';import '/src/styles.css';
       const surface=${JSON.stringify(surface)},scenario=${JSON.stringify(scenario)};
       const data=createDemo(),order=data.orders[0];
       Object.assign(order,{id:'proof-order',pickupCode:'YVSPS',status:scenario==='pending'?'DELIVERING':'DELIVERED',packingStatus:'PACKED',batchId:'proof-batch',nickname:'验收同学',phone:'13800138000',history:[{title:'资料已送达',time:'2026-11-05T05:10:38Z',description:'交付凭证已记录'}]});
+      if(scenario==='unconfirmed')Object.assign(order,{status:'PENDING_CONFIRMATION',packingStatus:'PENDING',files:${JSON.stringify(orderFileNames)}.map(name=>makeFile(name,19))});
       const proof={placementNote:'资料放在一楼收发台左侧，请及时领取。'+ '长备注与连续标识'.repeat(12)+'ABCDE'.repeat(20),deliveredAt:'2026-11-05T05:10:38Z',position:{latitude:31.490191,longitude:121.829420,accuracyMeters:12,capturedAt:'2026-11-05T05:10:20Z',coordinateSystem:'WGS84'}};
       if(surface==='admin')proof.photoUrl='/api/v1/assets/proof-photo/content';else proof.photoAssetId='proof-photo';
       if(scenario==='exceptions'){delete proof.photoUrl;delete proof.photoAssetId;delete proof.position;proof.skipPhotoReason='收件人已当面领取，明确要求不拍照';proof.skipLocationReason='楼内无信号，管理员已核对交付位置';}
-      order.proof=['missing','pending'].includes(scenario)?undefined:proof;
+      order.proof=['missing','pending','unconfirmed'].includes(scenario)?undefined:proof;
       data.orders=[order];data.batches=[{id:'proof-batch',date:'2026-11-05',time:'11:30 – 13:30',orderIds:[order.id],courierId:'staff-2',status:'COMPLETED',version:1}];
       window.proofFixture={generation:0,store:{data,role:surface==='admin'?'ADMIN':'COURIER',resources:{},toast:()=>{},act:async()=>true,updateOrder:async()=>{},refresh:async()=>{},actionIssues:{}}};
       const component=surface==='admin'?AdminOrderDetail:CourierOrder,path=surface==='admin'?'/manage/orders/proof-order':'/courier/orders/proof-order';
@@ -79,6 +86,69 @@ async function mount(
   expect(errors).toEqual([]);
   return errors;
 }
+
+test("后台订单详情的长文件名完整换行，六档宽度不溢出", async ({
+  page,
+}, info) => {
+  await mount(page, "admin", "unconfirmed");
+  const panel = page.locator(".detail-grid > div > .panel").filter({
+    has: page.getByRole("heading", { name: "打印文件与任务", exact: true }),
+  });
+  await expect(panel.locator(".file-info strong")).toHaveText(orderFileNames);
+  await page.evaluate(() => document.fonts.ready);
+
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const metrics = await panel.evaluate((element) => {
+      const card = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const contentRight =
+        card.right - parseFloat(style.paddingRight) - element.clientLeft;
+      const names = [...element.querySelectorAll(".file-info strong")].map(
+        (name) => {
+          const range = document.createRange();
+          range.selectNodeContents(name);
+          const lines = [...range.getClientRects()];
+          return {
+            lineCount: new Set(lines.map((line) => Math.round(line.top))).size,
+            right: Math.max(...lines.map((line) => line.right)),
+            availableRight: name.getBoundingClientRect().right,
+          };
+        },
+      );
+      return {
+        width: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        scrollX,
+        cardRight: card.right,
+        badgeRight: Math.max(
+          ...[...element.querySelectorAll(".file-row .badge")].map(
+            (badge) => badge.getBoundingClientRect().right,
+          ),
+        ),
+        contentRight,
+        names,
+      };
+    });
+    expect(metrics.scrollWidth, `${width}px viewport`).toBeLessThanOrEqual(
+      metrics.width + 1,
+    );
+    expect(metrics.scrollX).toBe(0);
+    expect(metrics.cardRight).toBeLessThanOrEqual(metrics.width);
+    expect(metrics.badgeRight).toBeLessThanOrEqual(metrics.contentRight + 1);
+    expect(metrics.names[0].lineCount).toBe(1);
+    if (width <= 430) expect(metrics.names[1].lineCount).toBeGreaterThan(1);
+    expect(metrics.names[2].lineCount).toBeGreaterThan(1);
+    for (const name of metrics.names) {
+      expect(name.right).toBeLessThanOrEqual(name.availableRight + 1);
+    }
+    if (width === 320 || width === 1440) {
+      await panel.screenshot({
+        path: info.outputPath(`order-file-names-${width}.png`),
+      });
+    }
+  }
+});
 
 async function expectContained(page: Page) {
   const metrics = await page.evaluate(() => {
