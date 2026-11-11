@@ -855,11 +855,10 @@ def _can_pack(order: Order, state: dict) -> bool:
     )
 
 
-def _checklist_dto(db, state: dict) -> ProductionChecklistDTO:
-    payload = state['checklist']
+def _original_file_names(db, files: list[OrderFile]) -> dict[str, str]:
     names = {}
     missing_names = []
-    for file in state['files']:
+    for file in files:
         name = _json_dict(file.data).get('name')
         if isinstance(name, str) and name.strip():
             names[file.id] = name
@@ -869,6 +868,12 @@ def _checklist_dto(db, state: dict) -> ProductionChecklistDTO:
         asset_names = dict(db.execute(select(Asset.id, Asset.name).where(
             Asset.id.in_({file.asset_id for file in missing_names}))).all())
         names.update({file.id: asset_names.get(file.asset_id, '') for file in missing_names})
+    return names
+
+
+def _checklist_dto(db, state: dict) -> ProductionChecklistDTO:
+    payload = state['checklist']
+    names = _original_file_names(db, state['files'])
     return ProductionChecklistDTO(
         version=payload['version'],
         generated_at=_iso(utcnow()),
@@ -904,11 +909,12 @@ def _checklist_dto(db, state: dict) -> ProductionChecklistDTO:
 # ---------------------------------------------------------------------------
 
 
-def _task_dto(db, task: PrintTask, order: Order, *, with_attempts: bool = False) -> PrintTaskDTO:
+def _task_dto(
+    db, task: PrintTask, order: Order, file: OrderFile | None, file_name: str, *, with_attempts: bool = False,
+) -> PrintTaskDTO:
     artifact = db.get(Artifact, task.artifact_id)
     artifact_settings = _artifact_settings(artifact)
     settings = {**artifact_settings, **_json_dict(task.settings)}
-    file = db.get(OrderFile, task.file_id)
     catalog = sheet_catalog(artifact, settings) if artifact is not None else []
     open_attempt = _open_attempt(db, task)
     last_attempt = None
@@ -932,7 +938,7 @@ def _task_dto(db, task: PrintTask, order: Order, *, with_attempts: bool = False)
         order_id=task.order_id,
         pickup_code=order.pickup_code if order else '',
         file_id=task.file_id,
-        file_name=(_json_dict(file.data).get('name') if file else '') or (file.client_file_id if file else ''),
+        file_name=file_name,
         kind=file.kind if file else 'DOCUMENT',
         binding_type=file.binding_type if file else 'NONE',
         status=task.status,
@@ -983,7 +989,7 @@ def _binding_dto(db, task: BindingTask) -> BindingTaskDTO:
         order_id=task.order_id,
         pickup_code=order.pickup_code if order else '',
         file_id=task.file_id,
-        file_name=(_json_dict(file.data).get('name') if file else '') or (file.client_file_id if file else ''),
+        file_name=_original_file_names(db, [file])[file.id] if file else '',
         binding_type=file.binding_type if file else 'NONE',
         status=task.status,
         print_status=aggregate_file_print_status([row.status for row in tasks]),
@@ -1057,7 +1063,8 @@ def list_print_tasks(
         query = query.where(PrintTask.order_id == order_id)
     if not include_inactive:
         query = query.where(PrintTask.active.is_(True))
-    tasks = []
+    rows = []
+    files = {}
     counts = {name: 0 for name in ('PENDING', 'ATTEMPTED', 'COMPLETED', 'EXCEPTION')}
     for task in db.scalars(query):
         order = db.get(Order, task.order_id)
@@ -1066,13 +1073,20 @@ def list_print_tasks(
         if order.status in ('CANCELLED',) + POST_DELIVERY_STATUSES:
             continue
         file = db.get(OrderFile, task.file_id)
-        if file is not None and kind and file.kind != kind:
-            continue
         if status and task.status != status:
             continue
+        if file is not None:
+            if kind and file.kind != kind:
+                continue
+            files[file.id] = file
         if task.status in counts:
             counts[task.status] += 1
-        tasks.append(_task_dto(db, task, order))
+        rows.append((task, order))
+    names = _original_file_names(db, list(files.values()))
+    tasks = [
+        _task_dto(db, task, order, files.get(task.file_id), names.get(task.file_id, ''))
+        for task, order in rows
+    ]
     next_task = next(
         (task.id for task in tasks if task.status in ('PENDING', 'ATTEMPTED', 'EXCEPTION')),
         None,
@@ -1089,7 +1103,9 @@ def get_print_task(
     require_admin(actor, 'production.manage')
     task = _resolve_task(db, task_id)
     order = _order_of_task(db, task)
-    return ok(_task_dto(db, task, order, with_attempts=True))
+    file = db.get(OrderFile, task.file_id)
+    name = _original_file_names(db, [file])[file.id] if file else ''
+    return ok(_task_dto(db, task, order, file, name, with_attempts=True))
 
 
 @router.post('/admin/orders/{order_id}/start-production', response_model=Envelope[ProductionStartDTO])

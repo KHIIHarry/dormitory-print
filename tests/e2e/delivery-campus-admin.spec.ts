@@ -2,7 +2,14 @@ import { expect, test } from "@playwright/test";
 
 async function fixture(
   page: import("@playwright/test").Page,
-  view: "slots" | "batches" | "proposals" | "paid" | "detail" | "packing",
+  view:
+    | "slots"
+    | "batches"
+    | "proposals"
+    | "paid"
+    | "detail"
+    | "packing"
+    | "binding",
 ) {
   if (view === "slots")
     await page.clock.install({ time: new Date("2030-11-01T04:00:00Z") });
@@ -46,6 +53,11 @@ async function fixture(
       }
       if(path.includes('/admin/orders')) return {items:window.fixture.orders || []};
       if(path==='/admin/couriers') return {items:[{id:'c1',name:'配送员甲',role:'COURIER',enabled:true,status:'ACTIVE'}]};
+      if(path==='/admin/binding-tasks') return {tasks:[
+        {id:'internal-binding-id',orderId:'o1',pickupCode:'HV7KR',fileId:'file-1',fileName:'实验报告（终稿）.docx',bindingType:'CORNER',status:'READY',printStatus:'COMPLETED'},
+        {id:'internal-binding-long',orderId:'o1',pickupCode:'HV7KR',fileId:'file-2',fileName:'verylong'.repeat(25)+'.pdf',bindingType:'SIDE',status:'WAITING_PRINT',printStatus:'ATTEMPTED'},
+        {id:'internal-binding-unnamed',orderId:'o1',pickupCode:'HV7KR',fileId:'file-3',fileName:'',bindingType:'CORNER',status:'WAITING_PRINT',printStatus:'PENDING'}
+      ]};
       if(path==='/admin/packing-tasks') return {tasks:[{id:'internal-packing-id',orderId:'o1',pickupCode:'T8DUW',status:'PACKED',checklistVersion:2,checklist:{blockers:[],items:[{fileId:'internal-file-id',name:'实验报告（终稿）.docx',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'},{fileId:'long-file',name:'verylong'.repeat(23)+'.pdf',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'},{fileId:'missing-file-name',name:'',printStatus:'COMPLETED',bindingStatus:'NOT_REQUIRED'}]}}]};
       return {};
     }
@@ -62,13 +74,13 @@ async function fixture(
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
     <script type="module">
       import React from '${reactUrl}'; import ReactDOM from '${domUrl}'; import {BrowserRouter,MemoryRouter,Routes,Route} from '${routerUrl}';
-      import {Slots,Batches,SlotProposals,PaidArrangementProposals,BatchDetail} from '/src/admin/logistics.tsx'; import {PackingCenter} from '/src/admin/production.tsx'; import '/src/styles.css';
+      import {Slots,Batches,SlotProposals,PaidArrangementProposals,BatchDetail} from '/src/admin/logistics.tsx'; import {BindingCenter,PackingCenter} from '/src/admin/production.tsx'; import '/src/styles.css';
       const campuses=[{id:'east',name:'东校区',selectionEnabled:true},{id:'west',name:'西校区',selectionEnabled:true}];
       const slots=[{id:'e1',campusId:'east',campusName:'东校区',name:'东时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1},{id:'w1',campusId:'west',campusName:'西校区',name:'西时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1}];
       window.fixture={calls:[],campuses,slots,orders:[{id:'order',pickupCode:'P1',locationId:'building',status:'PENDING_CONFIRMATION',version:1}],data:{campuses:[],slots,buildings:[],orders:[],staff:[],batches:[{id:'legacy',name:'旧空批次',campusId:'old',campusName:'停用校区',status:'PLANNED',date:'2030-11-01',time:'12:00',orderIds:[],version:1}]}};
       if ('${view}' === 'paid') window.fixture.orders=[{id:'paid-order',pickupCode:'PAID1',locationId:'building',status:'PENDING_PRINT',version:1,confirmedSlotId:'e1',arrangement:{effective:{id:'e1',name:'东时段',startsAt:'2030-11-01T05:30:00Z',endsAt:'2030-11-01T06:30:00Z'}}}];
       if ('${view}' === 'detail') {window.fixture.data.batches=[{id:'source',name:'测试批次',campusId:'east',campusName:'东校区',status:'PLANNED',date:'2030-11-01',time:'12:00 – 13:00',orderIds:['o1'],version:1,allowedActions:['ASSIGN_COURIER']}];window.fixture.data.orders=[{id:'o1',pickupCode:'P1',locationId:'building',status:'PAID',packingStatus:'PACKED'}];window.fixture.data.buildings=[{id:'building',name:'楼栋',campusId:'east'}];}
-      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "paid" ? "React.createElement(PaidArrangementProposals,{slots,buildings:[{id:'building',campusId:'east'}]})" : view === "packing" ? "React.createElement(PackingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
+      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "paid" ? "React.createElement(PaidArrangementProposals,{slots,buildings:[{id:'building',campusId:'east'}]})" : view === "packing" ? "React.createElement(PackingCenter)" : view === "binding" ? "React.createElement(BindingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
       ReactDOM.createRoot(document.getElementById('root')).render('${view}'==='detail' ? component : React.createElement(BrowserRouter,null,component));
     </script>`,
     }),
@@ -434,6 +446,46 @@ test("packing checklist shows names and wraps long files inside the card", async
     if (width === 390 || width === 1440)
       await card.screenshot({
         path: info.outputPath(`packing-names-${width}.png`),
+      });
+  }
+});
+
+test("binding cards show original filenames and wrap long names", async ({
+  page,
+}, info) => {
+  await fixture(page, "binding");
+  const list = page.locator(".production-list");
+  await expect(
+    list.getByText("实验报告（终稿）.docx", { exact: true }),
+  ).toBeVisible();
+  await expect(list).not.toContainText(/internal-binding-|\bCOMPLETED\b/);
+  await expect(list.getByText("文件名未记录", { exact: true })).toBeVisible();
+  const name = list.getByText(`${"verylong".repeat(25)}.pdf`, { exact: true });
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bounds = await name.evaluate((element) => {
+      const card = element.closest(".panel")!;
+      const content = card.getBoundingClientRect();
+      const style = getComputedStyle(card);
+      const text = document.createRange();
+      text.selectNodeContents(element);
+      const textBox = text.getBoundingClientRect();
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        offset: scrollX,
+        contentLeft: content.left + parseFloat(style.paddingLeft),
+        contentRight: content.right - parseFloat(style.paddingRight),
+        textLeft: textBox.left,
+        textRight: textBox.right,
+      };
+    });
+    expect(bounds.pageWidth).toBeLessThanOrEqual(width + 1);
+    expect(bounds.offset).toBe(0);
+    expect(bounds.textLeft).toBeGreaterThanOrEqual(bounds.contentLeft - 1);
+    expect(bounds.textRight).toBeLessThanOrEqual(bounds.contentRight + 1);
+    if (width === 390 || width === 1440)
+      await list.screenshot({
+        path: info.outputPath(`binding-names-${width}.png`),
       });
   }
 });

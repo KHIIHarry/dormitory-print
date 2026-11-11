@@ -4142,6 +4142,10 @@ select.campus-filter:focus {
   gap: 25px;
   margin-top: 17px;
 }
+.production-file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .binding-task-body > .binding-card {
   width: 117px;
   flex-shrink: 0;
@@ -8337,7 +8341,9 @@ button.session-action svg { stroke-width: 1.7; }
 .print-settings span:nth-child(3) { background: #f0edf8; color: #6d5c91; }
 .print-settings span:nth-child(4) { background: #edf5ed; color: #557658; }
 .print-settings span:nth-child(5) { background: #faf2df; color: #806b38; }
-.print-task-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 24px; margin: 0 0 24px; }
+.print-task-metadata { border-top: 1px solid var(--line); margin-bottom: 12px; }
+.print-task-metadata summary { min-height: 44px; padding: 11px 0; cursor: pointer; color: var(--muted); }
+.print-task-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 16px 24px; margin: 0 0 12px; }
 .print-task-facts > div { min-width: 0; }
 .print-task-facts dt { color: #8b7d70; margin-bottom: 5px; }
 .print-task-facts dd { margin: 0; overflow-wrap: anywhere; }

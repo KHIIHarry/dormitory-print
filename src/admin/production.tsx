@@ -1100,7 +1100,9 @@ function ServerPrintCenter() {
                 <Link className="table-code" to={`${ADMIN}/orders/${task.orderId}`}>
                   {task.pickupCode}
                 </Link>
-                <span>{task.fileName}</span>
+                <strong className="production-file-name">
+                  {task.fileName?.trim() || "文件名未记录"}
+                </strong>
                 <CampusTag campus={taskCampus} />
                 <Badge status={task.status} />
                 {task.openAttemptId && (
@@ -1113,12 +1115,6 @@ function ServerPrintCenter() {
                   {task.pageRange ? `第 ${task.pageRange} 页` : "整文件"} ·{" "}
                   {taskPaperLabel(task)}
                 </p>
-                <span>
-                  任务 {task.id} · 内容版本 {task.orderVersion}
-                </span>
-                <span>
-                  产物 {task.artifactId.slice(0, 8)} · SHA {task.artifactSha256.slice(0, 10)}
-                </span>
                 {task.bindingType !== "NONE" && <span>需装订</span>}
               </div>
               <div className="task-card-actions">
@@ -1219,6 +1215,8 @@ function ServerPrintTask() {
     );
   if (!task)
     return <Empty title="打印任务不存在或已失效" text="旧内容版本的任务不能继续打印。" />;
+  const fileName = task.fileName?.trim() || "文件名未记录";
+  const orderFile = order?.files.find((item) => item.id === task.fileId);
   const pdfUrl = printAssetUrl(reprintArtifactId || task.artifactId);
   const completed = task.status === "COMPLETED";
   const run = async (work: () => Promise<unknown>, success: string) => {
@@ -1310,11 +1308,13 @@ function ServerPrintTask() {
         <ArrowLeft size={16} />
         返回打印中心
       </Link>
-      <PageHeading
-        title={`打印任务 · ${task.pickupCode}`}
-        description={task.fileName}
-        action={<Badge status={task.status} />}
-      />
+      <div className="production-file-name">
+        <PageHeading
+          title={`打印任务 · ${task.pickupCode}`}
+          description={fileName}
+          action={<Badge status={task.status} />}
+        />
+      </div>
       {refundLocked && (
         <Notice type="error">
           退款审核中，新生产已锁定；请先在售后流程完成未结打印尝试核实与审批。
@@ -1336,21 +1336,33 @@ function ServerPrintTask() {
               `打印页码 ${task.pageRange || "整文件"}`,
             ].map((value) => <span key={value}>{value}</span>)}
           </div>
-          <dl className="courier-facts print-task-facts">
-            <div>
-              <dt>任务 ID</dt>
-              <dd className="numeric">{task.id}</dd>
-            </div>
-            <div>
-              <dt>产物</dt>
-              <dd className="numeric">{task.artifactId}</dd>
-            </div>
-            <div>
-              <dt>SHA-256</dt>
-              <dd className="numeric">{task.artifactSha256}</dd>
-            </div>
-          </dl>
-          <DocPreview file={(order?.files.find((item) => item.id === task.fileId) || { id: task.fileId, assetId: task.artifactId, name: task.fileName, kind: "DOCUMENT", pages: task.pages }) as PrintFile} pdfUrl={pdfUrl} />
+          <details className="print-task-metadata">
+            <summary>任务技术信息</summary>
+            <dl className="courier-facts print-task-facts">
+              <div>
+                <dt>任务编号</dt>
+                <dd className="numeric">{task.id}</dd>
+              </div>
+              <div>
+                <dt>订单版本</dt>
+                <dd className="numeric">{orderVersion}</dd>
+              </div>
+              <div>
+                <dt>产物编号</dt>
+                <dd className="numeric">{task.artifactId}</dd>
+              </div>
+              <div>
+                <dt>SHA-256</dt>
+                <dd className="numeric">{task.artifactSha256}</dd>
+              </div>
+            </dl>
+          </details>
+          <DocPreview
+            file={orderFile
+              ? { ...orderFile, name: fileName }
+              : { id: task.fileId, assetId: task.artifactId, name: fileName, kind: "DOCUMENT", pages: task.pages } as PrintFile}
+            pdfUrl={pdfUrl}
+          />
           <div className="button-row">
             <a className="btn secondary" href={pdfUrl} target="_blank" rel="noreferrer">
               {reprintArtifactId ? "打开补打 PDF" : "打开最终 PDF"}
@@ -1515,6 +1527,14 @@ export function BindingCenter() {
   return DEMO ? DemoBindingCenter() : <ServerBindingCenter />;
 }
 
+const bindingPrintLabels: Record<string, string> = {
+  PENDING: "等待打印",
+  ATTEMPTED: "待确认打印结果",
+  COMPLETED: "打印已完成",
+  EXCEPTION: "打印异常",
+  VOIDED: "打印任务已作废",
+};
+
 function ServerBindingCenter() {
   const { data: storeData, refresh } = useStore();
   const queue = useRemote<{ tasks: BindingTaskView[] }>("/admin/binding-tasks");
@@ -1608,7 +1628,9 @@ function ServerBindingCenter() {
               <Link className="table-code" to={`${ADMIN}/orders/${task.orderId}`}>
                 {task.pickupCode}
               </Link>
-              <span>{task.fileName}</span>
+              <strong className="production-file-name">
+                {task.fileName?.trim() || "文件名未记录"}
+              </strong>
               <CampusTag campus={taskCampus} />
               <Badge
                 status={
@@ -1629,7 +1651,7 @@ function ServerBindingCenter() {
               />
               <div>
                 <p>
-                  装订任务 {task.id} · 打印状态 {task.printStatus}
+                  {bindingPrintLabels[task.printStatus] || "打印尚未完成"}
                 </p>
                 <small className="muted">
                   同文件各分段份数必须一致；超过每册张数上限时由服务端拒绝。

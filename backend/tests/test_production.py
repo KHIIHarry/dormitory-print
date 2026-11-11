@@ -1189,6 +1189,40 @@ def test_packing_queue_shows_original_names_for_current_and_legacy_files(db):
     }
 
 
+def test_binding_queue_shows_original_names_for_current_and_legacy_files(db):
+    seed = _seed(db, binding='CORNER', file_count=3)
+    current, legacy, unnamed = seed.files
+    current.data = {'name': '实验报告（终稿）.docx'}
+    legacy.data = {}
+    db.get(Asset, legacy.asset_id).name = '历史上传资料.pdf'
+    unnamed.data = {'name': ' '}
+    db.get(Asset, unnamed.asset_id).name = ''
+    db.commit()
+
+    queue = production.list_binding_tasks(seed.order.id, db=db, actor=seed.actor)
+    assert {task['fileId']: task['fileName'] for task in queue['data']['tasks']} == {
+        current.id: '实验报告（终稿）.docx', legacy.id: '历史上传资料.pdf', unnamed.id: '',
+    }
+
+
+def test_print_queue_and_detail_show_original_names_for_current_and_legacy_files(db):
+    seed = _seed(db, file_count=3)
+    current, legacy, unnamed = seed.files
+    current.data = {'name': '实验报告（终稿）.docx'}
+    legacy.data = {}
+    db.get(Asset, legacy.asset_id).name = '历史上传资料.pdf'
+    unnamed.data = {'name': ' '}
+    db.get(Asset, unnamed.asset_id).name = ''
+    db.commit()
+
+    queue = production.list_print_tasks(order_id=seed.order.id, db=db, actor=seed.actor)
+    names = {current.id: '实验报告（终稿）.docx', legacy.id: '历史上传资料.pdf', unnamed.id: ''}
+    assert {task['fileId']: task['fileName'] for task in queue['data']['tasks']} == names
+    for task in seed.tasks:
+        detail = production.get_print_task(task.id, db=db, actor=seed.actor)['data']
+        assert detail['fileName'] == names[task.file_id]
+
+
 def test_packing_requires_every_file_and_task(db):
     seed = _seed(db, file_count=2)
     _attempt_and_complete(db, seed, seed.tasks[0])

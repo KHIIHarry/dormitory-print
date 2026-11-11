@@ -49,13 +49,20 @@ const cases = [
   { id: "single", sides: "SINGLE", flip: "NONE", label: "单面" },
 ] as const;
 
+const fileNames: Record<(typeof cases)[number]["id"], string> = {
+  long: `${"LectureNotes".repeat(12)}.pdf`,
+  short: "课堂练习.pdf",
+  legacy: "历史上传资料.pdf",
+  single: "",
+};
+
 test("打印中心和任务详情显示每项任务的双面翻转方向", async ({ page }, info) => {
   const tasks = cases.map(({ label, ...task }) => ({
     ...task,
     orderId: "order-1",
     pickupCode: "T8DUW",
     fileId: `file-${task.id}`,
-    fileName: `${task.id}.pdf`,
+    fileName: fileNames[task.id],
     kind: "DOCUMENT",
     bindingType: "NONE",
     status: "COMPLETED",
@@ -100,16 +107,24 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
 
   await page.goto(`${baseURL}/manage/print`);
   for (const { id, label } of cases) {
-    const card = page
-      .locator(".print-task-card")
-      .filter({ hasText: `${id}.pdf` });
+    const fileName = fileNames[id] || "文件名未记录";
+    const card = page.locator(".print-task-card").filter({ hasText: fileName });
+    await expect(card.getByText(fileName, { exact: true })).toBeVisible();
+    await expect(card).not.toContainText(`任务 ${id}`);
+    await expect(card).not.toContainText("SHA");
     await expect(card.locator(".print-task-details > p")).toContainText(
       `· ${label} ·`,
     );
     await card.getByRole("link", { name: "打开任务" }).click();
     await expect(
+      page.locator(".page-heading").getByText(fileName, { exact: true }),
+    ).toBeVisible();
+    await expect(
       page.getByLabel("打印设置").getByText(label, { exact: true }),
     ).toBeVisible();
+    await expect(page.getByText("SHA-256", { exact: true })).toBeHidden();
+    await page.getByText("任务技术信息", { exact: true }).click();
+    await expect(page.getByText("SHA-256", { exact: true })).toBeVisible();
     await page.getByRole("link", { name: "返回打印中心" }).click();
   }
 
@@ -117,6 +132,18 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
   await expect(summary).toBeVisible();
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
+    const name = page.getByText(fileNames.long, { exact: true });
+    const nameFits = await name.evaluate((element) => {
+      const heading = element
+        .closest(".print-task-top")!
+        .getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return Array.from(range.getClientRects()).every(
+        (rect) => rect.right <= heading.right + 1,
+      );
+    });
+    expect(nameFits, `${width}px filename`).toBe(true);
     const overflow = await summary.evaluate((element) => {
       const parent = element.parentElement!;
       return Math.max(
