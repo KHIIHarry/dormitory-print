@@ -110,6 +110,13 @@ export function Batches() {
   const [createBatch, setCreateBatch] = useState(false);
   const batchCampuses = (batch: Batch) =>
     campusesOfBatch(data.campuses, data.buildings, data.orders, batch);
+  const dispatchBatches = data.batches.filter(
+    (batch) =>
+      batch.source !== "AUTO" ||
+      !batch.isRegular ||
+      batch.status !== "PLANNED" ||
+      batch.orderIds.length > 0,
+  );
   const filterCampuses = [...(data.campuses || [])];
   for (const batch of data.batches) {
     if (
@@ -141,7 +148,7 @@ export function Batches() {
       (!!batch.campusId && [...ids].some((id) => id !== batch.campusId))
     );
   };
-  const visibleBatches = data.batches.filter(
+  const visibleBatches = dispatchBatches.filter(
     (batch) =>
       (!status || batch.status === status) &&
       (!campus ||
@@ -247,7 +254,7 @@ export function Batches() {
                   <Truck size={24} />
                 </span>
                 <Badge status={b.status} />
-                {extra.isRegular && <span className="badge">自动归集</span>}
+                {b.isRegular && <span className="badge">自动归集</span>}
                 {extra.sealedAt && <span className="badge">已封批</span>}
               </div>
               <h2>{b.name}</h2>
@@ -306,10 +313,10 @@ export function Batches() {
         <Panel>
           <Empty
             title={
-              data.batches.length ? "该校区暂无配送批次" : "还没有配送批次"
+              dispatchBatches.length ? "该校区暂无配送批次" : "还没有配送批次"
             }
             text={
-              data.batches.length
+              dispatchBatches.length
                 ? "切换校区或清除筛选查看其他批次。"
                 : "订单确认收款后会自动生成配送批次；特殊拆分或补送可从批次详情处理。"
             }

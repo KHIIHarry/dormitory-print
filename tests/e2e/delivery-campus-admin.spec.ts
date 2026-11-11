@@ -219,6 +219,61 @@ test("blocked slot save keeps the input and shows the error next to save", async
   );
 });
 
+test("dispatch hides emptied automatic batches and shows them again after new orders", async ({
+  page,
+}) => {
+  await fixture(page, "batches");
+  await expect(page.getByRole("link", { name: /旧空批次/ })).toBeVisible();
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    const automatic = {
+      ...fixture.data.batches[0],
+      source: "AUTO",
+      isRegular: true,
+    };
+    fixture.data.batches.push(
+      { ...automatic, id: "source", name: "原配送批次", orderIds: ["o1"] },
+      { ...automatic, id: "target", name: "目标配送批次", orderIds: ["o2"] },
+    );
+    fixture.refresh();
+  });
+  const source = page.getByRole("link", { name: /原配送批次/ });
+  const target = page.getByRole("link", { name: /目标配送批次/ });
+  const plannedCount = page
+    .locator(".production-stats > div")
+    .filter({ hasText: "规划中" });
+  await page.getByRole("button", { name: "规划中", exact: true }).click();
+  await expect(source).toBeVisible();
+  await expect(plannedCount.locator("strong")).toHaveText("3");
+
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.data.batches[1].orderIds = [];
+    fixture.data.batches[2].orderIds = ["o1", "o2"];
+    fixture.refresh();
+  });
+  await expect(source).toHaveCount(0);
+  await expect(target.locator(".batch-count strong").first()).toHaveText("2");
+  await expect(page.getByRole("link", { name: /旧空批次/ })).toBeVisible();
+  await expect(plannedCount.locator("strong")).toHaveText("2");
+  await page.getByRole("button", { name: "全部批次", exact: true }).click();
+  await expect(source).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.data.batches = [fixture.data.batches[1]];
+    fixture.refresh();
+  });
+  await expect(page.getByText("还没有配送批次", { exact: true })).toBeVisible();
+
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.data.batches[0].orderIds = ["o3"];
+    fixture.refresh();
+  });
+  await expect(source.locator(".batch-count strong").first()).toHaveText("1");
+});
+
 test("batch creation filters slots and disabled empty batches keep campus identity", async ({
   page,
 }) => {

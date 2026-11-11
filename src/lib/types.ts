@@ -208,6 +208,8 @@ export type Batch = {
   id: string;
   campusId?: string | null;
   campusName?: string | null;
+  source?: string;
+  isRegular?: boolean;
   name: string;
   date: string;
   time: string;
