@@ -12,7 +12,7 @@ from .core import (Actor, DTO, DomainError, Envelope, actor_dep, audit, authoriz
 from .db import get_db
 from .campuses import campus_is_open
 from .delivery_scope import ensure_slot_campus, location_campus_snapshot, order_campus_id
-from .models import (AccessGrant, Account, Artifact, Asset, BindingTask, BusinessException, DeliveryAssignment,
+from .models import (AccessGrant, Account, Artifact, Asset, AuditLog, BindingTask, BusinessException, DeliveryAssignment,
     DeliveryProof, DeliverySlot, Location, Order, OrderFile, OrderRevision, PackingTask, Payment, Preparation,
     Principal, PrintAttempt, PrintTask, Quote, Receipt, ReceiptAdjustment, utcnow)
 from .growth_schemas import QuoteDTO
@@ -20,6 +20,7 @@ from .supplementary_schemas import SupplementarySummaryDTO
 
 router=APIRouter()
 STATUS=Literal['PENDING_CONFIRMATION','PENDING_PRINT','READY_FOR_DELIVERY','DELIVERING','DELIVERED','CANCELLED','DELIVERY_EXCEPTION']
+PAYMENT_TIMEOUT_REASON = '超过待确认期限自动关闭'
 
 
 class Contact(DTO):
@@ -67,6 +68,18 @@ class RevisionSubmit(OrderSubmit):
 class VersionReason(DTO):
     expected_version:StrictInt
     reason:str=Field(default='',max_length=1000)
+
+
+class ReopenOrderInput(DTO):
+    expected_version:StrictInt
+    confirmed:Literal[True]
+
+    @field_validator('confirmed', mode='before')
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError('请明确确认恢复超时订单')
+        return value
 
 
 class LocationInput(DTO):
@@ -396,6 +409,25 @@ def _artifact_view(artifact,file_id,segment_id):
         'expandedCopies':values.get('copies',1),'sourcePageMapAvailable':bool(artifact.page_map)}
 
 
+def _is_timed_out_order(db, order):
+    if (order.status != 'CANCELLED' or order.deleted_at or order.settlement_kind
+            or order.cash_received_cents or order.refunded_cents or order.refund_locked
+            or order.actual_started_at or order.confirmed_slot_id):
+        return False
+    data = order.data or {}
+    if data.get('voidedAt'):
+        return False
+    if 'closeReasonCode' in data:
+        return data['closeReasonCode'] == 'PAYMENT_TIMEOUT'
+    # Legacy auto-closures have an audit record. The displayed reason alone
+    # is insufficient because a customer's cancellation also accepts text.
+    return data.get('closeReason') == PAYMENT_TIMEOUT_REASON and bool(db.scalar(
+        select(AuditLog.id).where(
+            AuditLog.target_type == 'ORDER', AuditLog.target_id == order.id,
+            AuditLog.actor_id == 'system', AuditLog.action == 'ORDER_AUTO_CLOSED',
+        ).limit(1)))
+
+
 def _scope_actions(db,order,actor):
     owner=owns_principal(db,actor,order.principal_id)
     scopes=grant_scopes(db,actor,order.id)
@@ -413,6 +445,9 @@ def _scope_actions(db,order,actor):
     if (not (order.data or {}).get('slotProposal')
             or order.status in ('CANCELLED', 'DELIVERED')):
         allowed.discard('ORDER_AGREE_SLOT')
+    if (actor.staff_role == 'ADMIN' and not actor.restricted
+            and {'*', 'payment.manage'} & actor.capabilities and _is_timed_out_order(db, order)):
+        allowed.add('ADMIN_REOPEN_TIMED_OUT_ORDER')
     return sorted(allowed)
 
 
@@ -847,7 +882,7 @@ def revise_order(order_id:str,body:RevisionSubmit,db=Depends(get_db),actor:Actor
     return ok({'order':order_view(db,order,actor)})
 
 
-def cancel_pending(db,order,reason,actor=None):
+def cancel_pending(db,order,reason,actor=None,*,close_reason_code='CUSTOMER_CANCELLED'):
     if order.status!='PENDING_CONFIRMATION' or order.settlement_kind:
         raise DomainError('INVALID_TRANSITION','该订单当前不能直接撤销',409)
     from .growth import release_coupon
@@ -855,7 +890,7 @@ def cancel_pending(db,order,reason,actor=None):
     for assignment in db.scalars(select(DeliveryAssignment).where(DeliveryAssignment.order_id==order.id,DeliveryAssignment.active.is_(True)).with_for_update()):
         assignment.active=False;assignment.status='CANCELLED';touch(assignment)
     order.status='CANCELLED'
-    order.data={**order.data,'closeReason':reason}
+    order.data={**order.data,'closeReason':reason,'closeReasonCode':close_reason_code}
     add_history(order,'订单已关闭',reason);touch(order)
     if actor:audit(db,actor,'ORDER_CANCELLED','ORDER',order.id,reason)
     from .growth import notify_order_event
@@ -867,6 +902,53 @@ def cancel_order(order_id:str,body:VersionReason,db=Depends(get_db),actor:Actor=
     order=lock(db,Order,order_id,body.expected_version);authorize_order(db,actor,order,'ORDER_CANCEL_PENDING')
     cancel_pending(db,order,body.reason or '客户撤销',actor)
     return ok(order_view(db,order,actor))
+
+
+@router.post('/admin/orders/{order_id}/reopen', response_model=Envelope[OrderView])
+def reopen_order(order_id: str, body: ReopenOrderInput, db=Depends(get_db), actor: Actor=Depends(actor_dep)):
+    require_admin(actor, 'payment.manage')
+    candidate = db.get(Order, order_id)
+    authorize_order(db, actor, candidate)
+    owner_account_id = db.scalar(select(Principal.account_id).where(Principal.id == candidate.principal_id))
+    account_ids = {owner_account_id, candidate.checkout_account_id} - {None}
+    if account_ids:
+        # Account deletion locks the account before checking for active orders.
+        accounts = list(db.scalars(select(Account).where(Account.id.in_(account_ids)).order_by(Account.id)
+            .with_for_update().execution_options(populate_existing=True)))
+        if len(accounts) != len(account_ids) or any(
+                account.deleted_at or account.status in ('DELETION_PENDING', 'DELETED') for account in accounts):
+            raise DomainError('ORDER_REOPEN_UNAVAILABLE', '客户账号正在注销或已注销，无法恢复订单', 409)
+    order = lock(db, Order, order_id, body.expected_version)
+    authorize_order(db, actor, order)
+    if not _is_timed_out_order(db, order):
+        raise DomainError('ORDER_REOPEN_UNAVAILABLE', '仅可恢复未结算且因超时自动关闭的订单', 409)
+    if db.scalar(select(Payment.id).where(Payment.order_id == order.id).limit(1)) or db.scalar(
+            select(DeliveryAssignment.id).where(DeliveryAssignment.order_id == order.id,
+                or_(DeliveryAssignment.active.is_(True), DeliveryAssignment.status.in_(('STARTED', 'DELIVERED')))).limit(1)):
+        raise DomainError('ORDER_REOPEN_UNAVAILABLE', '订单已有结算或配送记录，请人工核对', 409)
+
+    assets = list(db.scalars(select(Asset).join(Artifact, Artifact.asset_id == Asset.id)
+        .join(PrintTask, PrintTask.artifact_id == Artifact.id)
+        .where(PrintTask.order_id == order.id, PrintTask.active.is_(True))))
+    if not assets or any(asset.deleted_at or asset.status != 'READY' or not asset.storage_key for asset in assets):
+        raise DomainError('FILE_NOT_READY', '原订单的最终打印文件已不可用，请重新下单', 409)
+
+    minutes = get_config(db, 'workflow').data.get('unpaidTimeoutMinutes')
+    if not minutes:
+        raise DomainError('WORKFLOW_NOT_CONFIGURED', '请先配置待确认订单期限', 409)
+    from .growth import reserve_coupon
+    reserve_coupon(db, order, db.get(Quote, order.quote_id))
+
+    previous_close_at = order.close_at
+    order.close_at = utcnow() + timedelta(minutes=minutes)
+    order.status = 'PENDING_CONFIRMATION'
+    order.data = {key: value for key, value in order.data.items()
+                  if key not in ('closeReason', 'closeReasonCode')}
+    add_history(order, '超时订单已恢复', '管理员恢复为待确认，等待核对收款。')
+    touch(order)
+    audit(db, actor, 'ORDER_REOPENED', 'ORDER', order.id, PAYMENT_TIMEOUT_REASON,
+          {'previousCloseAt': previous_close_at.isoformat(), 'closeAt': order.close_at.isoformat()})
+    return ok(order_view(db, order, actor))
 
 
 @router.patch('/orders/{order_id}/location',response_model=Envelope[OrderView])
@@ -992,7 +1074,10 @@ def settle_order(db,actor,order,body):
     if order.status!='PENDING_CONFIRMATION' or order.close_at<=utcnow() or order.settlement_kind:
         if receipt and not order.settlement_kind:
             receipt.data={**receipt.data,'refundRequired':True,'reasonCode':'CLOSED_ORDER'}
-            raise DomainError('ORDER_CLOSED_CASH_REVIEW','订单已关闭或到期，已登记待核对实收，请线下退回后重新下单',409,{'receiptId':receipt.id,'refundRequired':True},commit=True)
+            message = ('订单已超时，款项已登记。可在订单自动关闭后恢复订单并复用该款项，或线下退款'
+                       if order.status == 'PENDING_CONFIRMATION' or _is_timed_out_order(db, order)
+                       else '订单已关闭，已登记待核对实收，请线下退回后重新下单')
+            raise DomainError('ORDER_CLOSED_CASH_REVIEW',message,409,{'receiptId':receipt.id,'refundRequired':True},commit=True)
         raise DomainError('INVALID_TRANSITION','订单当前不能重复结算',409)
     valid_cash=order.total_cents>0 and body.received_cents>0 and body.settlement_kind=='CASH_MANUAL'
     valid_zero=order.total_cents==0 and body.received_cents==0 and body.settlement_kind=='ZERO_PAYABLE'
@@ -1072,7 +1157,11 @@ def _complete_settlement(db,actor,order,body,receipt):
     from .growth import settle_coupon
     settle_coupon(db,order)
     slot.occupied+=1;touch(slot)
-    if receipt:receipt.status='ALLOCATED';touch(receipt)
+    if receipt:
+        receipt.status = 'ALLOCATED'
+        if (receipt.data or {}).get('reasonCode') == 'CLOSED_ORDER':
+            receipt.data = {**receipt.data, 'refundRequired': False}
+        touch(receipt)
     order.confirmed_slot_id=slot.id;order.cash_received_cents=body.received_cents;order.settlement_kind=body.settlement_kind
     order.status='PENDING_PRINT'
     quote=db.get(Quote,order.quote_id)

@@ -2,7 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 // Mount the real detail/form component with a deterministic store; API cash
 // persistence, permissions and transaction behavior are covered in PostgreSQL.
-async function fixture(page: Page, legacyReceipt = false, exports = false) {
+async function fixture(
+  page: Page,
+  { legacyReceipt = false, exports = false, timedOut = false } = {},
+) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   if (exports)
     await page.route("**/src/growth/client.ts*", (route) =>
@@ -26,9 +29,14 @@ async function fixture(page: Page, legacyReceipt = false, exports = false) {
       body: `import React from '${react}';
       export const ADMIN='/manage',DEMO=false;
       export function useStore(){const [,tick]=React.useState(0);return {
-        data:window.fixture.data,actionIssues:{},refresh:async()=>{},updateOrder:()=>{},
+        data:window.fixture.data,actionIssues:{},refresh:async()=>{},
+        updateOrder:async(id,patch)=>{window.fixture.data.orders=window.fixture.data.orders.map(order=>order.id===id?{...order,...patch}:order);tick(v=>v+1);return true},
         toast:(message)=>window.fixture.toast=message,
-        act:async(path,body,update)=>{window.fixture.calls.push({path,body});window.fixture.data=update(window.fixture.data);tick(v=>v+1);return true}
+        act:async(path,body,update,method,onResponse)=>{
+          window.fixture.calls.push({path,body});
+          if(path.endsWith('/reopen'))onResponse?.({...window.fixture.data.orders[0],status:'PENDING_CONFIRMATION',version:2,allowedActions:[]});
+          window.fixture.data=update(window.fixture.data);tick(v=>v+1);return true
+        }
       }}`,
     }),
   );
@@ -61,6 +69,7 @@ async function fixture(page: Page, legacyReceipt = false, exports = false) {
         const quote=buildQuote([{key:'a',relatedId:'a',unit:'SHEET',quantity:10,unitPriceCents:100,amountCents:1000,service:'A4'}],{id:'p',version:1,enabled:false,tiers:[]},[]);
         const legacy=${JSON.stringify(legacyReceipt)};
         const order={id:'order',pickupCode:'P1001',version:1,contentRevision:1,status:'PENDING_CONFIRMATION',currentQuoteId:quote.id,quote,totalCents:1000,files:[],history:[],packingStatus:'WAITING_PRINT',nickname:'测试同学',phone:'13800000000',createdAt:'2026-11-05T01:00:00Z',locationId:'building',slotId:'slot',blockers:legacy?[{code:'PAYMENT_MISMATCH',message:'历史收款待核对'}]:[],unmatchedReceipts:legacy?[{id:'receipt',amountCents:980,status:'UNMATCHED',createdAt:'2026-11-05T02:00:00Z'}]:[]};
+        if(${JSON.stringify(timedOut)})Object.assign(order,{status:'CANCELLED',priority:true,allowedActions:['ADMIN_REOPEN_TIMED_OUT_ORDER']});
         window.fixture={calls:[],data:{orders:[order],campuses:[],buildings:[],slots:[],batches:[],staff:[]}};
         ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MemoryRouter,{initialEntries:['/manage/orders/order']},React.createElement(Routes,null,React.createElement(Route,{path:'/manage/orders/:id',element:React.createElement(${exports ? "AdminDataOperationsPage" : "AdminOrderDetail"})}))));
       </script>`,
@@ -150,7 +159,7 @@ test("resets acknowledgement and optional note on reopening, keeps equal cash si
 test("reconciles a historical mismatch using its existing cash receipt", async ({
   page,
 }) => {
-  await fixture(page, true);
+  await fixture(page, { legacyReceipt: true });
   await page.getByRole("button", { name: "确认线下收款", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("combobox").selectOption("receipt");
@@ -193,10 +202,65 @@ test("shows a distinct confirmation for a zero receipt on a positive quote", asy
   await expect(page.getByText("免单已确认", { exact: true })).toBeVisible();
 });
 
+test("shows a filled priority star and asks again before reopening a timed-out order", async ({
+  page,
+}, info) => {
+  await fixture(page, { legacyReceipt: true, timedOut: true });
+  const priority = page.getByRole("button", { name: "取消优先" });
+  await expect(priority).toHaveAttribute("aria-pressed", "true");
+  await expect(priority.locator("svg")).toHaveCSS("fill", "rgb(232, 179, 64)");
+  await priority.click();
+  const unmarked = page.getByRole("button", { name: "设为优先" });
+  await expect(unmarked).toHaveAttribute("aria-pressed", "false");
+  await expect(unmarked.locator("svg")).toHaveCSS("fill", "none");
+
+  const reopen = page.getByRole("button", { name: "恢复订单", exact: true });
+  const dialog = page.getByRole("dialog", { name: /恢复超时订单/ });
+  await reopen.click();
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixture.calls)).toEqual([]);
+  await reopen.click();
+  await expect(dialog.getByText(/已有待核对实收/)).toBeVisible();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 850 });
+    const metrics = await dialog.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        left: bounds.left,
+        right: bounds.right,
+        dialogOverflow: element.scrollWidth - element.clientWidth,
+        pageOverflow: document.documentElement.scrollWidth - innerWidth,
+        buttons: [...element.querySelectorAll('button')].map((button) => ({
+          name: button.getAttribute("aria-label") || button.textContent,
+          height: button.getBoundingClientRect().height,
+        })),
+      };
+    });
+    expect(metrics.left, `${width}px viewport`).toBeGreaterThanOrEqual(0);
+    expect(metrics.right, `${width}px viewport`).toBeLessThanOrEqual(width + 1);
+    expect(metrics.dialogOverflow, `${width}px viewport`).toBeLessThanOrEqual(1);
+    expect(metrics.pageOverflow, `${width}px viewport`).toBeLessThanOrEqual(1);
+    for (const button of metrics.buttons) {
+      expect(button.height, `${width}px ${button.name}`).toBeGreaterThanOrEqual(44);
+    }
+    if (width === 390 || width === 1440)
+      await dialog.screenshot({ path: info.outputPath(`reopen-${width}.png`) });
+  }
+  await dialog.getByRole("button", { name: "确认恢复" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixture.calls)).toEqual([
+    { path: "/admin/orders/order/reopen", body: { expectedVersion: 1, confirmed: true } },
+  ]);
+  await expect(reopen).toHaveCount(0);
+  await page.getByRole("button", { name: "确认线下收款", exact: true }).click();
+  await expect(page.getByRole("combobox")).toContainText("¥9.80");
+});
+
 test("finance export defaults include real cash and variance without stale order-only fields", async ({
   page,
 }) => {
-  await fixture(page, false, true);
+  await fixture(page, { exports: true });
   await page.getByLabel("导出类型").selectOption("FINANCE");
   for (const field of [
     "payableCents",

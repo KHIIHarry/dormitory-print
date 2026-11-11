@@ -299,6 +299,14 @@ svg.lucide {
   padding: 10px 16px;
   font-size: 12px;
 }
+.button-row.order-detail-actions .btn,
+.button-row.order-reopen-actions .btn {
+  min-height: 44px;
+}
+.order-priority-star {
+  fill: #e8b340;
+  stroke: #a66b15;
+}
 .icon-btn {
   aspect-ratio: 1;
   padding: 0;
@@ -880,6 +888,10 @@ input[type="date"],
 }
 .modal > header h2 {
   margin: 0;
+}
+.modal:has(> .order-reopen-actions) > header > .icon-btn {
+  min-width: 44px;
+  min-height: 44px;
 }
 .modal > p {
   color: #84786d;

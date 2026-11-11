@@ -29,6 +29,7 @@ import {
   MoreHorizontal,
   Plus,
   Receipt,
+  RotateCcw,
   Search,
   Star,
   Truck,
@@ -262,7 +263,9 @@ export function AdminOrders() {
                           to={`${ADMIN}/orders/${o.id}`}
                         >
                           {o.pickupCode}
-                          {o.priority && <Star size={12} fill="currentColor" />}
+                          {o.priority && (
+                            <Star size={12} className="order-priority-star" aria-hidden="true" />
+                          )}
                         </Link>
                         <small>{formatDisplayTime(o.createdAt)}</small>
                       </td>
@@ -355,6 +358,8 @@ export function AdminOrderDetail() {
   const { data, act, updateOrder, toast, refresh, actionIssues } = useStore();
   const [payment, setPayment] = useState(false);
   const [changingSlot, setChangingSlot] = useState(false);
+  const [reopening, setReopening] = useState(false);
+  const [reopenIssue, setReopenIssue] = useState("");
   const [voiding, setVoiding] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteBlockers, setDeleteBlockers] = useState<TrashBlocker[]>([]);
@@ -381,6 +386,9 @@ export function AdminOrderDetail() {
       />
     );
   const orderForChange = order as Order & AdminOrderView;
+  const canReopen =
+    order.status === "CANCELLED" &&
+    order.allowedActions?.includes("ADMIN_REOPEN_TIMED_OUT_ORDER");
   const { unpaid, current, previous, hasLegacyProposal } = deliveryWindowOf(
     order,
     data.slots.find((slot) => slot.id === order.slotId),
@@ -411,6 +419,34 @@ export function AdminOrderDetail() {
   }
   const confirmingWaiver =
     order.totalCents > 0 && paymentDifference === -order.totalCents;
+  const reopen = async () => {
+    setBusy(true);
+    setReopenIssue("");
+    let reopened: Order | undefined;
+    const ok = await act(
+      `/admin/orders/${order.id}/reopen`,
+      { expectedVersion: order.version, confirmed: true },
+      (state) => ({
+        ...state,
+        orders: state.orders.map((item) =>
+          reopened && item.id === reopened.id ? reopened : item,
+        ),
+      }),
+      "POST",
+      (result) => {
+        reopened = result as Order;
+      },
+      (_error, message) => {
+        setReopenIssue(message);
+        return true;
+      },
+    );
+    setBusy(false);
+    if (ok) {
+      setReopening(false);
+      toast("订单已恢复为待确认");
+    }
+  };
   const confirm = async () => {
     let settlement: ReturnType<typeof settlementWithReceipt>;
     try {
@@ -491,12 +527,17 @@ export function AdminOrderDetail() {
       }),
       "POST",
       undefined,
-      (error) => {
-        const details = (error as { details?: { receiptId?: string } }).details;
+      (error, message) => {
+        const { code, details } = error as {
+          code?: string;
+          details?: { receiptId?: string };
+        };
         if (details?.receiptId) {
           setRecordedReceiptOrder(order.id);
           setReceiptNotice(
-            "款项已登记为待核对实收。协调并接受有效新时段后，请选择该记录完成结算，无需再次付款。",
+            code === "ORDER_CLOSED_CASH_REVIEW"
+              ? message
+              : "款项已登记为待核对实收。协调并接受有效新时段后，请选择该记录完成结算，无需再次付款。",
           );
           void refresh();
         }
@@ -518,7 +559,7 @@ export function AdminOrderDetail() {
         title={`订单 ${order.pickupCode}`}
         description={`下单 ${formatDisplayTime(order.createdAt)} · 内容版本 v${order.contentRevision}`}
         action={
-          <div className="button-row">
+          <div className="button-row order-detail-actions">
             <Button
               variant="secondary"
               onClick={() => {
@@ -532,12 +573,28 @@ export function AdminOrderDetail() {
               staff?.capabilities?.includes("orders.manage")) && (
               <Button
                 variant="secondary"
+                aria-pressed={!!order.priority}
                 onClick={() =>
                   updateOrder(order.id, { priority: !order.priority }, "priority")
                 }
               >
-                <Star size={16} />
+                <Star
+                  size={16}
+                  className={order.priority ? "order-priority-star" : undefined}
+                  aria-hidden="true"
+                />
                 {order.priority ? "取消优先" : "设为优先"}
+              </Button>
+            )}
+            {canReopen && (
+              <Button
+                onClick={() => {
+                  setReopenIssue("");
+                  setReopening(true);
+                }}
+              >
+                <RotateCcw size={16} aria-hidden="true" />
+                恢复订单
               </Button>
             )}
             {order.status === "DELIVERING" && (
@@ -1046,6 +1103,34 @@ export function AdminOrderDetail() {
                   ? "已核对，确认免单"
                   : "已核对，确认实际收款"}
           </Button>
+        </Modal>
+      )}
+      {reopening && canReopen && (
+        <Modal
+          title={`恢复超时订单 · ${order.pickupCode}`}
+          onClose={() => {
+            if (!busy) setReopening(false);
+          }}
+        >
+          <Notice>订单将恢复为待确认，待确认期限从现在重新计算。</Notice>
+          {order.unmatchedReceipts?.length ? (
+            <p>已有待核对实收，确认收款时请选择原记录。</p>
+          ) : (
+            <p>恢复后请核对实际收款和配送时段。</p>
+          )}
+          {reopenIssue && <Notice type="error">{reopenIssue}</Notice>}
+          <div className="button-row order-reopen-actions">
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setReopening(false)}
+            >
+              取消
+            </Button>
+            <Button busy={busy} disabled={busy} onClick={reopen}>
+              {busy ? "正在恢复…" : "确认恢复"}
+            </Button>
+          </div>
         </Modal>
       )}
       {voiding && (

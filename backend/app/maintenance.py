@@ -2089,7 +2089,7 @@ def process_purge_job(db, trash_id: str, expected_version: int | None = None,
 
 
 def _close_expired_orders(db, now: datetime) -> int:
-    from .commerce import cancel_pending
+    from .commerce import PAYMENT_TIMEOUT_REASON, cancel_pending
 
     rows = list(db.scalars(select(Order).where(
         Order.status == 'PENDING_CONFIRMATION',
@@ -2099,7 +2099,7 @@ def _close_expired_orders(db, now: datetime) -> int:
     closed = 0
     for order in rows:
         try:
-            cancel_pending(db, order, '超过待确认期限自动关闭')
+            cancel_pending(db, order, PAYMENT_TIMEOUT_REASON, close_reason_code='PAYMENT_TIMEOUT')
         except DomainError:
             continue
         audit(db, 'system', 'ORDER_AUTO_CLOSED', 'ORDER', order.id,
@@ -2330,6 +2330,18 @@ def _retention_files(db, now: datetime) -> int:
         completed = _order_completed_at(db, order)
         if completed is None:
             continue
+        if order.status == 'CANCELLED':
+            if now < completed + timedelta(days=min(source_days, final_days, proof_days)):
+                continue
+            # A recovery and removal of its printable files must serialize on
+            # the same row. Re-read the status after acquiring the lock.
+            order = db.scalar(select(Order).where(Order.id == order.id, Order.deleted_at.is_(None))
+                .with_for_update(skip_locked=True).execution_options(populate_existing=True))
+            if order is None or _file_retention_protected(db, order):
+                continue
+            completed = _order_completed_at(db, order)
+            if completed is None:
+                continue
         context = _assets_for_order(db, order)
         file_ids, prep_ids, quote_ids, task_ids, artifact_ids, proof_ids, asset_ids = context
         for asset in db.scalars(select(Asset).where(

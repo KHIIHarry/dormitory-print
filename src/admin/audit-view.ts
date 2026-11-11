@@ -51,6 +51,7 @@ export const auditActionNames: Record<string, string> = {
   CONFIG_UPDATED: "更新系统配置",
   ORDER_CREATED: "创建订单",
   ORDER_CANCELLED: "撤销订单",
+  ORDER_REOPENED: "恢复超时订单",
   PAYMENT_CONFIRMED: "确认收款",
   ORDER_DELIVERED: "完成交付",
   STAFF_LOGIN: "员工进入工作台",

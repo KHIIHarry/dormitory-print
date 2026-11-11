@@ -1313,6 +1313,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/orders/{order_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen Order */
+        post: operations["reopen_order_api_v1_admin_orders__order_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/orders/{order_id}/slot-change": {
         parameters: {
             query?: never;
@@ -8802,6 +8819,16 @@ export interface components {
              */
             status: string;
         };
+        /** ReopenOrderInput */
+        ReopenOrderInput: {
+            /**
+             * Confirmed
+             * @constant
+             */
+            confirmed: true;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
         /** ReprintInput */
         ReprintInput: {
             /** Expectedversion */
@@ -15118,6 +15145,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reopen_order_api_v1_admin_orders__order_id__reopen_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReopenOrderInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
