@@ -34,6 +34,7 @@ from app.models import (
     OneTimeToken,
     Order,
     OrderFile,
+    OrderRevision,
     Payment,
     Preparation,
     Principal,
@@ -650,24 +651,23 @@ def test_scheduled_auto_close_commits_when_storage_cleanup_fails(db, monkeypatch
     assert order.data['closeReasonCode'] == 'PAYMENT_TIMEOUT'
 
 
-def test_sweep_removes_cancelled_expired_drafts(db):
-    from app.db import SessionLocal
-    from app.maintenance import maintenance_sweep
+@pytest.mark.parametrize('quote_reference', [None, 'no_current_quote', 'order', 'revision'])
+def test_sweep_cleans_expired_requoted_drafts_and_preserves_order_quotes(db, quote_reference):
+    from app.jobs import maintenance
 
-    principal = Principal()
-    db.add(principal)
-    db.flush()
+    order = make_order(db)
+    original_order_quote_id = order.quote_id
     sha = secrets.token_hex(32)
     key = f'assets/{sha[:2]}/{sha}'
     path = write_file(key)
-    asset = Asset(principal_id=principal.id, purpose='PRINT_SOURCE', name='draft.pdf',
+    asset = Asset(principal_id=order.principal_id, purpose='PRINT_SOURCE', name='draft.pdf',
                   mime='application/pdf', size=path.stat().st_size, sha256=sha,
                   storage_key=key, status='READY', pages=1,
                   expires_at=utcnow() + timedelta(days=7))
     db.add(asset)
     db.flush()
     preparation = Preparation(
-        principal_id=principal.id, status='CANCELLED',
+        principal_id=order.principal_id, status='CANCELLED',
         expires_at=utcnow() - timedelta(hours=1),
         input={'files': [{'assetId': asset.id, 'clientFileId': 'f1'}]},
         data={'cancelledAt': utcnow().isoformat()},
@@ -677,21 +677,43 @@ def test_sweep_removes_cancelled_expired_drafts(db):
     artifact = Artifact(preparation_id=preparation.id, asset_id=asset.id,
                         client_file_id='f1', sha256=sha, pages=1, sheets=1,
                         settings={}, page_map=[])
-    db.add(artifact)
+    previous_quote, current_quote = [
+        Quote(preparation_id=preparation.id, price_version=1,
+              expires_at=preparation.expires_at, subtotal_cents=cents, total_cents=cents)
+        for cents in (1000, 1500)
+    ]
+    db.add_all([artifact, previous_quote, current_quote])
+    db.flush()
+    if quote_reference != 'no_current_quote':
+        preparation.quote_id = current_quote.id
+    revision = None
+    # Legacy rows can reference a quote through a different preparation ID.
+    if quote_reference == 'order':
+        order.quote_id = previous_quote.id
+    elif quote_reference == 'revision':
+        revision = OrderRevision(order_id=order.id, number=1, preparation_id=order.preparation_id,
+                                 quote_id=previous_quote.id, snapshot={})
+        db.add(revision)
+    unrelated_draft = Preparation(principal_id=order.principal_id, status='CANCELLED',
+                                  expires_at=preparation.expires_at)
+    db.add(unrelated_draft)
     db.commit()
 
-    session = SessionLocal()
-    try:
-        maintenance_sweep(session)
-        session.commit()
-    finally:
-        session.close()
+    result = maintenance.run()
     refresh(db)
 
-    assert db.get(Preparation, preparation.id) is None
-    assert db.get(Artifact, artifact.id) is None
-    assert db.get(Asset, asset.id) is None
-    assert not path.exists()
+    protected = quote_reference in ('order', 'revision')
+    assert result['removedDrafts'] == (1 if protected else 2)
+    assert db.get(Preparation, unrelated_draft.id) is None
+    assert db.get(Quote, original_order_quote_id) is not None
+    for model, row_id in ((Preparation, preparation.id), (Artifact, artifact.id),
+                          (Asset, asset.id), (Quote, previous_quote.id), (Quote, current_quote.id)):
+        assert (db.get(model, row_id) is not None) == protected
+    assert path.exists() == protected
+    if quote_reference == 'order':
+        assert db.get(Order, order.id).quote_id == previous_quote.id
+    if revision is not None:
+        assert db.get(OrderRevision, revision.id).quote_id == previous_quote.id
 
 
 def test_sweep_file_retention_uses_q29_and_protects_unfinished_or_disputed(db):

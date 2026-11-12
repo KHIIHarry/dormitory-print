@@ -2196,6 +2196,14 @@ def _cleanup_drafts(db, now: datetime) -> int:
     for preparation in rows:
         if _preparation_referenced(db, preparation.id):
             continue
+        draft_quotes = Quote.preparation_id == preparation.id
+        quote_ids = select(Quote.id).where(draft_quotes)
+        # A referenced quote still needs its preparation, even if a legacy
+        # order or revision points directly at a different preparation.
+        if (db.scalar(select(Order.id).where(Order.quote_id.in_(quote_ids)).limit(1))
+                or db.scalar(select(OrderRevision.id).where(
+                    OrderRevision.quote_id.in_(quote_ids)).limit(1))):
+            continue
         artifacts = list(db.scalars(select(Artifact).where(
             Artifact.preparation_id == preparation.id)))
         if any(db.scalar(select(PrintTask.id).where(
@@ -2223,8 +2231,7 @@ def _cleanup_drafts(db, now: datetime) -> int:
         for artifact in artifacts:
             db.delete(artifact)
         db.flush()
-        if preparation.quote_id and not _quote_shared(db, preparation.quote_id):
-            db.execute(delete(Quote).where(Quote.id == preparation.quote_id))
+        db.execute(delete(Quote).where(draft_quotes))
         db.execute(delete(Preparation).where(Preparation.id == preparation.id))
         if deletable:
             db.execute(delete(Asset).where(Asset.id.in_(deletable)))
