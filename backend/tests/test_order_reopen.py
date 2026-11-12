@@ -1,5 +1,6 @@
 """Timed-out order recovery through the real API and PostgreSQL."""
-from datetime import timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
@@ -22,6 +23,62 @@ def expire(db, order):
 def reopen(api, client, order, **kwargs):
     return api(client, f'/admin/orders/{order.id}/reopen',
                {'expectedVersion': order.version, 'confirmed': True}, **kwargs)
+
+
+def test_scheduled_auto_close_keeps_running_while_backup_holds_storage_lock(
+        db, api, admin_client, monkeypatch):
+    from app import commerce, jobs, maintenance
+    from app.config import get_config
+    from app.storage_coordination import maintenance_lock
+
+    world = make_world(db)
+    workflow = get_config(db, 'workflow')
+    configured = api(admin_client, '/admin/config/workflow', {
+        'expectedVersion': workflow.version, 'unpaidTimeoutMinutes': 30,
+    }, method='PATCH')
+    assert configured.status_code == 200, configured.text
+    db.expire_all()
+    started_at = utcnow()
+    monkeypatch.setattr(commerce, 'utcnow', lambda: started_at)
+    order = submit(db, world)
+    deadline = started_at + timedelta(minutes=30)
+    assert order.close_at == deadline
+
+    def run_scheduled_at(now):
+        monkeypatch.setattr(jobs, 'utcnow', lambda: now)
+        monkeypatch.setattr(maintenance, '_now', lambda: now)
+        return jobs.maintenance.run()
+
+    def assert_auto_closed_at(due_at):
+        # The lock is reentrant on the same thread. Run the worker separately,
+        # just as Celery does when another process is holding a backup lock.
+        with ThreadPoolExecutor(max_workers=1) as worker, maintenance_lock(timeout=0):
+            result = worker.submit(run_scheduled_at, due_at).result(timeout=5)
+        assert result['closedOrders'] == 1
+        assert result['storageMaintenanceDeferred'] is True
+        db.refresh(order)
+        assert order.status == 'CANCELLED'
+        assert order.data['closeReasonCode'] == 'PAYMENT_TIMEOUT'
+        detail = api(admin_client, f'/admin/orders/{order.id}', method='GET')
+        assert detail.status_code == 200, detail.text
+        assert 'ADMIN_REOPEN_TIMED_OUT_ORDER' in detail.json()['data']['allowedActions']
+
+    monkeypatch.setenv('DORMPRINT_MAINTENANCE_LOCK_TIMEOUT_SECONDS', '0')
+    assert run_scheduled_at(deadline - timedelta(microseconds=1))['closedOrders'] == 0
+    assert_auto_closed_at(deadline)
+
+    reopened_at = deadline + timedelta(seconds=1)
+    monkeypatch.setattr(commerce, 'utcnow', lambda: reopened_at)
+    response = reopen(api, admin_client, order)
+    assert response.status_code == 200, response.text
+    new_deadline = reopened_at + timedelta(minutes=30)
+    assert datetime.fromisoformat(response.json()['data']['closeAt']) == new_deadline
+    assert run_scheduled_at(new_deadline - timedelta(microseconds=1))['closedOrders'] == 0
+    assert_auto_closed_at(new_deadline)
+    assert run_scheduled_at(new_deadline)['closedOrders'] == 0
+    assert db.scalar(select(func.count()).select_from(AuditLog).where(
+        AuditLog.target_id == order.id, AuditLog.action == 'ORDER_AUTO_CLOSED',
+    )) == 2
 
 
 @pytest.mark.parametrize('legacy', [False, True])

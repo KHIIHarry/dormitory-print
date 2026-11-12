@@ -581,8 +581,7 @@ def test_admin_can_list_deletion_requests_with_live_blockers(admin_client, api, 
 
 
 def test_sweep_closes_expired_orders_and_expires_transient_secrets(db):
-    from app.db import SessionLocal
-    from app.maintenance import maintenance_sweep
+    from app.jobs import maintenance
 
     order = make_order(db, status='PENDING_CONFIRMATION', settlement_kind=None,
                        cash_received_cents=0)
@@ -614,12 +613,7 @@ def test_sweep_closes_expired_orders_and_expires_transient_secrets(db):
     db.add(audit)
     db.commit()
 
-    session = SessionLocal()
-    try:
-        result = maintenance_sweep(session)
-        session.commit()
-    finally:
-        session.close()
+    result = maintenance.run()
     refresh(db)
 
     assert db.get(Order, order.id).status == 'CANCELLED'
@@ -631,7 +625,29 @@ def test_sweep_closes_expired_orders_and_expires_transient_secrets(db):
     assert db.get(UploadSession, upload.id).status == 'EXPIRED'
     assert not upload_directory.exists()
     assert db.get(AuditLog, audit.id) is not None
-    assert isinstance(result, dict) and result
+    assert result['closedOrders'] == 1
+
+
+def test_scheduled_auto_close_commits_when_storage_cleanup_fails(db, monkeypatch):
+    from app import maintenance as lifecycle
+    from app.core import DomainError
+    from app.jobs import maintenance
+
+    order = make_order(db, status='PENDING_CONFIRMATION', settlement_kind=None,
+                       cash_received_cents=0)
+    order.close_at = utcnow() - timedelta(minutes=1)
+    db.commit()
+
+    def fail_storage_cleanup(*_):
+        raise DomainError('STORAGE_PATH_INVALID', '测试：文件清理失败', 503)
+
+    monkeypatch.setattr(lifecycle, '_cleanup_orphan_assets', fail_storage_cleanup)
+    with pytest.raises(DomainError) as error:
+        maintenance.run()
+    assert error.value.code == 'STORAGE_PATH_INVALID'
+    db.refresh(order)
+    assert order.status == 'CANCELLED'
+    assert order.data['closeReasonCode'] == 'PAYMENT_TIMEOUT'
 
 
 def test_sweep_removes_cancelled_expired_drafts(db):

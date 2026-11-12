@@ -2717,8 +2717,8 @@ def _purge_expired_unverified_accounts(db, now: datetime) -> dict:
     return {'purged': purged, 'skipped': skipped, 'failed': failed, 'files': files}
 
 
-def maintenance_sweep(db) -> dict:
-    """Run all due lifecycle work in the caller's transaction.
+def maintenance_sweep(db, *, storage_lock_timeout: float | None = None) -> dict:
+    """Run the remaining lifecycle work after the order deadline sweep.
 
     Never age-deletes ordinary orders, accounting, audit, verified accounts or
     email records.  The one account exception is an email address that never
@@ -2730,10 +2730,9 @@ def maintenance_sweep(db) -> dict:
     committed database plus the original files, or the new database plus
     collected files; a rollback restores the staged files.
     """
-    with storage_gc_guard(db):
+    with storage_gc_guard(db, timeout=storage_lock_timeout):
         recover_orphaned_staging(db)
         now = _now()
-        closed = _close_expired_orders(db, now)
         queued_exports = _queue_pending_exports(db, now)
         expired_exports, deleted_export_files = _expire_exports(db, now)
         expired_uploads = _expire_uploads(db, now)
@@ -2747,7 +2746,6 @@ def maintenance_sweep(db) -> dict:
         deleted_files = _retention_files(db, now)
         deleted_files += _cleanup_orphan_assets(db, now)
         return {
-            'closedOrders': closed,
             'queuedExports': queued_exports,
             'expiredExports': expired_exports,
             'expiredUploads': expired_uploads,

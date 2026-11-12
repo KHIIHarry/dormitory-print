@@ -199,12 +199,24 @@ def business_work():
 @celery_app.task(name='dormprint.maintenance')
 def maintenance():
     _database()
-    from .maintenance import maintenance_sweep
+    from .maintenance import _close_expired_orders, maintenance_sweep
     from .account_lifecycle import run_due_deletions
+
+    # Commit order deadlines before attempting file cleanup. Backups can hold
+    # the storage lock and cleanup errors must not roll back closed orders.
     with SessionLocal.begin() as session:
-        result=maintenance_sweep(session)
-        result['accountDeletions']=run_due_deletions(session)
-        return result
+        closed = _close_expired_orders(session, utcnow())
+
+    try:
+        with SessionLocal.begin() as session:
+            result = maintenance_sweep(session, storage_lock_timeout=0)
+            result['accountDeletions'] = run_due_deletions(session)
+    except DomainError as error:
+        if error.code != 'TRANSIENT_IO' or (error.details or {}).get('lock') != 'maintenance':
+            raise
+        logger.info('storage_maintenance_deferred: backup or restore holds the storage lock')
+        return {'closedOrders': closed, 'storageMaintenanceDeferred': True}
+    return {'closedOrders': closed, **result}
 
 
 @celery_app.task(name='dormprint.delivery-publication')
