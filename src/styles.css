@@ -1456,6 +1456,8 @@ input[type="date"],
   align-items: center;
   justify-content: center;
   text-align: center;
+  font-family: system-ui, sans-serif;
+  letter-spacing: normal;
   padding: 30px 20px;
   transition: background 0.2s;
 }
@@ -1487,7 +1489,7 @@ input[type="date"],
 }
 .dropzone > p {
   font-size: 12px;
-  color: #a19488;
+  color: #75675c;
   margin: 0 0 22px;
 }
 .upload-button {
@@ -1496,11 +1498,12 @@ input[type="date"],
   align-items: stretch;
 }
 .upload-button .btn {
-  border-radius: 10px 0 0 10px;
+  border-radius: 12px 0 0 12px;
   min-width: 150px;
+  gap: 8px;
 }
 .upload-button:not(:has(.upload-menu)) .btn {
-  border-radius: 10px;
+  border-radius: 12px;
 }
 .upload-picker {
   position: relative;
@@ -1537,20 +1540,24 @@ input[type="date"],
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 12px;
-  color: var(--muted);
+  gap: 12px;
+  margin-top: 16px;
+  color: #75675c;
   font-size: 12px;
+  line-height: 1.5;
 }
 .upload-browser-help .copy-btn {
   min-height: 44px;
+  padding: 8px 14px;
+  gap: 8px;
+  border-radius: 12px;
 }
 .upload-menu {
-  border-radius: 0 10px 10px 0;
+  border-radius: 0 12px 12px 0;
   background: var(--primary);
   color: #fff;
   border-left: 1px solid #ffffff50;
-  width: 41px;
+  width: 44px;
   display: grid;
   place-items: center;
 }
@@ -1576,15 +1583,21 @@ input[type="date"],
 }
 .supported-types {
   display: flex;
-  gap: 17px;
-  font-size: 10px;
-  color: #ad9e90;
-  margin-top: 21px;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #75675c;
+  margin-top: 16px;
 }
 .supported-types > span {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
+}
+.supported-types svg {
+  flex: none;
 }
 .selected-heading {
   display: flex;
@@ -6147,28 +6160,53 @@ select.campus-filter:focus {
     padding: 25px 15px;
   }
   .dropzone h2 {
-    font-size: 15px;
+    font-size: 16px;
+    margin-bottom: 8px;
   }
   .dropzone > p {
-    font-size: 10px;
+    margin-bottom: 16px;
   }
-  .dropzone .btn {
+  .upload-button {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 144px) minmax(0, 1fr);
+  }
+  .upload-button:has(.upload-menu) {
+    grid-template-columns: minmax(44px, 1fr) minmax(0, 144px) minmax(44px, 1fr);
+    column-gap: 8px;
+  }
+  .upload-button .btn {
+    grid-column: 2;
     min-height: 44px;
-    min-width: 140px;
-    font-size: 12px;
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+  .upload-button .upload-menu {
+    grid-column: 3;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--primary-dark);
+  }
+  .upload-button .dropdown {
+    inset: calc(100% + 8px) auto auto 50%;
+    width: min(100%, 200px);
+    transform: translateX(-50%);
   }
   .upload-folder {
-    margin-bottom: 14px;
+    margin-bottom: 12px;
   }
   .upload-folder > svg {
     width: 42px;
   }
-  .supported-types {
-    font-size: 8px;
-    gap: 14px;
+  .upload-browser-help {
+    flex-direction: column;
   }
-  .supported-types svg {
-    width: 12px;
+  .upload-browser-help .copy-btn {
+    min-width: min(144px, 100%);
+    font-size: 14px;
   }
   .flow-aside .panel {
     padding: 20px;

@@ -57,7 +57,7 @@ test("the installed upload page opens the native picker from a direct click", as
 
 test("Android WeChat gets document MIME filters and a browser fallback", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "userAgent", {
       value: "Android MicroMessenger/8.0",
@@ -79,6 +79,48 @@ test("Android WeChat gets document MIME filters and a browser fallback", async (
   await expect(
     page.getByRole("button", { name: "复制上传链接" }),
   ).toBeVisible();
+
+  for (const width of [320, 375, 390, 430]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await page.locator(".dropzone").evaluate((zone) => {
+      const primary = zone.querySelector(".upload-picker")!;
+      const help = zone.querySelector(".upload-browser-help > span")!;
+      const copy = zone.querySelector(".upload-browser-help button")!;
+      const formats = zone.querySelector(".supported-types")!;
+      const center = (element: Element) => {
+        const bounds = element.getBoundingClientRect();
+        return bounds.left + bounds.width / 2;
+      };
+      return {
+        primaryOffset: Math.abs(center(primary) - center(zone)),
+        copyOffset: Math.abs(center(copy) - center(zone)),
+        copyHeight: copy.getBoundingClientRect().height,
+        helpGap:
+          copy.getBoundingClientRect().top -
+          help.getBoundingClientRect().bottom,
+        formatsFontSize: parseFloat(getComputedStyle(formats).fontSize),
+        tracking: [primary, help, copy].map(
+          (element) => getComputedStyle(element).letterSpacing,
+        ),
+      };
+    });
+    expect(layout.primaryOffset).toBeLessThanOrEqual(1);
+    expect(layout.copyOffset).toBeLessThanOrEqual(1);
+    expect(layout.copyHeight).toBeGreaterThanOrEqual(44);
+    expect(layout.helpGap).toBeGreaterThanOrEqual(12);
+    expect(layout.formatsFontSize).toBeGreaterThanOrEqual(12);
+    expect(
+      layout.tracking.every(
+        (spacing) => spacing === "normal" || spacing === "0px",
+      ),
+    ).toBe(true);
+    if (width === 390) {
+      await page
+        .locator(".dropzone")
+        .screenshot({ path: testInfo.outputPath("wechat-upload-390.png") });
+    }
+  }
+
   await page.goto("/u/new?type=photo");
   await expect(picker).toHaveAttribute("accept", /^image\/jpeg/);
   await expect(page.getByRole("button", { name: "复制上传链接" })).toHaveCount(
