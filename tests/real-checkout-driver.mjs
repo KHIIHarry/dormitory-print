@@ -45,7 +45,7 @@ try {
   await noteIdentity('new-page-loaded');
   await expect(page.locator('.header-profile')).toContainText('我的账户', { timeout: 30000 });
   await noteIdentity('account-hydrated');
-  const chooseFile = page.getByRole('button', { name: '选择文件', exact: true });
+  const chooseFile = page.getByLabel('选择文件', { exact: true });
   await expect(chooseFile).toBeEnabled({ timeout: 30000 });
   await page.locator('input[type="file"]').setInputFiles(pdf);
   await noteIdentity('file-selected');

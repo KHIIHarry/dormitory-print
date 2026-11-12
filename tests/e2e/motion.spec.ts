@@ -281,7 +281,7 @@ test("leaving a pending upload retains a retryable item and old response cannot 
   });
   await page.goto("http://127.0.0.1:5175/u/new");
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page
     .locator("input[type=file]")
@@ -431,13 +431,13 @@ test("identity invalidation disables upload until current configuration is obtai
   });
   await page.goto("http://127.0.0.1:5175/u/new");
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page.evaluate(async () =>
     (await import("/src/growth/client.ts")).advanceIdentity(),
   );
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeDisabled();
   await expect(
     page.getByText("正在读取服务配置，暂时不能上传或提交"),

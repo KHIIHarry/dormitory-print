@@ -1502,6 +1502,49 @@ input[type="date"],
 .upload-button:not(:has(.upload-menu)) .btn {
   border-radius: 10px;
 }
+.upload-picker {
+  position: relative;
+  border: 0;
+}
+.upload-picker input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+.upload-picker input::file-selector-button {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: inherit;
+}
+.upload-picker:has(input:focus-visible) {
+  outline: 3px solid #c67c4e80;
+  outline-offset: 3px;
+}
+.upload-picker:has(input:disabled) {
+  opacity: 0.42;
+}
+.upload-picker input:disabled,
+.upload-picker input[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+.upload-browser-help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.upload-browser-help .copy-btn {
+  min-height: 44px;
+}
 .upload-menu {
   border-radius: 0 10px 10px 0;
   background: var(--primary);
@@ -6110,7 +6153,7 @@ select.campus-filter:focus {
     font-size: 10px;
   }
   .dropzone .btn {
-    min-height: 43px;
+    min-height: 44px;
     min-width: 140px;
     font-size: 12px;
   }

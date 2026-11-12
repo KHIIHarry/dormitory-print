@@ -261,7 +261,7 @@ test("uploaded images require a paper choice and can use A4 document printing", 
 }) => {
   await page.goto("/u/new");
   const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "选择文件", exact: true }).click();
+  await page.getByLabel("选择文件", { exact: true }).click();
   const chooser = await chooserPromise;
   await chooser.setFiles("public/assets/icon-512.png");
   const dialog = page.getByRole("dialog", {

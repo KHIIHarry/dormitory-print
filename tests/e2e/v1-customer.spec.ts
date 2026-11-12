@@ -1024,7 +1024,7 @@ test("upload waits for account hydration and the upload session before accepting
   });
   try {
     await page.goto(appUrl("/u/new"));
-    const choose = page.getByRole("button", { name: "选择文件", exact: true });
+    const choose = page.getByLabel("选择文件", { exact: true });
     await expect(choose).toBeDisabled();
     resolveAccount();
     await expect(
@@ -1045,7 +1045,7 @@ test("Excel upload asks for print area/pagination and sends strict excelOptions 
   const state = await installUploadApi(page, { assetReady: true });
   await page.goto(appUrl("/u/new"));
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "成绩表.xlsx",
@@ -1098,7 +1098,7 @@ test("HEIC upload uses the server READY normalized PNG for the local display sou
   });
   await page.goto(appUrl("/u/new"));
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "IMG_0001.HEIC",
@@ -1129,7 +1129,7 @@ test("a lost chunk reuses the same session, offset and idempotency key on retry"
   });
   await page.goto(appUrl("/u/new"));
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "资料.pdf",
@@ -1174,7 +1174,7 @@ test("processing cancellation records a request, then polls the real final resul
   });
   await page.goto(appUrl("/u/new"));
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "资料.pdf",

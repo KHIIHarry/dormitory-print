@@ -104,7 +104,7 @@ test("uploaded one-page documents disable duplex in normal mode", async ({
   pdf.addPage();
   await page.goto("/u/new");
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "one-page.pdf",
@@ -130,7 +130,7 @@ test("skip selector preserves choices across pages and labels each allocated seg
   for (let i = 0; i < 65; i++) pdf.addPage();
   await page.goto("/u/new");
   await expect(
-    page.getByRole("button", { name: "选择文件", exact: true }),
+    page.getByLabel("选择文件", { exact: true }),
   ).toBeEnabled();
   await page
     .locator('input[type="file"]')

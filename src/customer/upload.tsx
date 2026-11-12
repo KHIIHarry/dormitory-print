@@ -45,6 +45,7 @@ import "./image-medium.css";
 import type { PrintFile } from "../lib/types";
 import {
   Button,
+  CopyButton,
   Empty,
   Field,
   Notice,
@@ -63,6 +64,25 @@ import {
 import { UploadFileStatus, UploadFileRow } from "./upload-status";
 import { useIdentity } from "../growth/identity";
 import type { Artifact } from "../lib/artifacts";
+
+const PHOTO_ACCEPT =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif";
+const FILE_ACCEPT = [
+  ...DEFAULT_FORMATS.map((extension) => `.${extension}`),
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+].join(",");
+
 export function UploadPage() {
   const { draft, setDraft, data, toast } = useStore();
   const identity = useIdentity();
@@ -71,6 +91,10 @@ export function UploadPage() {
   const nav = useNavigate();
   const [params] = useSearchParams();
   const photo = params.get("type") === "photo";
+  const android = /Android/i.test(navigator.userAgent);
+  const androidWechat = android && /MicroMessenger/i.test(navigator.userAgent);
+  const androidStandalone =
+    android && window.matchMedia("(display-mode: standalone)").matches;
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showUploadStatus, setShowUploadStatus] = useState(false);
@@ -102,7 +126,6 @@ export function UploadPage() {
       window.removeEventListener("dormprint:identity", invalidate);
     };
   }, []);
-  const input = useRef<HTMLInputElement>(null);
   const [sample, setSample] = useState(false);
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -979,17 +1002,31 @@ export function UploadPage() {
                 : "拖拽文件到此处，或点击下方选择"}
             </p>
             <div className="upload-button">
-              <Button
-                disabled={!data.config.serviceEnabled || !uploadReady}
-                aria-disabled={busy || !data.config.serviceEnabled || !uploadReady}
-                aria-busy={busy || undefined}
-                onClick={() => {
-                  if (uploadReady && !busy && !uploadLock.current) input.current?.click();
-                }}
-              >
-                <Upload size={17} />
+              <label className="btn upload-picker">
+                <Upload size={17} aria-hidden="true" />
                 选择文件
-              </Button>
+                <input
+                  type="file"
+                  multiple
+                  accept={photo ? PHOTO_ACCEPT : FILE_ACCEPT}
+                  disabled={!data.config.serviceEnabled || !uploadReady}
+                  aria-disabled={busy || undefined}
+                  aria-busy={busy || undefined}
+                  onClick={(e) => {
+                    if (busy || uploadLock.current) e.preventDefault();
+                  }}
+                  onChange={(e) => {
+                    const files = Array.from(e.currentTarget.files || []);
+                    e.currentTarget.value = "";
+                    if (
+                      files.length &&
+                      !uploadLock.current &&
+                      data.config.serviceEnabled
+                    )
+                      beginUpload(files);
+                  }}
+                />
+              </label>
               {DEMO && (
                 <button
                   className="upload-menu"
@@ -1013,23 +1050,6 @@ export function UploadPage() {
                 </div>
               )}
             </div>
-            <input
-              ref={input}
-              disabled={!uploadReady || !data.config.serviceEnabled}
-              type="file"
-              hidden
-              multiple
-              accept={
-                photo
-                  ? "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
-                  : ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.heic,.heif"
-              }
-              onChange={(e) => {
-                const files = Array.from(e.target.files || []);
-                e.target.value = "";
-                if (files.length) beginUpload(files);
-              }}
-            />
             <div className="supported-types">
               <span>
                 <FileText size={14} />
@@ -1040,6 +1060,22 @@ export function UploadPage() {
                 JPG / PNG / WebP / HEIC
               </span>
             </div>
+            {(androidStandalone || (androidWechat && !photo)) && (
+              <div className="upload-browser-help">
+                <span>
+                  {androidWechat
+                    ? "微信只显示相册时，请在手机浏览器打开上传页。"
+                    : "文件窗口未弹出时，请在手机浏览器打开上传页。"}
+                </span>
+                <CopyButton
+                  text={new URL(
+                    photo ? "/u/new?type=photo" : "/u/new",
+                    window.location.origin,
+                  ).href}
+                  label="复制上传链接"
+                />
+              </div>
+            )}
           </div>
           <div className="selected-heading">
             <h2>
