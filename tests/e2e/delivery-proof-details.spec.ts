@@ -62,12 +62,13 @@ async function mount(
       const surface=${JSON.stringify(surface)},scenario=${JSON.stringify(scenario)};
       const data=createDemo(),order=data.orders[0];
       Object.assign(order,{id:'proof-order',pickupCode:'YVSPS',status:scenario==='pending'?'DELIVERING':'DELIVERED',packingStatus:'PACKED',batchId:'proof-batch',nickname:'验收同学',phone:'13800138000',history:[{title:'资料已送达',time:'2026-11-05T05:10:38Z',description:'交付凭证已记录'}]});
+      if(scenario==='pending')order.allowedActions=['SUBMIT_PROOF','REPORT_EXCEPTION'];
       if(scenario==='unconfirmed')Object.assign(order,{status:'PENDING_CONFIRMATION',packingStatus:'PENDING',files:${JSON.stringify(orderFileNames)}.map(name=>makeFile(name,19))});
       const proof={placementNote:'资料放在一楼收发台左侧，请及时领取。'+ '长备注与连续标识'.repeat(12)+'ABCDE'.repeat(20),deliveredAt:'2026-11-05T05:10:38Z',position:{latitude:31.490191,longitude:121.829420,accuracyMeters:12,capturedAt:'2026-11-05T05:10:20Z',coordinateSystem:'WGS84'}};
       if(surface==='admin')proof.photoUrl='/api/v1/assets/proof-photo/content';else proof.photoAssetId='proof-photo';
       if(scenario==='exceptions'){delete proof.photoUrl;delete proof.photoAssetId;delete proof.position;proof.skipPhotoReason='收件人已当面领取，明确要求不拍照';proof.skipLocationReason='楼内无信号，管理员已核对交付位置';}
       order.proof=['missing','pending','unconfirmed'].includes(scenario)?undefined:proof;
-      data.orders=[order];data.batches=[{id:'proof-batch',date:'2026-11-05',time:'11:30 – 13:30',orderIds:[order.id],courierId:'staff-2',status:'COMPLETED',version:1}];
+      data.orders=[order];data.batches=[{id:'proof-batch',date:'2026-11-05',time:'11:30 – 13:30',orderIds:[order.id],courierId:'staff-2',status:scenario==='pending'?'DELIVERING':'COMPLETED',version:1}];
       window.proofFixture={generation:0,store:{data,role:surface==='admin'?'ADMIN':'COURIER',resources:{},toast:()=>{},act:async()=>true,updateOrder:async()=>{},refresh:async()=>{},actionIssues:{}}};
       const component=surface==='admin'?AdminOrderDetail:CourierOrder,path=surface==='admin'?'/manage/orders/proof-order':'/courier/orders/proof-order';
       const root=ReactDOM.createRoot(document.getElementById('root'));

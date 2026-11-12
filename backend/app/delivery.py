@@ -7,7 +7,9 @@ commerce settlement, and batch start is an all-or-nothing guarded transition.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date as date_type
 from datetime import datetime, timedelta, timezone
+from typing import get_args
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -44,7 +46,9 @@ from .delivery_plan import (
     apply_seal,
     arrangement_for_order,
     batch_effective_sealed,
+    batch_has_delivery_tasks,
     current_slot_orders,
+    delivery_task_conditions,
     empty_auto_batch,
     group_for_slot_campus,
     operational_slot_batches,
@@ -79,6 +83,7 @@ from .delivery_schemas import (
     CampusUpdateInput,
     CampusView,
     CourierBatchDetailView,
+    CourierBatchStatus,
     CourierExceptionInput,
     DeliveryExceptionListView,
     DeliveryExceptionView,
@@ -93,6 +98,7 @@ from .delivery_schemas import (
     MapHotspotUpdate,
     MapPublishInput,
     PublicMapView,
+    SHANGHAI,
     SlotDeleteInput,
     SlotInput,
     SlotListView,
@@ -321,8 +327,11 @@ def _batch_has_delivered(db, batch: DeliveryBatch) -> bool:
                      .limit(1)) is not None
 
 
-def _batch_view(db, batch: DeliveryBatch) -> dict:
-    assignments = _active_batch_assignments(db, batch.id)
+def _batch_view(db, batch: DeliveryBatch, *, courier_tasks: list[tuple[DeliveryAssignment, Order]] | None = None) -> dict:
+    tasks = courier_tasks if courier_tasks is not None else [
+        (assignment, db.get(Order, assignment.order_id))
+        for assignment in _active_batch_assignments(db, batch.id)]
+    assignments = [assignment for assignment, _order in tasks]
     courier = db.get(Staff, batch.courier_id) if batch.courier_id else None
     data = batch.data or {}
     published_at = data.get('publishedAt')
@@ -332,14 +341,16 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
     slot_name = slot_snapshot.get('name') or (slot.name if slot else None)
     campus = db.get(Campus, batch.campus_id) if batch.campus_id else None
     prepared = 0
-    for assignment in assignments:
-        order = db.get(Order, assignment.order_id)
-        if order is not None and not _order_blockers(db, order):
-            prepared += 1
+    delivered = 0
+    for _assignment, order in tasks:
+        if order is not None:
+            if not _order_blockers(db, order):
+                prepared += 1
+            delivered += int(order.status == 'DELIVERED')
     paid = len(assignments)
     slot = slot or (db.get(DeliverySlot, batch.slot_id) if batch.slot_id else None)
     unassigned = 0
-    if batch.group_id:
+    if courier_tasks is None and batch.group_id:
         group = db.get(DeliveryGroup, batch.group_id)
         if group is not None:
             campus_locations = select(Location.id).where(Location.campus_id == group.campus_id)
@@ -352,7 +363,10 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
                     DeliveryAssignment.active.is_(True))))) or 0
     sealed = batch.sealed_at is not None or (slot is not None and batch_effective_sealed(slot))
     actions = []
-    if batch.deleted_at is None and batch.status in ('PLANNED', 'POSTPONED'):
+    if courier_tasks is not None:
+        if batch.status == 'PUBLISHED':
+            actions.append('START')
+    elif batch.deleted_at is None and batch.status in ('PLANNED', 'POSTPONED'):
         actions.extend(['ADD', 'REMOVE', 'TRANSFER', 'SPLIT', 'MERGE', 'RESCHEDULE', 'CANCEL', 'DELETE'])
         if _can_assign_first_courier(batch, assignments):
             actions.append('ASSIGN_COURIER')
@@ -364,7 +378,8 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
         actions.extend(['START', 'RESCHEDULE'])
     elif batch.status == 'DELIVERING':
         actions.append('RESCHEDULE')
-    if batch.deleted_at is None and batch.status in ('PUBLISHED', 'DELIVERING') and not _batch_has_delivered(db, batch):
+    if (courier_tasks is None and batch.deleted_at is None
+            and batch.status in ('PUBLISHED', 'DELIVERING') and not _batch_has_delivered(db, batch)):
         actions.append('WITHDRAW_PUBLICATION')
     return {
         'id': batch.id,
@@ -384,6 +399,7 @@ def _batch_view(db, batch: DeliveryBatch) -> dict:
         'sealedByName': _staff_display_name(db, db.get(Staff, batch.sealed_by)) if batch.sealed_by else None,
         'sealReason': batch.seal_reason or '',
         'paidCount': paid,
+        'deliveredCount': delivered,
         'preparedCount': prepared,
         'unpreparedCount': max(0, paid - prepared),
         'unassignedCount': unassigned,
@@ -1279,7 +1295,7 @@ def admin_batches(status: str | None = None, courier_id: str | None = None,
                   date: str | None = None, db=Depends(get_db),
                   actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    query = select(DeliveryBatch).where(DeliveryBatch.deleted_at.is_(None))
+    query = select(DeliveryBatch).where(DeliveryBatch.deleted_at.is_(None), ~empty_auto_batch())
     if status:
         query = query.where(DeliveryBatch.status == status)
     if courier_id:
@@ -1539,12 +1555,13 @@ def admin_batch_delete(batch_id: str, payload: BatchVersionInput | None = None,
 def admin_batch_publish(batch_id: str, payload: BatchVersionInput, db=Depends(get_db),
                         actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    batch, orders, _assignments = _lock_batch_context(db, batch_id, payload.expected_version)
-    _publish_batch(db, actor, batch, orders, (payload.reason or '').strip())
+    batch, orders, assignments = _lock_batch_context(db, batch_id, payload.expected_version)
+    _publish_batch(db, actor, batch, orders, assignments, (payload.reason or '').strip())
     return ok(_batch_view(db, batch))
 
 
 def _publish_batch(db, actor: Actor, batch: DeliveryBatch, orders: dict[str, Order],
+                   assignments: list[DeliveryAssignment],
                    reason: str = '', *, automatic: bool = False) -> None:
     if batch.deleted_at or batch.status not in ('PLANNED', 'POSTPONED'):
         raise DomainError('INVALID_TRANSITION', '只有规划中或已延期的批次可以发布', 409,
@@ -1552,8 +1569,15 @@ def _publish_batch(db, actor: Actor, batch: DeliveryBatch, orders: dict[str, Ord
     scope = _batch_scope_blocker(db, batch, existing=bool(orders))
     if scope:
         raise DomainError(scope['code'], scope['message'], 409)
+    if not assignments:
+        raise DomainError('BATCH_EMPTY', '批次没有配送订单，不能发布', 409)
     if _valid_courier(db, batch.courier_id) is None:
         raise DomainError('COURIER_REQUIRED', '发布前必须分配有效配送员', 422)
+    if any(assignment.courier_id != batch.courier_id or assignment.status != 'PLANNED'
+           or orders[assignment.order_id].deleted_at
+           or orders[assignment.order_id].status in ('PENDING_CONFIRMATION', 'CANCELLED')
+           for assignment in assignments):
+        raise DomainError('BATCH_INVALID_MEMBERS', '批次包含失效订单或分配，请核对名单后发布', 409)
     batch_slot_id = _batch_slot_id(batch)
     slot_ids = {batch_slot_id} | {_order_effective_slot_id(order) for order in orders.values()}
     for slot_id in sorted(slot_ids - {None}):
@@ -1599,6 +1623,7 @@ def due_auto_publish_batch_ids(db, *, limit: int = 30) -> list[str]:
                                   DeliverySlot.data['archivedAt'].as_string().is_(None),
                                   DeliverySlot.cutoff_at <= now,
                                   DeliveryBatch.status == 'PLANNED', DeliveryBatch.deleted_at.is_(None),
+                                  batch_has_delivery_tasks(),
                                   DeliveryBatch.data['publishedAt'].as_string().is_(None),
                                   DeliveryBatch.data['publicationWithdrawnAt'].as_string().is_(None),
                                   DeliveryBatch.data['autoPublishBlockedReason'].as_string().is_(None))
@@ -1611,7 +1636,7 @@ def auto_publish_batch(db, batch_id: str) -> str:
     slot = db.get(DeliverySlot, slot_id) if slot_id else None
     data = batch.data or {}
     now = utcnow()
-    if (batch.deleted_at or batch.status != 'PLANNED' or data.get('publishedAt')
+    if (not assignments or batch.deleted_at or batch.status != 'PLANNED' or data.get('publishedAt')
             or data.get('publicationWithdrawnAt') or data.get('autoPublishBlockedReason')
             or slot is None or _slot_archived(slot) or (slot.data or {}).get('autoPublish') is not True
             or slot.cutoff_at is None or slot.cutoff_at > now):
@@ -1623,10 +1648,8 @@ def auto_publish_batch(db, batch_id: str) -> str:
             raise DomainError('AUTO_PUBLISH_WINDOW_ENDED', '配送窗口已结束，请核对后手动安排', 409)
         if ((get_config(db, 'workflow').data or {}).get('pauses') or {}).get('delivery'):
             raise DomainError('DELIVERY_PAUSED', '配送已暂停，请恢复后手动发布', 409)
-        if not assignments:
-            raise DomainError('BATCH_EMPTY', '批次没有配送订单，请核对后手动发布', 409)
         with db.begin_nested():
-            _publish_batch(db, actor, batch, orders, automatic=True)
+            _publish_batch(db, actor, batch, orders, assignments, automatic=True)
     except DomainError as error:
         batch.data = {**data, 'autoPublishBlockedReason': error.message}
         touch(batch)
@@ -2475,57 +2498,59 @@ def admin_address_review(assignment_id: str, payload: AddressReviewInput,
 # ---------------------------------------------------------------------------
 
 
-def _courier_batches(db, actor: Actor) -> list[DeliveryBatch]:
-    query = select(DeliveryBatch).where(DeliveryBatch.deleted_at.is_(None))
+def _courier_tasks(actor: Actor):
+    # A batch belongs on the workbench only through a current, visible order.
+    # Keep the same membership for the list, both detail routes and their counts.
+    query = (select(DeliveryBatch, DeliveryAssignment, Order)
+             .join(DeliveryAssignment, DeliveryAssignment.batch_id == DeliveryBatch.id)
+             .join(Order, Order.id == DeliveryAssignment.order_id)
+             .where(DeliveryBatch.deleted_at.is_(None),
+                    DeliveryBatch.status.in_(get_args(CourierBatchStatus)),
+                    DeliveryAssignment.courier_id == DeliveryBatch.courier_id,
+                    *delivery_task_conditions()))
     if not _is_admin(actor):
         query = query.where(DeliveryBatch.courier_id == actor.staff_id)
-    return list(db.scalars(query.order_by(DeliveryBatch.starts_at, DeliveryBatch.id)))
+    return query
 
 
 @router.get('/courier/batches', response_model=Envelope[BatchListView])
-def courier_batches(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+def courier_batches(date: date_type | None = None, status: CourierBatchStatus | None = None,
+                    db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     _require_delivery_actor(actor)
-    return ok({'items': [_batch_view(db, batch) for batch in _courier_batches(db, actor)]})
+    query = _courier_tasks(actor)
+    if date is not None:
+        query = query.where(func.date(func.timezone(SHANGHAI.key, DeliveryBatch.starts_at)) == date)
+    if status is not None:
+        query = query.where(DeliveryBatch.status == status)
+    batches: dict[str, tuple[DeliveryBatch, list[tuple[DeliveryAssignment, Order]]]] = {}
+    for batch, assignment, order in db.execute(query.order_by(DeliveryBatch.starts_at, DeliveryBatch.id, Order.id)):
+        batches.setdefault(batch.id, (batch, []))[1].append((assignment, order))
+    return ok({'items': [_batch_view(db, batch, courier_tasks=tasks) for batch, tasks in batches.values()]})
 
 
 @router.get('/courier/batches/{batch_id}', response_model=Envelope[CourierBatchDetailView],
              response_model_exclude_none=True)
 def courier_batch(batch_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     _require_delivery_actor(actor)
-    batch = db.get(DeliveryBatch, batch_id)
-    if batch is None or batch.deleted_at:
+    rows = list(db.execute(_courier_tasks(actor).where(DeliveryBatch.id == batch_id).order_by(Order.id)))
+    if not rows:
         raise DomainError('NOT_FOUND', '批次不存在或不可访问', 404)
-    if not _is_admin(actor) and (batch.courier_id != actor.staff_id
-                                 or actor.staff_role != 'COURIER'):
-        raise DomainError('NOT_FOUND', '批次不存在或不可访问', 404)
-    assignments = _active_batch_assignments(db, batch.id)
-    if not _is_admin(actor):
-        assignments = [assignment for assignment in assignments
-                       if assignment.courier_id == actor.staff_id]
-    orders = []
-    for assignment in assignments:
-        order = db.get(Order, assignment.order_id)
-        if order is not None and not order.deleted_at:
-            orders.append(_delivery_order_view(db, order, actor))
-    return ok({'batch': _batch_view(db, batch), 'orders': orders})
+    batch = rows[0][0]
+    tasks = [(assignment, order) for _, assignment, order in rows]
+    return ok({'batch': _batch_view(db, batch, courier_tasks=tasks),
+               'orders': [delivery_order_view(db, order, actor, assignment=assignment)
+                          for assignment, order in tasks]})
 
 
 @router.get('/courier/orders/{order_id}', response_model=Envelope[DeliveryOrderView],
              response_model_exclude_none=True)
 def courier_order(order_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     _require_delivery_actor(actor)
-    order = db.get(Order, order_id)
-    if order is None or order.deleted_at:
+    row = db.execute(_courier_tasks(actor).where(Order.id == order_id)).first()
+    if row is None:
         raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-    assignment = _active_assignment(db, order.id)
-    if not _is_admin(actor):
-        if (assignment is None or assignment.courier_id != actor.staff_id
-                or actor.staff_role != 'COURIER'):
-            raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-        batch = db.get(DeliveryBatch, assignment.batch_id)
-        if batch is None or batch.deleted_at or batch.courier_id != actor.staff_id:
-            raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-    return ok(_delivery_order_view(db, order, actor))
+    _, assignment, order = row
+    return ok(delivery_order_view(db, order, actor, assignment=assignment))
 
 
 def _lock_order_delivery(db, order_id: str, expected_version: int | None = None) -> tuple[Order, DeliveryAssignment, DeliveryBatch]:
@@ -2556,6 +2581,12 @@ def _require_current_courier(actor: Actor, assignment: DeliveryAssignment,
         raise DomainError('FORBIDDEN', '配送任务已改派或不属于当前账号', 403)
     if batch is not None and batch.courier_id != actor.staff_id:
         raise DomainError('FORBIDDEN', '批次已改派，不能继续旧任务', 403)
+
+
+def _delivery_in_progress(order: Order, assignment: DeliveryAssignment, batch: DeliveryBatch | None) -> bool:
+    return bool(batch and not batch.deleted_at and batch.status == 'DELIVERING'
+                and assignment.courier_id and assignment.courier_id == batch.courier_id
+                and assignment.active and assignment.status == 'STARTED' and order.status == 'DELIVERING')
 
 
 def _record_delivery_wage(db, order: Order, assignment: DeliveryAssignment,
@@ -2661,9 +2692,10 @@ def courier_proof(order_id: str, payload: DeliveryProofInput, db=Depends(get_db)
     if assignment.id != payload.delivery_assignment_id:
         raise DomainError('ASSIGNMENT_CHANGED', '配送执行已变更，请刷新后重试', 409)
     _require_current_courier(actor, assignment, batch)
-    if order.status != 'DELIVERING' or assignment.status != 'STARTED':
+    if not _delivery_in_progress(order, assignment, batch):
         raise DomainError('INVALID_TRANSITION', '只有配送中的当前执行可以提交交付', 409,
-                          {'orderStatus': order.status, 'assignmentStatus': assignment.status})
+                          {'orderStatus': order.status, 'assignmentStatus': assignment.status,
+                           'batchStatus': batch.status})
     guard_blockers = _order_blockers(db, order, assignment)
     if guard_blockers:
         raise DomainError('DELIVERY_GUARD_FAILED', '付款、打印、装订、装袋或异常条件已失效',
@@ -2850,7 +2882,7 @@ def courier_batch_proofs(batch_id: str, payload: BatchDeliveryProofInput,
                               {'assignmentId': assignment.id,
                                'expectedVersion': item.expected_assignment_version,
                                'currentVersion': assignment.version})
-        if order.status != 'DELIVERING' or assignment.status != 'STARTED':
+        if not _delivery_in_progress(order, assignment, batch):
             raise DomainError('INVALID_TRANSITION', '只有配送中的当前执行可以提交交付', 409,
                               {'orderId': order.id, 'orderStatus': order.status,
                                'assignmentStatus': assignment.status})
@@ -2943,7 +2975,7 @@ def courier_exception(order_id: str, payload: CourierExceptionInput, db=Depends(
         raise DomainError('EXCEPTION_TYPE_INVALID', str(error), 422) from error
     order, assignment, batch = _lock_order_delivery(db, order_id, payload.expected_version)
     _require_current_courier(actor, assignment, batch)
-    if order.status != 'DELIVERING' or assignment.status != 'STARTED':
+    if not _delivery_in_progress(order, assignment, batch):
         raise DomainError('INVALID_TRANSITION', '只有配送中的当前执行可以登记异常', 409)
     damaged = exception_type == 'DAMAGED_OR_MISSING'
     exception = BusinessException(
@@ -2979,7 +3011,7 @@ def courier_location_exception(order_id: str, payload: LocationExceptionInput,
         raise DomainError('LOCATION_FAILURE_CODE_INVALID', '定位失败原因代码无效', 422)
     order, assignment, batch = _lock_order_delivery(db, order_id, payload.expected_version)
     _require_current_courier(actor, assignment, batch)
-    if order.status != 'DELIVERING' or assignment.status != 'STARTED':
+    if not _delivery_in_progress(order, assignment, batch):
         raise DomainError('INVALID_TRANSITION', '只有配送中的当前执行可以申请定位例外', 409)
     existing = _active_exception(db, order.id, 'LOCATION_EXCEPTION',
                                  ('OPEN', 'APPROVED'))
@@ -3056,7 +3088,8 @@ def admin_location_exception_decision(exception_id: str, payload: ExceptionDecis
             or (exception.data or {}).get('assignmentVersion') != assignment.version):
         raise DomainError('LOCATION_APPROVAL_STALE',
                           '审批绑定当前订单与配送执行版本，该申请已失效', 409)
-    if order.status != 'DELIVERING' or assignment.status != 'STARTED':
+    batch = lock(db, DeliveryBatch, assignment.batch_id)
+    if not _delivery_in_progress(order, assignment, batch):
         raise DomainError('INVALID_TRANSITION', '当前执行已不在配送中', 409)
     exception.status = payload.decision
     exception.data = {**(exception.data or {}), 'decision': payload.decision,
@@ -3142,10 +3175,10 @@ def admin_delivery_exception_resolve(exception_id: str, payload: ExceptionResolv
 # ---------------------------------------------------------------------------
 
 
-def delivery_order_view(db, order: Order, actor: Actor) -> dict:
+def delivery_order_view(db, order: Order, actor: Actor, *, assignment: DeliveryAssignment | None = None) -> dict:
     """Role-cropped delivery view; never exposes printable assets or management money."""
     admin = _is_admin(actor)
-    assignment = _active_assignment(db, order.id)
+    assignment = assignment or _active_assignment(db, order.id)
     proof = _proof_for_assignment(db, assignment.id) if assignment else None
     approval = _approved_location_exception(db, assignment) if assignment else None
     blockers = _order_blockers(db, order, assignment)
@@ -3160,8 +3193,10 @@ def delivery_order_view(db, order: Order, actor: Actor) -> dict:
             allowed.append('REVIEW_ADDRESS')
             if assignment.address_review or order.address_review:
                 allowed.append('APPROVE_ADDRESS')
-        if order.status == 'DELIVERING' and assignment.status == 'STARTED':
-            allowed.extend(['SUBMIT_PROOF', 'REPORT_EXCEPTION', 'REQUEST_LOCATION_EXCEPTION'])
+        if _delivery_in_progress(order, assignment, db.get(DeliveryBatch, batch_id)):
+            allowed.extend(['SUBMIT_PROOF', 'REPORT_EXCEPTION'])
+            if not admin:
+                allowed.append('REQUEST_LOCATION_EXCEPTION')
         if order.status == 'DELIVERED':
             allowed.append('VIEW_PROOF')
     view = {
@@ -3192,7 +3227,7 @@ def delivery_order_view(db, order: Order, actor: Actor) -> dict:
         'locationExceptionApproval': (
             _location_exception_approval_view(approval) if approval else None),
         'deliveryStatus': assignment.status if assignment else None,
-        'arrangement': arrangement_for_order(db, order),
+        'arrangement': arrangement_for_order(db, order, assignment=assignment),
         'allowedActions': allowed,
         'blockers': blockers,
     }

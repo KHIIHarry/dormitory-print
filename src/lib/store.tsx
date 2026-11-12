@@ -1,4 +1,5 @@
 import { planResources } from "./resources";
+import { useShanghaiToday } from "./use-shanghai-today";
 import {
   ActionLock,
   LatestTask,
@@ -104,6 +105,38 @@ type Store = {
   refresh: () => Promise<void>;
 };
 const Context = createContext<Store>(null!);
+
+async function loadCourierTasks(path: string, signal: AbortSignal) {
+  type BatchDetail = { batch: DataState["batches"][number]; orders: Order[] };
+  if (path.startsWith("/courier/batches?")) {
+    const { items } = await request<{ items: DataState["batches"] }>(path, {
+      signal,
+    });
+    return { items: [], batches: items };
+  }
+  const empty = { items: [], batches: [] };
+  try {
+    if (path.startsWith("/courier/batches/")) {
+      const { batch, orders } = await request<BatchDetail>(path, { signal });
+      return { items: orders, batches: [batch] };
+    }
+    const order = await request<Order>(path, { signal });
+    const batchId = order.assignment?.batchId || order.batchId;
+    if (!batchId) return empty;
+    const { batch, orders } = await request<BatchDetail>(
+      `/courier/batches/${encodeURIComponent(batchId)}`,
+      { signal },
+    );
+    // The second response represents the latest membership. A transfer that
+    // happened between the two requests cannot leave an old order on screen.
+    const current = orders.find((item) => item.id === order.id);
+    return current ? { items: [current], batches: [batch] } : empty;
+  } catch (error) {
+    if ((error as { status?: number }).status === 404) return empty;
+    throw error;
+  }
+}
+
 export function Provider({ children }: { children: ReactNode }) {
   const [savedAccessLinks, setSavedAccessLinks] = useState<
     Record<string, string>
@@ -173,6 +206,8 @@ export function Provider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const location = useLocation();
+  const today = useShanghaiToday();
+  const courierToday = /^\/courier\/?$/.test(location.pathname) ? today : undefined;
   const queryClient = useQueryClient();
   const sessionReady = useRef(false);
   const sessionRequest = useRef<Promise<unknown> | null>(null);
@@ -220,6 +255,7 @@ export function Provider({ children }: { children: ReactNode }) {
       location.search,
       role,
       identity.staff?.capabilities || [],
+      courierToday,
     );
     const realm = location.pathname.startsWith(ADMIN)
       ? "admin"
@@ -269,24 +305,7 @@ export function Provider({ children }: { children: ReactNode }) {
                 signal: controller.signal,
               });
             } else if (resource.name === "orders" && realm === "courier") {
-              const assigned = await request<{ items: DataState["batches"] }>(
-                resource.path,
-                { signal: controller.signal },
-              );
-              const details = await Promise.all(
-                assigned.items.map((batch) =>
-                  request<{
-                    batch: DataState["batches"][number];
-                    orders: Order[];
-                  }>(`/courier/batches/${batch.id}`, {
-                    signal: controller.signal,
-                  }),
-                ),
-              );
-              result = {
-                items: details.flatMap((d) => d.orders),
-                batches: details.map((d) => d.batch),
-              };
+              result = await loadCourierTasks(resource.path, controller.signal);
             } else if (resource.path === "/public/config")
               result = await queryClient.fetchQuery({
                 queryKey: ["public-config"],
@@ -345,6 +364,7 @@ export function Provider({ children }: { children: ReactNode }) {
                 ...state,
                 [resource.name]: resource.name === "config" ? emptyConfig : [],
                 ...(resource.name === "buildings" ? { campuses: [] } : {}),
+                ...(resource.name === "orders" && realm === "courier" ? { batches: [] } : {}),
               }));
               queryClient.clear();
               if (item.status === 401 && realm !== "customer")
@@ -436,7 +456,7 @@ export function Provider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     void refresh();
-  }, [role, location.pathname, location.search, identity.generation]);
+  }, [role, location.pathname, location.search, identity.generation, courierToday]);
   useEffect(() => {
     if (DEMO) return;
     const t = setInterval(() => {
@@ -452,7 +472,7 @@ export function Provider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", listener);
       window.removeEventListener("online", listener);
     };
-  }, [role, location.pathname, location.search, identity.generation]);
+  }, [role, location.pathname, location.search, identity.generation, courierToday]);
   useEffect(() => {
     if (DEMO)
       import("../growth/demo").then((m) => {
@@ -673,6 +693,7 @@ export function Provider({ children }: { children: ReactNode }) {
           location.search,
           role,
           identity.staff?.capabilities || [],
+          courierToday,
         );
   const currentResources = { ...resources };
   for (const resource of currentPlan) {

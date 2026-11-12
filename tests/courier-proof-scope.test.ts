@@ -11,7 +11,7 @@ vi.mock("../src/lib/store", () => ({
     role: context.role,
     data: {
       orders: [{ id: "a", deliveryAssignmentId: context.assignmentId }],
-      batches: [{ courierId: "staff-2", orderIds: ["a"] }],
+      batches: [{ courierId: "staff-2", status: "DELIVERING", orderIds: ["a"] }],
     },
   }),
 }));

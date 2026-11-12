@@ -4886,6 +4886,42 @@ select.campus-filter:focus {
 .courier-content .section-heading > .muted {
   font-size: 10px;
 }
+.courier-task-filters {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.courier-date-shortcuts,
+.courier-filter-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.courier-date-shortcuts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.courier-filter-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.courier-filter-fields .field {
+  min-width: 0;
+  margin: 0;
+}
+.courier-task-filters .btn,
+.courier-task-filters .field input[type="date"],
+.courier-task-filters .field select {
+  min-width: 0;
+  min-height: 44px;
+  font-size: 16px;
+}
+.courier-task-filters .field select {
+  height: 44px;
+}
+@media (max-width: 480px) {
+  .courier-filter-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .courier-batch {
   display: block;
   transition: box-shadow 0.2s;

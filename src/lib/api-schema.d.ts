@@ -4370,6 +4370,11 @@ export interface components {
             /** Date */
             date: string;
             /**
+             * Deliveredcount
+             * @default 0
+             */
+            deliveredCount: number;
+            /**
              * Endsat
              * Format: date-time
              */
@@ -19241,7 +19246,10 @@ export interface operations {
     };
     courier_batches_api_v1_courier_batches_get: {
         parameters: {
-            query?: never;
+            query?: {
+                date?: string | null;
+                status?: ("PLANNED" | "POSTPONED" | "PUBLISHED" | "DELIVERING" | "COMPLETED") | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19255,6 +19263,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_BatchListView_"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */

@@ -10,7 +10,7 @@ from test_delivery import add_orders, create_batch, make_courier, make_ready_ord
 from test_delivery_closed_loop import APP_MODULES, act_as, admin_client_actor, make_world, settle, submit
 
 
-@pytest.mark.parametrize('scenario', ['assigned', 'unassigned', 'legacy_slot', 'expired', 'disabled'])
+@pytest.mark.parametrize('scenario', ['assigned', 'unassigned', 'legacy_slot', 'expired', 'disabled', 'empty'])
 def test_auto_publication_at_cutoff_is_once_and_withdrawn_batch_stays_manual(
         db, api, client, act_as, staff_factory, scenario):
     from app import jobs
@@ -44,9 +44,17 @@ def test_auto_publication_at_cutoff_is_once_and_withdrawn_batch_stays_manual(
         batch.slot_id = None
         batch.data = {key: value for key, value in batch.data.items() if key not in ('slotId', 'slot_id')}
         batch.data = {**batch.data, 'slotSnapshot': {'id': slot.id}}
+    if scenario == 'empty':
+        assignment = db.scalars(select(DeliveryAssignment).where(DeliveryAssignment.batch_id == batch.id)).one()
+        assignment.active = False
     db.commit()
 
     result = jobs.publish_due_delivery_batches.run()
+    if scenario == 'empty':
+        assert result['published'] == result['blocked'] == 0
+        current = api(client, path, method='GET').json()['data']
+        assert current['status'] == 'PLANNED' and current['autoPublishBlockedReason'] is None
+        return
     if scenario == 'disabled':
         assert result['published'] == result['blocked'] == 0
         rejected = api(client, slot_path, {'expectedVersion': slot.version, 'autoPublish': True}, method='PATCH')

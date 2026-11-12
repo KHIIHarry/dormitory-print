@@ -1,5 +1,6 @@
 import { ADMIN } from "./api";
 import { adminResources, adminNavAllowed } from "../admin/resources";
+import { courierBatchFilters } from "./courier-batch-filters";
 import type { DataState } from "./types";
 export type ResourcePlan = { name: keyof DataState; path: string };
 export function planResources(
@@ -7,6 +8,7 @@ export function planResources(
   search: string,
   role: string | null,
   capabilities: readonly string[],
+  courierToday?: string,
 ): ResourcePlan[] {
   if (path.startsWith(ADMIN)) {
     if (role !== "ADMIN" || !adminNavAllowed(path, capabilities)) return [];
@@ -54,8 +56,17 @@ export function planResources(
       !capabilities.includes("delivery.manage")
     )
       return [];
+    const detail = path.match(/^\/courier\/(orders|batches)\/([^/]+)/);
+    let taskPath: string;
+    if (detail) taskPath = `/courier/${detail[1]}/${detail[2]}`;
+    else {
+      const { date, status } = courierBatchFilters(search, courierToday);
+      const filters = new URLSearchParams({ date });
+      if (status) filters.set("status", status);
+      taskPath = `/courier/batches?${filters}`;
+    }
     return [
-      { name: "orders", path: "/courier/batches" },
+      { name: "orders", path: taskPath },
       { name: "buildings", path: "/public/map" },
       { name: "slots", path: "/public/slots" },
     ];

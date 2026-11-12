@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Field } from "../components/ui";
+import { DeliveryDateField } from "../components/delivery-date-field";
+import { useShanghaiToday } from "../lib/use-shanghai-today";
 import {
   formatSlotDate,
   identifySlotDateRange,
-  shanghaiToday,
   slotDateRange,
   slotDateRangeError,
   type SlotDatePreset,
@@ -11,21 +12,11 @@ import {
 } from "../lib/slot-date-range";
 
 export function useSlotDateFilter(dates: string[]) {
-  const [today, setToday] = useState(() => shanghaiToday());
+  const today = useShanghaiToday();
   const [selection, setSelection] = useState<{
     preset: SlotDatePreset | "custom";
     range: SlotDateRange;
   }>(() => ({ preset: "week", range: slotDateRange("week", today, dates) }));
-
-  useEffect(() => {
-    const refreshToday = () => setToday(shanghaiToday());
-    const timer = window.setInterval(refreshToday, 60_000);
-    document.addEventListener("visibilitychange", refreshToday);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", refreshToday);
-    };
-  }, []);
 
   const range =
     selection.preset === "custom"
@@ -75,20 +66,18 @@ export function SlotDateFilter({
           <option value="custom">自定义</option>
         </select>
       </Field>
-      <Field label="开始日期" error={!range.start && error ? error : undefined}>
-        <input
-          type="date"
-          value={range.start}
-          onChange={(event) => changeDate("start", event.target.value)}
-        />
-      </Field>
-      <Field label="结束日期" error={range.start && error ? error : undefined}>
-        <input
-          type="date"
-          value={range.end}
-          onChange={(event) => changeDate("end", event.target.value)}
-        />
-      </Field>
+      <DeliveryDateField
+        label="开始日期"
+        value={range.start}
+        error={!range.start && error ? error : undefined}
+        onChange={(value) => changeDate("start", value)}
+      />
+      <DeliveryDateField
+        label="结束日期"
+        value={range.end}
+        error={range.start && error ? error : undefined}
+        onChange={(value) => changeDate("end", value)}
+      />
     </>
   );
 }

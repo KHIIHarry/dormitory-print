@@ -1,6 +1,6 @@
 import { formatDisplayTime } from "../lib/display-format";
-import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -26,18 +26,23 @@ import {
 } from "lucide-react";
 import { DEMO, useStore } from "../lib/store";
 import { isUncertainSubmission, mutation, now, request } from "../lib/api";
-import type { Order, Position, Proof } from "../lib/types";
+import type { Batch, Order, Position, Proof } from "../lib/types";
+import {
+  courierBatchFilters, courierBatchStatuses, courierDatePresets, hasCourierTasks,
+} from "../lib/courier-batch-filters";
 import {
   Badge,
   Button,
   Empty,
+  ErrorState,
   Field,
   LinkButton,
   Notice,
   PageHeading,
   Panel,
 } from "../components/ui";
-import { Progress } from "../components/feedback";
+import { Progress, RefreshStatus, ResourceSkeleton } from "../components/feedback";
+import { DeliveryDateField } from "../components/delivery-date-field";
 import { useIdentity } from "../growth/identity";
 import {
   DeviceTask,
@@ -55,15 +60,87 @@ import {
 import { BatchProof, LocationExceptionRequest } from "./batch-proof";
 import { DeliveryProofPanel } from "../components/delivery-proof";
 import "./batch-proof.css";
+
+function UnavailableCourierTask({
+  title = "该配送任务已不可访问",
+}: {
+  title?: string;
+}) {
+  return (
+    <Empty
+      title={title}
+      text="任务可能已改派或移除。"
+      action={
+        <LinkButton variant="secondary" to="/courier/">
+          返回配送任务
+        </LinkButton>
+      }
+    />
+  );
+}
+
+function deliveryActionAvailable(
+  order: Order,
+  batch: Batch | undefined,
+  action: string,
+) {
+  return (
+    batch?.status === "DELIVERING" &&
+    order.status === "DELIVERING" &&
+    (DEMO || order.allowedActions?.includes(action))
+  );
+}
+
 export function CourierHome() {
-  const { data, role } = useStore();
+  const { data, role, resources, refresh } = useStore();
   const { staff } = useIdentity();
-  const batches = data.batches.filter(
-    (b) => role === "ADMIN" || !DEMO || b.courierId === "staff-2",
+  const [params, setParams] = useSearchParams();
+  const latestParams = useRef(params);
+  useLayoutEffect(() => {
+    latestParams.current = params;
+  }, [params]);
+  const { date, day, status } = courierBatchFilters(params);
+  const resource = resources.orders;
+  const ready = !resource || resource.hasData;
+  const batches = ready
+    ? data.batches.filter(
+        (batch) =>
+          (role === "ADMIN" || !DEMO || batch.courierId === staff?.id) &&
+          hasCourierTasks(batch) &&
+          batch.date === date &&
+          (!status || batch.status === status),
+      )
+    : [];
+  const orderCount = batches.reduce(
+    (total, batch) => total + batch.orderIds.length,
+    0,
   );
-  const orders = data.orders.filter((o) =>
-    batches.some((b) => b.orderIds.includes(o.id)),
+  const delivered = batches.reduce(
+    (total, batch) =>
+      total +
+      (batch.deliveredCount ??
+        (batch.status === "COMPLETED"
+          ? batch.orderIds.length
+          : data.orders.filter(
+              (order) =>
+                order.status === "DELIVERED" &&
+                batch.orderIds.includes(order.id),
+            ).length)),
+    0,
   );
+  const changeFilter = (key: "date" | "day" | "status", value: string) => {
+    const next = new URLSearchParams(latestParams.current);
+    if (key !== "status") {
+      next.delete("date");
+      next.delete("day");
+    }
+    if (value && value !== "today") next.set(key, value);
+    else next.delete(key);
+    // Router transitions can render after the next control event. Compose
+    // both edits against the latest requested query until it is rendered.
+    latestParams.current = next;
+    setParams(next);
+  };
   return (
     <>
       <div className="courier-greeting">
@@ -79,28 +156,70 @@ export function CourierHome() {
           <Truck size={43} />
         </span>
       </div>
-      <div className="courier-stat-row">
-        <div>
-          <strong>
-            {orders.filter((o) => o.status !== "DELIVERED").length}
-          </strong>
-          <span>待送订单</span>
-        </div>
-        <div>
-          <strong>
-            {orders.filter((o) => o.status === "DELIVERED").length}
-          </strong>
-          <span>已送达</span>
-        </div>
-        <div>
-          <strong>{batches.length}</strong>
-          <span>我的批次</span>
-        </div>
-      </div>
       <div className="section-heading">
         <h2>我的配送批次</h2>
-        <span className="muted">仅显示已分配任务</span>
       </div>
+      <Panel className="courier-task-filters">
+        <div
+          className="courier-date-shortcuts"
+          role="group"
+          aria-label="配送日期快捷选择"
+        >
+          {courierDatePresets.map(({ key, label }) => (
+            <Button
+              key={key}
+              variant={day === key ? "" : "secondary"}
+              aria-pressed={day === key}
+              onClick={() => changeFilter("day", key)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+        <div className="courier-filter-fields">
+          <DeliveryDateField
+            label="配送日期"
+            value={date}
+            onChange={(value) => changeFilter("date", value)}
+          />
+          <Field label="批次状态">
+            <select
+              value={status}
+              onChange={(event) => changeFilter("status", event.target.value)}
+            >
+              <option value="">全部状态</option>
+              {courierBatchStatuses.map(({ key, label }) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      </Panel>
+      {ready && resource && (
+        <RefreshStatus
+          loading={resource.loading}
+          error={resource.error}
+          retry={refresh}
+        />
+      )}
+      {ready && (
+        <div className="courier-stat-row">
+          <div>
+            <strong>{orderCount - delivered}</strong>
+            <span>待送订单</span>
+          </div>
+          <div>
+            <strong>{delivered}</strong>
+            <span>已送达</span>
+          </div>
+          <div>
+            <strong>{batches.length}</strong>
+            <span>我的批次</span>
+          </div>
+        </div>
+      )}
       {batches.map((b) => (
         <Link
           className="panel courier-batch"
@@ -112,9 +231,7 @@ export function CourierHome() {
             {b.status === "PLANNED" && b.publicationWithdrawnAt && (
               <span className="badge">发布已撤回</span>
             )}
-            {(b as Record<string, any>).isRegular && (
-              <span className="badge">自动归集</span>
-            )}
+            {b.isRegular && <span className="badge">自动归集</span>}
             {(b as Record<string, any>).sealedAt && (
               <span className="badge">名单已冻结</span>
             )}
@@ -137,11 +254,20 @@ export function CourierHome() {
           </div>
         </Link>
       ))}
-      {!batches.length && (
+      {!ready && (
+        <Panel>
+          {resource?.error ? (
+            <ErrorState message={resource.error} retry={refresh} />
+          ) : (
+            <ResourceSkeleton />
+          )}
+        </Panel>
+      )}
+      {ready && !batches.length && (
         <Panel>
           <Empty
-            title="暂时没有配送任务"
-            text="管理员分配批次后，会显示在这里。"
+            title="没有符合筛选条件的配送批次"
+            text="可切换配送日期或批次状态。"
           />
         </Panel>
       )}
@@ -160,18 +286,12 @@ export function CourierBatch() {
   const [proofBuilding, setProofBuilding] = useState<string | null>(null);
   const batch = data.batches.find(
     (b) =>
-      b.id === id && (role === "ADMIN" || !DEMO || b.courierId === "staff-2"),
+      b.id === id && hasCourierTasks(b) && (role === "ADMIN" || !DEMO || b.courierId === "staff-2"),
   );
   useEffect(() => {
     if (batch?.status !== "DELIVERING") setProofBuilding(null);
   }, [batch?.status]);
-  if (!batch)
-    return (
-      <Empty
-        title="该批次未分配给你"
-        text="分配可能已变更，请返回工作台刷新。"
-      />
-    );
+  if (!batch) return <UnavailableCourierTask title="该批次暂无可访问任务" />;
   const adminCapable = canAdminDeliver(role, staff?.capabilities);
   const mayDeliver = role !== "ADMIN" || adminCapable;
   const orders = data.orders.filter((o) => batch.orderIds.includes(o.id));
@@ -212,7 +332,9 @@ export function CourierBatch() {
       <Notice>
         {batch.status === "DELIVERING"
           ? "批次已开始配送，请按楼栋完成交付。"
-          : batch.status === "PUBLISHED"
+          : batch.status === "COMPLETED"
+            ? "本批次已完成，可查看交付记录。"
+            : batch.status === "PUBLISHED"
             ? "批次已发布，确认后整批开始配送；开始后才能提交交付。"
             : batch.status === "POSTPONED"
               ? "批次已延期，请等待管理员重新发布配送计划。"
@@ -325,6 +447,7 @@ function useAssignment() {
   const batch = store.data.batches.find(
     (b) =>
       b.orderIds.includes(id || "") &&
+      hasCourierTasks(b) &&
       (store.role === "ADMIN" || !DEMO || b.courierId === "staff-2"),
   );
   return { ...store, order: batch ? order : undefined, batch };
@@ -332,10 +455,7 @@ function useAssignment() {
 export function CourierOrder() {
   const { order, batch, data } = useAssignment();
   const { generation } = useIdentity();
-  if (!order)
-    return (
-      <Empty title="该配送任务已不可访问" text="请返回工作台确认是否已改派。" />
-    );
+  if (!order) return <UnavailableCourierTask />;
   return (
     <>
       <Link className="back-link" to={`/courier/batches/${batch?.id}`}>
@@ -401,7 +521,7 @@ export function CourierOrder() {
         />
       ) : (
         <div className="courier-action-stack">
-          {order.status === "DELIVERING" && order.packingStatus === "PACKED" ? (
+          {deliveryActionAvailable(order, batch, "SUBMIT_PROOF") && order.packingStatus === "PACKED" ? (
             <LinkButton to={`/courier/orders/${order.id}/proof`}>
               <Camera size={19} />
               拍照并完成交付
@@ -409,13 +529,12 @@ export function CourierOrder() {
           ) : (
             <Button disabled>配送尚未开始，暂不能交付</Button>
           )}
-          <LinkButton
-            variant="secondary"
-            to={`/courier/orders/${order.id}/exception`}
-          >
-            <TriangleAlert size={18} />
-            记录配送异常
-          </LinkButton>
+          {deliveryActionAvailable(order, batch, "REPORT_EXCEPTION") && (
+            <LinkButton variant="secondary" to={`/courier/orders/${order.id}/exception`}>
+              <TriangleAlert size={18} />
+              记录配送异常
+            </LinkButton>
+          )}
         </div>
       )}
     </>
@@ -479,7 +598,7 @@ function DeliveryProofForm() {
     },
     [order?.id, role, generation],
   );
-  if (!order) return <Empty title="无权访问此配送任务" />;
+  if (!order) return <UnavailableCourierTask />;
   const delivery = order;
   const assignmentId =
     delivery.deliveryAssignmentId ||
@@ -490,9 +609,7 @@ function DeliveryProofForm() {
   const adminCapable = canAdminDeliver(role, staff?.capabilities);
   const limits = locationLimits(data.config);
   const available =
-    order.status === "DELIVERING" &&
-    order.packingStatus === "PACKED" &&
-    batch?.status === "DELIVERING";
+    deliveryActionAvailable(order, batch, "SUBMIT_PROOF") && order.packingStatus === "PACKED";
   const locate = () => {
     const token = locationTask.current.start();
     if (token === undefined) return;
@@ -844,7 +961,7 @@ function DeliveryProofForm() {
                 配送员不能自行跳过定位。请重试，或提交定位例外申请并等待管理员批准当前配送执行。
               </Notice>
             ) : null}
-            {!approval ? (
+            {!approval && deliveryActionAvailable(order, batch, "REQUEST_LOCATION_EXCEPTION") ? (
               <LocationExceptionRequest
                 orderId={order.id}
                 expectedVersion={order.version}
@@ -971,13 +1088,12 @@ function DeliveryProofForm() {
           <CheckCircle2 size={18} />
           {busy ? "等待服务端确认…" : "确认资料已送达"}
         </Button>
-        <Link
-          to={`/courier/orders/${order.id}/exception`}
-          className="text-link"
-        >
-          遇到问题？记录配送异常
-          <ArrowRight size={15} />
-        </Link>
+        {deliveryActionAvailable(order, batch, "REPORT_EXCEPTION") && (
+          <Link to={`/courier/orders/${order.id}/exception`} className="text-link">
+            遇到问题？记录配送异常
+            <ArrowRight size={15} />
+          </Link>
+        )}
       </div>
     </>
   );
@@ -988,7 +1104,8 @@ export function CourierException() {
   const [type, setType] = useState("无法联系收件人");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  if (!order) return <Empty title="无权访问此任务" />;
+  if (!order) return <UnavailableCourierTask />;
+  const canReport = deliveryActionAvailable(order, batch, "REPORT_EXCEPTION");
   return (
     <>
       <Link className="back-link" to={`/courier/orders/${order.id}`}>
@@ -999,73 +1116,79 @@ export function CourierException() {
         title="记录配送异常"
         description={`提取码 ${order.pickupCode}`}
       />
-      <Panel>
-        <Notice>
-          提交后由管理员跟进处理。请妥善保管资料，配送员不能自行改期或重新打印。
+      {!canReport ? (
+        <Notice type="warning">
+          当前配送执行未开始或已结束，暂不能登记异常。
         </Notice>
-        <Field label="异常类型">
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            {[
-              "无法联系收件人",
-              "无法获取设备定位",
-              "照片上传失败",
-              "资料损坏或缺失",
-              "楼栋暂时无法进入",
-              "其他配送问题",
-            ].map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="详细原因（必填）">
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={6}
-            placeholder="描述现场情况、已尝试的处理方式和资料保管位置"
-          />
-        </Field>
-        <Button
-          className="full"
-          busy={busy}
-          disabled={!reason.trim() || busy || order.status !== "DELIVERING"}
-          onClick={async () => {
-            setBusy(true);
-            if (
-              await act(
-                `/courier/orders/${order.id}/exception`,
-                { expectedVersion: order.version, type, reason },
-                (s) => ({
-                  ...s,
-                  orders: s.orders.map((o) =>
-                    o.id === order.id
-                      ? { ...o, status: "DELIVERY_EXCEPTION" }
-                      : o,
-                  ),
-                  exceptions: [
-                    {
-                      id: crypto.randomUUID(),
-                      orderId: order.id,
-                      type,
-                      reason,
-                      status: "OPEN",
-                      time: now(),
-                    },
-                    ...s.exceptions,
-                  ],
-                }),
-              )
-            ) {
-              toast("异常已记录，等待管理员处理");
-              nav(`/courier/orders/${order.id}`);
-            }
-            setBusy(false);
-          }}
-        >
-          <TriangleAlert size={18} />
-          提交异常，交由管理员处理
-        </Button>
-      </Panel>
+      ) : (
+        <Panel>
+          <Notice>
+            提交后由管理员跟进处理。请妥善保管资料，配送员不能自行改期或重新打印。
+          </Notice>
+          <Field label="异常类型">
+            <select value={type} onChange={(e) => setType(e.target.value)}>
+              {[
+                "无法联系收件人",
+                "无法获取设备定位",
+                "照片上传失败",
+                "资料损坏或缺失",
+                "楼栋暂时无法进入",
+                "其他配送问题",
+              ].map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="详细原因（必填）">
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={6}
+              placeholder="描述现场情况、已尝试的处理方式和资料保管位置"
+            />
+          </Field>
+          <Button
+            className="full"
+            busy={busy}
+            disabled={!reason.trim() || busy}
+            onClick={async () => {
+              setBusy(true);
+              if (
+                await act(
+                  `/courier/orders/${order.id}/exception`,
+                  { expectedVersion: order.version, type, reason },
+                  (s) => ({
+                    ...s,
+                    orders: s.orders.map((o) =>
+                      o.id === order.id
+                        ? { ...o, status: "DELIVERY_EXCEPTION" }
+                        : o,
+                    ),
+                    exceptions: [
+                      {
+                        id: crypto.randomUUID(),
+                        orderId: order.id,
+                        type,
+                        reason,
+                        status: "OPEN",
+                        time: now(),
+                      },
+                      ...s.exceptions,
+                    ],
+                  }),
+                )
+              ) {
+                toast("异常已记录，等待管理员处理");
+                nav(`/courier/orders/${order.id}`);
+              }
+              setBusy(false);
+            }}
+          >
+            <TriangleAlert size={18} />
+            提交异常，交由管理员处理
+          </Button>
+        </Panel>
+      )}
     </>
   );
 }

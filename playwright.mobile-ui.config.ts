@@ -9,6 +9,7 @@ export default defineConfig({
     "service-prices.spec.ts",
     "print-task-flip.spec.ts",
     "payment-variance.spec.ts",
+    "v1-courier.spec.ts",
   ],
   use: {
     baseURL: "http://localhost:5173",

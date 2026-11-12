@@ -27,7 +27,8 @@ async function reachable(url: string) {
 }
 
 test.beforeAll(async () => {
-  const port = test.info().project.name === "mobile" ? 5205 : 5204;
+  const project = test.info().project.name;
+  const port = project === "webkit" ? 5207 : project === "mobile" ? 5205 : 5204;
   REAL_BASE = `http://127.0.0.1:${port}`;
   if (await reachable(`${REAL_BASE}/courier/`)) return;
   server = spawn(
@@ -51,11 +52,12 @@ test.afterAll(() => {
   if (startedHere) server?.kill("SIGTERM");
 });
 
-test.use({ channel: "chrome", trace: "off" });
+test.use({ trace: "off" });
 
 type Call = {
   method: string;
   path: string;
+  search: string;
   body: unknown;
   headers: Record<string, string>;
 };
@@ -68,6 +70,8 @@ type CourierState = {
   orders: Record<string, unknown>[];
   batchProofStatus: number;
   singleProofStatus: number;
+  batches?: Record<string, unknown>[];
+  batchUnavailable?: boolean;
 };
 
 const envelope = (data: unknown) => ({ data, requestId: "e2e-courier" });
@@ -176,7 +180,7 @@ function courierOrder(
     requestedSlot: { id: "S1", name: "晚间配送", start: "19:00", end: "20:00" },
     confirmedSlot: { id: "S1", name: "晚间配送", start: "19:00", end: "20:00" },
     allowedActions:
-      status === "DELIVERING" ? ["SUBMIT_PROOF", "REPORT_EXCEPTION"] : [],
+      status === "DELIVERING" ? ["SUBMIT_PROOF", "REPORT_EXCEPTION", "REQUEST_LOCATION_EXCEPTION"] : [],
     blockers: [],
     ...overrides,
   };
@@ -248,6 +252,7 @@ async function installApi(page: Page, state: CourierState) {
     state.calls.push({
       method,
       path,
+      search: url.search,
       body,
       headers: request.headers(),
     });
@@ -288,14 +293,23 @@ async function installApi(page: Page, state: CourierState) {
           },
         ],
       });
-    if (path === "/courier/batches" && method === "GET")
-      return json(route, { items: [batch(state)] });
+    if (path === "/courier/batches" && method === "GET") {
+      const date = url.searchParams.get("date");
+      const status = url.searchParams.get("status");
+      return json(route, { items: (state.batches ?? [batch(state)]).filter(
+        (item) => (!date || item.date === date) && (!status || item.status === status),
+      ) });
+    }
     if (path === "/courier/batches/batch-1" && method === "GET")
-      return json(route, {
+      return state.batchUnavailable ? json(route, { code: "NOT_FOUND", message: "批次不存在或不可访问" }, 404) : json(route, {
         batch: batch(state),
         orders: state.orders,
         buildings: [{ id: "B1", name: "知行苑 1 栋", type: "DORMITORY" }],
       });
+    if (method === "GET" && /^\/courier\/orders\/[^/]+$/.test(path)) {
+      const order = state.orders.find((item) => item.id === path.split("/").at(-1));
+      return order ? json(route, order) : json(route, { code: "NOT_FOUND", message: "订单不存在或不可访问" }, 404);
+    }
     if (path === "/courier/batches/batch-1/start" && method === "POST") {
       state.batchStatus = "DELIVERING";
       state.batchVersion = 6;
@@ -451,6 +465,187 @@ test("starts a published batch once and opens batch proof after the server confi
   );
   expect(starts).toHaveLength(1);
   expect(starts[0].body).toEqual({ expectedVersion: 5 });
+});
+
+test("courier filters by Shanghai delivery date and status without loading each batch", async ({
+  page,
+}, info) => {
+  await page.clock.setFixedTime(new Date("2026-10-30T16:30:00Z"));
+  const state = initialState("PUBLISHED");
+  state.batches = [
+    {
+      ...batch(state),
+      id: "previous",
+      date: "2026-10-30",
+      name: "昨天已完成",
+      status: "COMPLETED",
+      deliveredCount: 2,
+    },
+    {
+      ...batch(state),
+      date: "2026-10-31",
+      name: "今天已发布",
+      deliveredCount: 0,
+    },
+    {
+      ...batch(state),
+      id: "delivering",
+      date: "2026-10-31",
+      name: "今天配送中",
+      status: "DELIVERING",
+      deliveredCount: 1,
+    },
+    {
+      ...batch(state),
+      id: "empty",
+      date: "2026-10-31",
+      name: "空自动批次",
+      status: "PLANNED",
+      orderIds: [],
+      isRegular: true,
+    },
+    { ...batch(state), id: "next", date: "2026-11-01", name: "明天的配送批次" },
+  ];
+  await installApi(page, state);
+  await page.goto(appUrl("/courier/"));
+  const date = page.getByLabel("配送日期", { exact: true });
+  const status = page.getByLabel("批次状态", { exact: true });
+  const today = page.getByRole("button", { name: "今天", exact: true });
+  await expect(today).toHaveAttribute("aria-pressed", "true");
+  await expect(date).toHaveValue("2026-10-31");
+  await expect(page.getByRole("link", { name: /今天已发布/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /今天配送中/ })).toBeVisible();
+  await expect(page.getByText("空自动批次")).toHaveCount(0);
+  await expect(page.getByText("明天的配送批次")).toHaveCount(0);
+  await expect(
+    page.getByText("待送订单", { exact: true }).locator(".."),
+  ).toHaveText("3待送订单");
+  expect(
+    state.calls.filter((call) => call.path.startsWith("/courier/batches/")),
+  ).toEqual([]);
+  expect(
+    state.calls.some(
+      (call) =>
+        call.path === "/courier/batches" && call.search === "?date=2026-10-31",
+    ),
+  ).toBe(true);
+
+  await page.locator(".courier-task-filters").evaluate((element) => {
+    [...element.querySelectorAll("button")].find((button) => button.textContent === "昨天")!.click();
+    const select = element.querySelector("select")!;
+    select.value = "COMPLETED";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(date).toHaveValue("2026-10-30");
+  await expect(page.getByRole("link", { name: /昨天已完成/ })).toBeVisible();
+  expect(
+    state.calls.some(
+      (call) => call.search === "?date=2026-10-30&status=COMPLETED",
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "明天", exact: true }).click();
+  await expect(page.getByText("没有符合筛选条件的配送批次")).toBeVisible();
+  await status.selectOption("");
+  await expect(date).toHaveValue("2026-11-01");
+  await expect(
+    page.getByRole("link", { name: /明天的配送批次/ }),
+  ).toBeVisible();
+  await date.fill("2026-10-31");
+  await expect(today).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("link", { name: /今天已发布/ })).toBeVisible();
+
+  const filter = page.locator(".courier-task-filters");
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const measurements = await filter.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const left =
+        bounds.left + element.clientLeft + parseFloat(style.paddingLeft);
+      const right =
+        bounds.right - element.clientLeft - parseFloat(style.paddingRight);
+      return {
+        scrollWidth: document.documentElement.scrollWidth,
+        scrollX,
+        controls: [...element.querySelectorAll("input, select, button")].map(
+          (control) => {
+            const rect = control.getBoundingClientRect();
+            return {
+              contained: rect.left >= left - 1 && rect.right <= right + 1,
+              height: rect.height,
+              fontSize: parseFloat(getComputedStyle(control).fontSize),
+            };
+          },
+        ),
+      };
+    });
+    expect(measurements.scrollWidth).toBeLessThanOrEqual(width + 1);
+    expect(measurements.scrollX).toBe(0);
+    for (const control of measurements.controls) {
+      expect(control.contained).toBe(true);
+      expect(control.height).toBeGreaterThanOrEqual(44);
+      expect(control.fontSize).toBeGreaterThanOrEqual(16);
+    }
+    if (width === 390 || width === 1440)
+      await filter.screenshot({
+        path: info.outputPath(`courier-filter-${width}.png`),
+      });
+  }
+  await today.click();
+  await page.clock.setFixedTime(new Date("2026-10-31T16:30:00Z"));
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange")),
+  );
+  await expect(date).toHaveValue("2026-11-01");
+  await expect(
+    page.getByRole("link", { name: /明天的配送批次/ }),
+  ).toBeVisible();
+  await date.fill("2026-10-31");
+  await page.getByRole("link", { name: /今天已发布/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "晚间配送 · 东区" }),
+  ).toBeVisible();
+  expect(
+    state.calls.some((call) => call.path === "/courier/batches/batch-1"),
+  ).toBe(true);
+});
+
+test("a revoked batch clears cached orders while unrelated batches are never loaded", async ({
+  page,
+}) => {
+  const state = initialState("DELIVERING");
+  await boot(page, state);
+  expect(
+    state.calls.filter((call) => call.path === "/courier/batches"),
+  ).toEqual([]);
+  state.batchUnavailable = true;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("该批次暂无可访问任务")).toBeVisible();
+  await expect(page.getByText("A1001")).toHaveCount(0);
+  await page.goto(appUrl("/courier/orders/ORD-1/proof"));
+  await expect(page.getByRole("heading", { name: "完成这次交付" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByText(/已不可访问/)).toBeVisible();
+});
+
+test("does not expose execution actions before the batch starts even when order flags are stale", async ({
+  page,
+}) => {
+  const state = initialState("PUBLISHED");
+  state.orders = [courierOrder("ORD-1", "asg-1", "DELIVERING")];
+  await installApi(page, state);
+  await page.goto(appUrl("/courier/orders/ORD-1"));
+  await expect(page.getByRole("heading", { name: "配送订单" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /完成交付|记录配送异常/ }),
+  ).toHaveCount(0);
+  await page.goto(appUrl("/courier/orders/ORD-1/exception"));
+  await expect(page.getByText(/暂不能登记异常/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /提交异常/ })).toHaveCount(0);
+  await page.goto(appUrl("/courier/orders/ORD-1/proof"));
+  await expect(page.getByText(/当前不可交付/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /申请定位例外/ })).toHaveCount(0);
 });
 
 test("submits one shared-photo atomic batch request with per-order assignment ids", async ({

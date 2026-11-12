@@ -1930,6 +1930,11 @@
             "title": "Date",
             "type": "string"
           },
+          "deliveredCount": {
+            "default": 0,
+            "title": "Deliveredcount",
+            "type": "integer"
+          },
           "endsAt": {
             "format": "date-time",
             "title": "Endsat",
@@ -33180,6 +33185,48 @@
     "/courier/batches": {
       "get": {
         "operationId": "courier_batches_api_v1_courier_batches_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "PLANNED",
+                    "POSTPONED",
+                    "PUBLISHED",
+                    "DELIVERING",
+                    "COMPLETED"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -33190,6 +33237,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "default": {
             "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",

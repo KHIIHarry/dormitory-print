@@ -50,6 +50,7 @@ export function ResourceOutlet() {
   const independent =
     publicOrLocal ||
     pathname === "/u/orders" ||
+    /^\/courier\/?$/.test(pathname) ||
     pathname === `${ADMIN}/orders` ||
     /\/(account|customers|promotions\/records|settings\/(mail|mail-templates|promotions|volume-discounts))/.test(
       pathname,

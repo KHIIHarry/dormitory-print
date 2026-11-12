@@ -216,6 +216,7 @@ export type Batch = {
   courierId: string;
   status: string;
   orderIds: string[];
+  deliveredCount?: number;
   allowedActions?: string[];
   publishedAutomatically?: boolean;
   publicationWithdrawnAt?: string | null;

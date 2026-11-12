@@ -363,23 +363,33 @@ def slot_batches(slot_id: str):
             DeliveryBatch.group_id.in_(select(DeliveryGroup.id).where(DeliveryGroup.slot_id == slot_id))))
 
 
+def delivery_task_conditions():
+    return (DeliveryAssignment.active.is_(True),
+            DeliveryAssignment.status.in_(('PLANNED', 'STARTED', 'DELIVERED', 'EXCEPTION')),
+            Order.deleted_at.is_(None), Order.status.notin_(('PENDING_CONFIRMATION', 'CANCELLED')))
+
+
+def batch_has_delivery_tasks():
+    return (select(DeliveryAssignment.id).join(Order, Order.id == DeliveryAssignment.order_id)
+            .where(DeliveryAssignment.batch_id == DeliveryBatch.id, *delivery_task_conditions())
+            .exists())
+
+
 def empty_auto_batch():
     return (
         (DeliveryBatch.source == 'AUTO') & DeliveryBatch.is_regular.is_(True)
         & (DeliveryBatch.status == 'PLANNED')
-        & ~select(DeliveryAssignment.id).where(
-            DeliveryAssignment.batch_id == DeliveryBatch.id,
-            DeliveryAssignment.active.is_(True)).exists())
+        & ~batch_has_delivery_tasks())
 
 
 def operational_slot_batches(slot_id: str):
     return slot_batches(slot_id).where(DeliveryBatch.status != 'CANCELLED', ~empty_auto_batch())
 
 
-def arrangement_for_order(db, order: Order) -> dict:
+def arrangement_for_order(db, order: Order, *, assignment: DeliveryAssignment | None = None) -> dict:
     """Compute the one authoritative arrangement shown to every surface."""
     data = order.data or {}
-    assignment = _assignment_for_order(db, order)
+    assignment = assignment or _assignment_for_order(db, order)
     batch = db.get(DeliveryBatch, assignment.batch_id) if assignment else None
     changes = _latest_changes(db, order)
     latest = changes[0] if changes else None

@@ -16,6 +16,7 @@ from pydantic import Field, field_validator, model_validator
 from .core import DTO
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
+CourierBatchStatus = Literal['PLANNED', 'POSTPONED', 'PUBLISHED', 'DELIVERING', 'COMPLETED']
 WEEKDAYS = ('星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日')
 
 BATCH_ACTIONS = (
@@ -716,6 +717,7 @@ class BatchView(DTO):
     sealed_by_name: str | None = None
     seal_reason: str = ''
     paid_count: int = 0
+    delivered_count: int = 0
     prepared_count: int = 0
     unprepared_count: int = 0
     unassigned_count: int = 0
