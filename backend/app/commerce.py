@@ -580,7 +580,9 @@ def _current_ready(db,actor,payload,order=None):
         source_scopes=grant_scopes(db,Actor(grant_ids=[prep.source_grant_id]),order.id if order else '')
         if not order or 'ORDER_REVISE_PENDING' not in source_scopes:
             raise DomainError('SOURCE_GRANT_REVOKED','原委托授权已撤销或过期，请重新取得授权',403)
-    artifacts=list(db.scalars(select(Artifact).where(Artifact.preparation_id==prep.id)))
+    from .media import IDENTIFICATION_PURPOSE
+    artifacts=list(db.scalars(select(Artifact).join(Asset, Artifact.asset_id == Asset.id).where(
+        Artifact.preparation_id == prep.id, Asset.purpose != IDENTIFICATION_PURPOSE)))
     expected={(a.id,a.sha256) for a in artifacts}
     actual=[(ack.artifact_id,ack.sha256) for ack in payload.preview_acks]
     if not expected or len(actual)!=len(expected) or len(set(actual))!=len(actual) or set(actual)!=expected:
@@ -803,7 +805,8 @@ def _void_blockers(db,order):
     # Finished print work is not an obligation: the order may still be voided
     # before the courier leaves. Only an in-flight print job blocks the void.
     started_print=db.scalar(select(PrintTask.id).where(PrintTask.order_id==order.id,
-        PrintTask.active.is_(True),PrintTask.status.in_(('PRINTING','ATTEMPTED','EXCEPTION'))).limit(1))
+        PrintTask.active.is_(True), PrintTask.file_id.is_not(None),
+        PrintTask.status.in_(('PRINTING','ATTEMPTED','EXCEPTION'))).limit(1))
     if started_print:
         blockers.append('PRINT_STARTED')
     delivery_started=db.scalar(select(DeliveryAssignment.id).where(
@@ -1198,6 +1201,8 @@ def _complete_settlement(db,actor,order,body,receipt):
     touch(order)
     from .production import refresh_production
     db.flush();refresh_production(db,order)
+    from .order_identification import queue_identification
+    queue_identification(db, order)
     if auto_batch and (auto_batch.starts_at != slot.starts_at or auto_batch.ends_at != slot.ends_at):
         from .delivery_plan import record_change
         from .growth import notify_delivery_change
@@ -1392,7 +1397,9 @@ def dashboard(db=Depends(get_db),actor:Actor=Depends(actor_dep)):
             result['cashReceivedCents']+=order.cash_received_cents
             result['refundCents']+=order.refunded_cents
             if order.settlement_kind=='ZERO_PAYABLE':result['zeroPayableCount']+=1
-    result['pendingPrintTaskCount']=db.scalar(select(func.count()).select_from(PrintTask).where(PrintTask.active.is_(True),PrintTask.status.in_(['PENDING','ATTEMPTED','EXCEPTION'])))
+    result['pendingPrintTaskCount']=db.scalar(select(func.count()).select_from(PrintTask).where(
+        PrintTask.active.is_(True), PrintTask.file_id.is_not(None),
+        PrintTask.status.in_(['PENDING','ATTEMPTED','EXCEPTION'])))
     result['pendingBindingCount']=db.scalar(select(func.count()).select_from(BindingTask).where(BindingTask.status!='COMPLETED'))
     from .models import AfterSale,Refund
     result['manualAdjustmentCents']=sum((r.amount_cents-int((r.data or {}).get('suggestedCents',r.amount_cents))) for r in db.scalars(select(Refund)))

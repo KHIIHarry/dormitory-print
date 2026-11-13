@@ -110,3 +110,68 @@ def test_after_sale_closes_batch_with_no_remaining_delivery(db,ready_preparation
     db.flush()
     assert assignment.active is False
     assert batch.status=='CANCELLED'
+
+
+def test_settled_order_with_open_print_attempt_cannot_cancel_or_approve_customer_refund(
+    db, ready_preparation, staff_factory,
+):
+    from sqlalchemy import select
+
+    from app.after_sales import CaseInput, ReviewInput, create_case, review_case
+    from app.commerce import OrderSubmit, cancel_pending, submit_order
+    from app.models import PrintTask
+    from app.production import create_print_attempt, start_production
+    from app.production_schemas import ActualStartInput, PrintAttemptInput
+
+    customer, _, _, _, body = ready_preparation
+    order = submit_order(db, customer, OrderSubmit.model_validate(body))
+    order.status = 'PENDING_PRINT'
+    order.settlement_kind = 'CASH_MANUAL'
+    order.cash_received_cents = order.total_cents
+    staff = staff_factory()
+    admin = Actor(staff_id=staff.id, staff_role='ADMIN', capabilities={'*'})
+    db.flush()
+    task = db.scalar(select(PrintTask).where(PrintTask.order_id == order.id))
+
+    with pytest.raises(DomainError, match='不能直接撤销'):
+        cancel_pending(db, order, '取消订单', customer)
+    attempt = create_print_attempt(
+        task.id, PrintAttemptInput(expectedVersion=order.version, artifactId=task.artifact_id),
+        db=db, actor=admin,
+    )
+    assert order.actual_started_at is None
+    case = create_case(db, customer, order, CaseInput(
+        responsibility='CUSTOMER', solution='REFUND', reason='暂时不需要',
+    ))
+    with pytest.raises(DomainError) as failure:
+        review_case(db, admin, case, ReviewInput(
+            expectedVersion=case.version, decision='APPROVE', reason='核对打印状态',
+        ))
+    assert failure.value.code == 'PRINT_ATTEMPT_UNRESOLVED'
+    with pytest.raises(DomainError) as invalid_attempt:
+        start_production(order.id, ActualStartInput(
+            expectedVersion=order.version, attemptId='unknown',
+        ), db=db, actor=admin)
+    assert invalid_attempt.value.code == 'OPEN_DOCUMENT_ATTEMPT_REQUIRED'
+    with pytest.raises(DomainError) as locked:
+        create_print_attempt(
+            task.id, PrintAttemptInput(expectedVersion=order.version, artifactId=task.artifact_id),
+            db=db, actor=admin,
+        )
+    assert locked.value.code == 'REFUND_LOCKED'
+    start_production(order.id, ActualStartInput(
+        expectedVersion=order.version, attemptId=attempt['data']['attemptId'],
+    ), db=db, actor=admin)
+    assert order.actual_started_at is not None
+    with pytest.raises(DomainError) as duplicate:
+        start_production(order.id, ActualStartInput(
+            expectedVersion=order.version, attemptId=attempt['data']['attemptId'],
+        ), db=db, actor=admin)
+    assert duplicate.value.code == 'ACTUAL_START_ALREADY_RECORDED'
+    with pytest.raises(DomainError) as after_start:
+        review_case(db, admin, case, ReviewInput(
+            expectedVersion=case.version, decision='APPROVE', reason='核对开印记录',
+        ))
+    assert after_start.value.code == 'PRODUCTION_ALREADY_STARTED'
+    assert order.status == 'PENDING_PRINT'
+    assert order.refunded_cents == 0

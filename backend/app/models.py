@@ -305,11 +305,14 @@ class OrderFile(Entity, Base):
 class PrintTask(Entity, Base):
     __tablename__ = 'print_tasks'
     order_id: Mapped[str] = mapped_column(ForeignKey('orders.id'), index=True)
-    file_id: Mapped[str] = mapped_column(ForeignKey('order_files.id'))
+    file_id: Mapped[str | None] = mapped_column(ForeignKey('order_files.id'))
     artifact_id: Mapped[str] = mapped_column(ForeignKey('artifacts.id'))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(24), default='PENDING')
     settings: Mapped[dict] = mapped_column(J, default=dict)
+
+    __table_args__ = (Index('uq_print_task_identification_order', 'order_id', unique=True,
+                            postgresql_where=text('file_id IS NULL'), sqlite_where=text('file_id IS NULL')),)
 
 
 class PrintAttempt(Entity, Base):

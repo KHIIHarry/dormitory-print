@@ -66,10 +66,17 @@ const statusFilters = [
   ["全部订单", ""],
   ["待确认", "PENDING_CONFIRMATION"],
   ["待打印", "PENDING_PRINT"],
+  ["打印中", "PRINTING"],
   ["待配送", "READY_FOR_DELIVERY"],
   ["配送中", "DELIVERING"],
   ["已送达", "DELIVERED"],
 ];
+function displayOrderStatus(order: Order) {
+  return order.status === "PENDING_PRINT" && order.actualStartedAt
+    ? "PRINTING"
+    : order.status;
+}
+
 export function OrderList() {
   const { data, resources, refreshing, refreshError, refresh } = useStore();
   const ordersResource = resources.orders;
@@ -83,7 +90,7 @@ export function OrderList() {
   const status = params.get("status") || "";
   const orders = data.orders.filter(
     (o) =>
-      (!status || o.status === status) &&
+      (!status || displayOrderStatus(o) === status) &&
       (!search ||
         `${o.pickupCode} ${o.files.map((f) => f.name).join(" ")}`
           .toLowerCase()
@@ -156,7 +163,7 @@ export function OrderList() {
                   <span>提取码</span>
                   <strong>{o.pickupCode}</strong>
                 </div>
-                <Badge status={o.status} />
+                <Badge status={displayOrderStatus(o)} />
               </div>
               {o.files.slice(0, 2).map((f) => (
                 <FileRow key={f.id} file={f} />
@@ -261,7 +268,7 @@ export function Contact() {
       </div>
       <div className="contact-grid">
         <Panel className="contact-order">
-          <Badge status={order.status} />
+          <Badge status={displayOrderStatus(order)} />
           <p>你的订单提取码</p>
           <div className="pickup-code">
             {order.pickupCode}
@@ -423,6 +430,17 @@ export function OrderDetail() {
     data.config as unknown as { unpaidTimeoutMinutes?: number | null }
   ).unpaidTimeoutMinutes;
   const closeNotice = autoCloseNotice(order, unpaidTimeoutMinutes);
+  const status = displayOrderStatus(order);
+  const statusHeading = {
+    PENDING_CONFIRMATION: "等待管理员确认付款",
+    PENDING_PRINT: "资料等待打印",
+    PRINTING: "正在打印你的资料",
+    READY_FOR_DELIVERY: "资料已准备好，等待配送",
+    DELIVERING: "你的资料正在路上",
+    DELIVERED: "资料已送达，请及时领取",
+    CANCELLED: "订单已撤销",
+    DELIVERY_EXCEPTION: "配送遇到一点问题",
+  }[status];
   const timeline = ["订单提交", "付款确认", "打印整理", "开始配送", "送达完成"];
   const stage = {
     PENDING_CONFIRMATION: 0,
@@ -456,22 +474,8 @@ export function OrderDetail() {
       <RefreshStatus loading={false} error={refreshError} retry={refresh} />
       <div className="detail-status">
         <div>
-          <Badge status={order.status} />
-          <h2>
-            {order.status === "PENDING_CONFIRMATION"
-              ? "等待管理员确认付款"
-              : order.status === "PENDING_PRINT"
-                ? "正在认真准备你的资料"
-                : order.status === "DELIVERING"
-                  ? "你的资料正在路上"
-                  : order.status === "DELIVERED"
-                    ? "资料已送达，请及时领取"
-                    : order.status === "CANCELLED"
-                      ? "订单已撤销"
-                      : order.status === "DELIVERY_EXCEPTION"
-                        ? "配送遇到一点问题"
-                        : "资料已准备好，等待配送"}
-          </h2>
+          <Badge status={status} />
+          <h2>{statusHeading}</h2>
           <p>
             {order.status === "PENDING_PRINT"
               ? order.packingStatus === "PACKED"
@@ -531,7 +535,7 @@ export function OrderDetail() {
                     <Printer size={14} />
                     {f.printStatus === "COMPLETED"
                       ? "打印已完成"
-                      : f.printStatus === "ATTEMPTED"
+                      : order.actualStartedAt && f.printStatus === "ATTEMPTED"
                         ? "等待打印结果确认"
                         : "等待打印"}
                   </span>

@@ -160,7 +160,7 @@ TARGET_ALIASES = {
     'EXPORT': 'EXPORT_JOB',
 }
 TRASH_STATUSES = ('DELETED', 'PURGE_PENDING')
-PUBLIC_PURPOSES = {'PUBLIC_WECHAT_QR', 'PUBLIC_MAP'}
+PUBLIC_PURPOSES = {'PUBLIC_WECHAT_QR', 'PUBLIC_MAP', 'PUBLIC_IDENTIFICATION_QR'}
 
 
 def _now() -> datetime:
@@ -316,7 +316,7 @@ def _order_active_blockers(db, order: Order) -> list[str]:
                 blockers.append('DELIVERY_NOT_COMPLETED')
             if db.scalar(select(PrintTask.id).where(
                     PrintTask.order_id == order.id, PrintTask.active.is_(True),
-                    PrintTask.status != 'COMPLETED').limit(1)):
+                    PrintTask.file_id.is_not(None), PrintTask.status != 'COMPLETED').limit(1)):
                 blockers.append('PRINT_NOT_COMPLETED')
             if db.scalar(select(BindingTask.id).where(
                     BindingTask.order_id == order.id,

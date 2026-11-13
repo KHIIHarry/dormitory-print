@@ -2,14 +2,16 @@ from copy import deepcopy
 from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import Field, StrictInt, create_model, model_validator
+from pydantic import Field, HttpUrl, StrictInt, create_model, model_validator
 from sqlalchemy import select
 
 from .core import Actor, DTO, DomainError, Envelope, actor_dep, advisory_lock, audit, lock, ok, require_admin, touch
 from .db import get_db
 from .models import ConfigSection
+from .settings import get_settings
 
 router = APIRouter()
+IDENTIFICATION_WEBSITE_MAX_BYTES = 240
 DEFAULTS = {
     'prices': {**dict.fromkeys(('bwSingle','bwDuplex','colorSingle','colorDuplex','photo','corner','side')), 'delivery': 0},
     'services': {'serviceEnabled':False,'maxFiles':10,'maxMb':50,'maxOrderMb':200,'maxPages':1000,'maxCopies':100,
@@ -21,7 +23,7 @@ DEFAULTS = {
     'contact': {'wechat':'','phone':'','qrUrl':'','displayName':'DormPrint','guide':''},
     'announcement': {'announcement':'','serviceEnabled':False},
     'workflow': {'unpaidTimeoutMinutes':None,'quoteMinutes':15,'locationMaxAgeSeconds':300,'locationMaxAccuracyMeters':100,
-        'shortCodeLength':5,'pauses':{'newOrders':False,'fileProcessing':False,'production':False,'delivery':False}},
+        'shortCodeLength':5,'orderIdentificationEnabled':False,'orderIdentificationWebsiteUrl':'','pauses':{'newOrders':False,'fileProcessing':False,'production':False,'delivery':False}},
     'retention': {'sourceDays':7,'finalDays':30,'proofDays':30,'draftHours':24,'exportHours':24,'trashHours':24},
     'map': {'mapUrl':'','mapVersion':1,'assetId':None},
     'volume-discounts': {'id':'volume-main','enabled':False,'description':'','effectiveAt':None,'tiers':[],'stackable':False},
@@ -55,7 +57,13 @@ def section_data(section, row):
     """
     data = deepcopy(DEFAULTS[section])
     data.update(row.data or {})
+    if section == 'workflow':
+        data.pop('orderIdentificationQrUrl', None)
     return data
+
+
+def identification_default_website_url():
+    return get_settings().public_origin.rstrip('/') + '/u/'
 
 
 def public_config(db):
@@ -164,6 +172,8 @@ class WorkflowPatch(DTO):
     location_max_age_seconds: StrictInt | None = Field(default=None,ge=10,le=3600)
     location_max_accuracy_meters: StrictInt | None = Field(default=None,ge=1,le=1000)
     short_code_length: StrictInt | None = Field(default=None,ge=5,le=12)
+    order_identification_enabled: bool | None = None
+    order_identification_website_url: str | None = Field(default=None, max_length=IDENTIFICATION_WEBSITE_MAX_BYTES)
     pauses: PauseConfig | None = None
 
 
@@ -265,7 +275,9 @@ for _name,_schema in PATCH_TYPES.items():
     if _name=='services':fields['binding_approved']=(bool,True)
     # Quote validity is workflow-owned but not operator-patchable; the stored
     # section still exposes it so the admin read response validates.
-    if _name=='workflow':fields['quote_minutes']=(int,None)
+    if _name=='workflow':
+        fields['quote_minutes']=(int,None)
+        fields['order_identification_default_website_url']=(str,...)
     SECTION_VIEWS[_name]=create_model(_name.title()+'ConfigView',__base__=DTO,**fields)
 SectionsView=create_model('ConfigSectionsView',__base__=DTO,**{name:(value,None) for name,value in SECTION_VIEWS.items()})
 
@@ -288,6 +300,7 @@ def config_admin(db=Depends(get_db), actor:Actor=Depends(actor_dep)):
         for name in PATCH_TYPES:
             row=get_config(db,name)
             result['sections'][name]={'version':row.version,**section_data(name,row)}
+        result['sections']['workflow']['orderIdentificationDefaultWebsiteUrl'] = identification_default_website_url()
     return ok(result)
 
 
@@ -314,10 +327,29 @@ def config_patch(section:str, payload:dict, db=Depends(get_db), actor:Actor=Depe
         asset=db.get(Asset,asset_id)
         if not asset or asset.purpose!='PUBLIC_WECHAT_QR' or asset.status!='READY' or not data['qrUrl'].startswith('/api/v1/assets/'):
             raise DomainError('INVALID_PUBLIC_ASSET','请选择已上传并就绪的公开二维码资产',422)
+    if section == 'workflow' and 'orderIdentificationWebsiteUrl' in update:
+        url = update['orderIdentificationWebsiteUrl'].strip()
+        if url:
+            try:
+                if (not url.lower().startswith('https://') or url[8:9] in ('', '/', '?', '#') or '\\' in url
+                        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in url)):
+                    raise ValueError
+                parsed = HttpUrl(url)
+                if parsed.username is not None or parsed.password is not None:
+                    raise ValueError
+            except ValueError as error:
+                raise DomainError('INVALID_IDENTIFICATION_WEBSITE', '请输入完整的 HTTPS 链接，链接中不能包含账号或密码', 422) from error
+            if len(url.encode('utf-8')) > IDENTIFICATION_WEBSITE_MAX_BYTES:
+                raise DomainError('INVALID_IDENTIFICATION_WEBSITE',
+                                  f'网站链接最多 {IDENTIFICATION_WEBSITE_MAX_BYTES} 字节，请缩短链接后重试', 422)
+        data['orderIdentificationWebsiteUrl'] = url
     row.data=data
     touch(row)
     audit(db,actor,'CONFIG_UPDATED','CONFIG',section,data={'version':row.version,'fields':list(update)})
-    return ok({'version':row.version,**row.data})
+    result = {'version':row.version,**row.data}
+    if section == 'workflow':
+        result['orderIdentificationDefaultWebsiteUrl'] = identification_default_website_url()
+    return ok(result)
 
 
 def _register_section(section,schema):

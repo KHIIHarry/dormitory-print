@@ -890,3 +890,21 @@ def test_version_probe_subprocess_env_excludes_secrets(monkeypatch):
         assert env is not None
         assert not any(key.upper().startswith('DORMPRINT') for key in env)
         assert 'secret-db' not in ' '.join(str(value) for value in env.values())
+
+
+def test_identification_pdf_paginates_complete_file_rows_and_repeats_pickup_code(tmp_path):
+    from app.order_identification import IdentificationFile, render_identification
+
+    files = [
+        IdentificationFile(f'文件 {index:03d} 课程资料.pdf', ('3',), 'CORNER')
+        for index in range(28)
+    ]
+    target = tmp_path / 'identification.pdf'
+    render_identification(target, 'A7K2P', files, 84, 0, 'https://print.example.test/u/')
+    with pymupdf.open(target) as pdf:
+        assert len(pdf) > 1
+        texts = [page.get_text() for page in pdf]
+        assert all('A7K2P' in text and '原始文件名' in text for text in texts)
+        assert all(abs(page.rect.width - 595.28) < .1 and abs(page.rect.height - 841.89) < .1 for page in pdf)
+        assert all(sum(f'文件 {index:03d}' in text for text in texts) == 1 for index in range(len(files)))
+        assert '下次打印' in texts[0] and all('下次打印' not in text for text in texts[1:])

@@ -2,6 +2,7 @@ import QRCode from "qrcode";
 
 /** Version 40 with error-correction level M holds 2331 bytes in byte mode. */
 export const QR_MAX_BYTES = 2331;
+export const IDENTIFICATION_QR_MAX_BYTES = 240;
 
 export type LinkQrKind = "order" | "invite" | "custom";
 
@@ -104,6 +105,16 @@ export function validateQrLink(
     );
   }
   return value;
+}
+
+export function validateIdentificationWebsite(raw: string) {
+  const value = raw.trim();
+  if (!value) return "";
+  if (!/^https:\/\/[^/?#]/i.test(value) || value.includes("\\"))
+    throw new QrLinkError("请输入完整的 HTTPS 链接");
+  if (utf8ByteLength(value) > IDENTIFICATION_QR_MAX_BYTES)
+    throw new QrLinkError("网站链接最多 240 字节，请缩短链接");
+  return validateQrLink(value, { kind: "custom" });
 }
 
 /** Generates the PNG entirely in the current browser/Node process. */

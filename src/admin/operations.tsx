@@ -24,6 +24,10 @@ import { ADMIN, DEMO, useStore } from "../lib/store";
 import { NumberInput } from "../components/number-input";
 import { SERVICE_PRICES } from "../lib/service-prices";
 import { mutation, now, request } from "../lib/api";
+import {
+  createQrDataUrl,
+  validateIdentificationWebsite,
+} from "../lib/link-qr";
 import { growthRequest } from "../growth/client";
 import type { Building, Config, ExceptionItem, Staff } from "../lib/types";
 import {
@@ -437,6 +441,42 @@ function SettingsForm() {
   const [saveError, setSaveError] = useState("");
   const patch = (change: Record<string, unknown>) =>
     setConfig((current) => ({ ...current, ...change }));
+  const websiteInput: string =
+    config.orderIdentificationWebsiteUrl ??
+    config.sections?.workflow?.orderIdentificationWebsiteUrl ??
+    "";
+  const defaultWebsite: string =
+    config.orderIdentificationDefaultWebsiteUrl ??
+    config.sections?.workflow?.orderIdentificationDefaultWebsiteUrl ??
+    (DEMO ? new URL("/u/", window.location.origin).href : "");
+  let website = "";
+  let websiteError = "";
+  try {
+    website = validateIdentificationWebsite(websiteInput) || defaultWebsite;
+  } catch (error) {
+    websiteError = (error as Error).message;
+  }
+  const previewWebsite = tab === "workflow" ? website : "";
+  const [websitePreview, setWebsitePreview] = useState<{
+    website: string;
+    image?: string;
+  }>();
+  useEffect(() => {
+    if (!previewWebsite) return;
+    let current = true;
+    createQrDataUrl(previewWebsite, { width: 256, margin: 4 })
+      .then((image) => {
+        if (current) setWebsitePreview({ website: previewWebsite, image });
+      })
+      .catch(() => {
+        if (current) setWebsitePreview({ website: previewWebsite });
+      });
+    return () => {
+      current = false;
+    };
+  }, [previewWebsite]);
+  const currentWebsitePreview =
+    websitePreview?.website === previewWebsite ? websitePreview : undefined;
   const uploadQrFiles = async (files: File[]) => {
     if (qrUploadLock.current || imageState.busy) return;
     let file: File;
@@ -605,7 +645,11 @@ function SettingsForm() {
         action={
           tab !== "decisions" && (
             <Button
-              disabled={imageState.busy || (!DEMO && !versionAvailable)}
+              disabled={
+                imageState.busy ||
+                (!DEMO && !versionAvailable) ||
+                (tab === "workflow" && !!websiteError)
+              }
               onClick={() => setReview(true)}
             >
               <Save size={16} />
@@ -1064,6 +1108,51 @@ function SettingsForm() {
                   />
                 </Field>
               </div>
+              <label className="switch-row identification-config">
+                <span>
+                  <b>自动生成订单识别页</b>
+                  <span className="identification-config-hint">
+                    开启后为新结算订单生成 A4 PDF，可按需打印。
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={
+                    config.orderIdentificationEnabled ??
+                    config.sections?.workflow?.orderIdentificationEnabled ??
+                    false
+                  }
+                  onChange={(event) => patch({ orderIdentificationEnabled: event.target.checked })}
+                />
+              </label>
+              <section className="identification-qr" aria-label="网站二维码">
+                <div className="identification-qr-content">
+                  <Field
+                    label="网站链接"
+                    hint="自动生成识别页底部的二维码。留空时使用系统下单链接。"
+                    error={websiteError || undefined}
+                  >
+                    <input
+                      type="url"
+                      value={websiteInput}
+                      placeholder={defaultWebsite || "https://"}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        patch({ orderIdentificationWebsiteUrl: event.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
+                {currentWebsitePreview?.image && (
+                  <div className="identification-qr-frame">
+                    <img src={currentWebsitePreview.image} alt="网站二维码预览" />
+                  </div>
+                )}
+                {currentWebsitePreview && !currentWebsitePreview.image && (
+                  <p className="muted" role="status">二维码预览生成失败</p>
+                )}
+              </section>
               <h3>四类暂停</h3>
               {[
                 ["newOrders", "暂停新订单", "停止新提交，已下单订单继续履约"],

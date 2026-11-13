@@ -75,6 +75,10 @@ def process_claim(job_id,lease_token):
                 from .media import process_preparation
                 process_preparation(session,job.target_id)
                 target=session.get(Preparation,job.target_id)
+            elif job.kind=='ORDER_IDENTIFICATION':
+                from .order_identification import process_identification
+                identification_ready=process_identification(session, job)
+                target=None
             elif job.kind=='EMAIL':
                 from .mail import process_email_job
                 process_email_job(session,job.target_id)
@@ -119,6 +123,8 @@ def process_claim(job_id,lease_token):
                               'failureCode':'ACCOUNT_DELETION_BLOCKED'}
                 else:
                     job.status='READY'
+            elif kind=='ORDER_IDENTIFICATION':
+                job.status='READY' if identification_ready else 'CANCELLED'
             elif kind=='EMAIL':
                 email=session.get(EmailJob,target_id)
                 if email and email.status in ('QUEUED','RETRY','RETRY_PENDING'):
@@ -188,7 +194,7 @@ def work():
 
 @celery_app.task(name='dormprint.files')
 def file_work():
-    return run_one(('ASSET','PREPARATION'))
+    return run_one(('ASSET','PREPARATION','ORDER_IDENTIFICATION'))
 
 
 @celery_app.task(name='dormprint.business')

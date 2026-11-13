@@ -30,6 +30,7 @@ from app.models import (
     Asset,
     BindingTask,
     BusinessException,
+    Job,
     Order,
     OrderFile,
     PackingTask,
@@ -196,7 +197,8 @@ def _current_files(db, order: Order) -> list[OrderFile]:
 def _all_print_tasks(db, order: Order) -> list[PrintTask]:
     return list(
         db.scalars(
-            select(PrintTask).where(PrintTask.order_id == order.id).order_by(PrintTask.created_at, PrintTask.id)
+            select(PrintTask).where(PrintTask.order_id == order.id, PrintTask.file_id.is_not(None))
+            .order_by(PrintTask.created_at, PrintTask.id)
         )
     )
 
@@ -206,6 +208,9 @@ def _file_is_current(file: OrderFile | None, order: Order) -> bool:
 
 
 def _task_is_current(db, order: Order, task: PrintTask) -> bool:
+    if task.file_id is None:
+        return bool(task.active and task.order_id == order.id
+                    and (task.settings or {}).get('contentRevision') == order.content_revision)
     return task.active and _file_is_current(db.get(OrderFile, task.file_id), order)
 
 
@@ -365,25 +370,29 @@ def _raise_for_blocking_exception(db, order: Order) -> None:
         )
 
 
-def _require_paid(order: Order) -> None:
+def _require_paid(order: Order, *, allow_after_delivery: bool = False) -> None:
     """Payment is proven by the human settlement projection, never by a client flag."""
     if order.status == 'PENDING_CONFIRMATION':
         raise DomainError('PAYMENT_REQUIRED', '订单尚未人工确认收款，不能开始生产', 422)
-    if order.status not in PRODUCTION_STATUSES:
+    if order.status not in PRODUCTION_STATUSES and not (allow_after_delivery and order.status in POST_DELIVERY_STATUSES):
         raise DomainError('INVALID_ORDER_STATE', '当前订单状态不能开展生产', 409, {'status': order.status})
     if not order.settlement_kind:
         raise DomainError('PAYMENT_REQUIRED', '订单缺少人工结算事实，不能开始生产', 422)
 
 
-def _require_production_open(db, order: Order) -> None:
+def _require_production_open(db, order: Order, *, recording_open_attempt: bool = False) -> None:
     _require_order_active(order)
     _require_paid(order)
-    _refund_locked(order)
+    if not recording_open_attempt:
+        _refund_locked(order)
     _raise_for_blocking_exception(db, order)
 
 
-def _raise_if_delivery_started(db, actor: Actor, order: Order, *, action: str, target_type: str, target_id: str, reason: str):
+def _raise_if_delivery_started(db, actor: Actor, order: Order, *, action: str, target_type: str,
+                               target_id: str, reason: str, identification: bool = False):
     if _delivery_started(db, order):
+        if identification:
+            raise DomainError('DELIVERY_STARTED', '订单已开始配送，识别页不能发起新的打印', 409)
         _record_high_risk(
             db, actor, order, action=action, target_type=target_type, target_id=target_id, reason=reason
         )
@@ -813,14 +822,16 @@ def refund_production_facts(db, order: Order) -> dict:
         db.scalars(
             select(PrintAttempt)
             .join(PrintTask, PrintAttempt.task_id == PrintTask.id)
-            .where(PrintTask.order_id == order.id, PrintAttempt.outcome.is_(None))
+            .where(PrintTask.order_id == order.id, PrintTask.file_id.is_not(None),
+                   PrintAttempt.outcome.is_(None))
             .order_by(PrintAttempt.created_at)
         )
     )
     completed_tasks = db.scalar(
         select(func.count())
         .select_from(PrintTask)
-        .where(PrintTask.order_id == order.id, PrintTask.active.is_(True), PrintTask.status == 'COMPLETED')
+        .where(PrintTask.order_id == order.id, PrintTask.active.is_(True),
+               PrintTask.file_id.is_not(None), PrintTask.status == 'COMPLETED')
     )
     return {
         'orderId': order.id,
@@ -917,10 +928,8 @@ def _task_dto(
     settings = {**artifact_settings, **_json_dict(task.settings)}
     catalog = sheet_catalog(artifact, settings) if artifact is not None else []
     open_attempt = _open_attempt(db, task)
-    last_attempt = None
-    if with_attempts:
-        attempts = _attempts_for(db, task)
-        last_attempt = _attempt_dto(attempts[0]) if attempts else None
+    attempts = _attempts_for(db, task) if with_attempts else []
+    last_attempt = _attempt_dto(attempts[0]) if attempts else None
     reprints = [
         ReprintRecordDTO(
             attempt_id=row.get('attemptId', ''),
@@ -933,13 +942,16 @@ def _task_dto(
         )
         for row in _task_reprints(task)
     ]
+    if task.file_id is None:
+        from .order_identification import FILE_NAME
+        file_name = FILE_NAME
     return PrintTaskDTO(
         id=task.id,
         order_id=task.order_id,
         pickup_code=order.pickup_code if order else '',
-        file_id=task.file_id,
+        file_id=task.file_id or '',
         file_name=file_name,
-        kind=file.kind if file else 'DOCUMENT',
+        kind='IDENTIFICATION' if task.file_id is None else file.kind if file else 'DOCUMENT',
         binding_type=file.binding_type if file else 'NONE',
         status=task.status,
         active=bool(task.active),
@@ -954,9 +966,13 @@ def _task_dto(
         flip=str(settings.get('flip') or 'NONE').upper(),
         open_attempt_id=open_attempt.id if open_attempt else None,
         last_attempt=last_attempt,
+        attempts=[_attempt_dto(attempt) for attempt in attempts] if task.file_id is None else [],
+        generated_at=_iso(artifact.created_at) if artifact and task.file_id is None else None,
         reprints=reprints,
         order_status=order.status if order else '',
         order_version=order.version if order else 0,
+        actual_started_at=_iso(order.actual_started_at),
+        refund_locked=bool(order.refund_locked),
         sheet_catalog=[
             SheetDTO(
                 sheet_id=row['sheetId'],
@@ -1070,28 +1086,63 @@ def list_print_tasks(
         order = db.get(Order, task.order_id)
         if order is None or order.deleted_at:
             continue
-        if order.status in ('CANCELLED',) + POST_DELIVERY_STATUSES:
+        if order.status == 'CANCELLED':
             continue
-        file = db.get(OrderFile, task.file_id)
+        if order.status in POST_DELIVERY_STATUSES and (not order_id or task.file_id is not None):
+            continue
+        file = db.get(OrderFile, task.file_id) if task.file_id else None
         if status and task.status != status:
             continue
+        task_kind = file.kind if file is not None else 'IDENTIFICATION'
+        if kind and kind != task_kind:
+            continue
         if file is not None:
-            if kind and file.kind != kind:
-                continue
             files[file.id] = file
         if task.status in counts:
             counts[task.status] += 1
         rows.append((task, order))
+    order_positions = {order_id: position for position, order_id in
+                       enumerate(dict.fromkeys(order.id for _, order in rows))}
+    rows.sort(key=lambda row: (order_positions[row[1].id], row[0].file_id is not None))
     names = _original_file_names(db, list(files.values()))
     tasks = [
         _task_dto(db, task, order, files.get(task.file_id), names.get(task.file_id, ''))
         for task, order in rows
     ]
     next_task = next(
-        (task.id for task in tasks if task.status in ('PENDING', 'ATTEMPTED', 'EXCEPTION')),
+        (task.id for task in tasks if task.kind != 'IDENTIFICATION' and task.order_status in PRODUCTION_STATUSES
+         and task.status in ('PENDING', 'ATTEMPTED', 'EXCEPTION')),
         None,
     )
-    return ok(PrintQueueDTO(tasks=tasks, counts=counts, next_task_id=next_task))
+    from .order_identification import JOB_KIND
+    identification_jobs = dict(db.execute(select(Job.target_id, Job.status).where(
+        Job.kind == JOB_KIND, Job.target_id.in_(order_positions),
+        Job.status.in_(('QUEUED', 'PROCESSING', 'FAILED')),
+    )).all())
+    return ok(PrintQueueDTO(tasks=tasks, counts=counts, next_task_id=next_task,
+                            identification_jobs=identification_jobs))
+
+
+@router.post('/admin/orders/{order_id}/identification/retry')
+def retry_order_identification(order_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    from .order_identification import JOB_KIND
+
+    require_admin(actor, 'production.manage')
+    order = lock(db, Order, order_id)
+    _require_production_open(db, order)
+    if order.status not in ('PENDING_PRINT', 'READY_FOR_DELIVERY'):
+        raise DomainError('INVALID_ORDER_STATE', '当前订单不能重新生成识别页', 409)
+    job = db.scalar(select(Job).where(
+        Job.kind == JOB_KIND, Job.business_key == f'order-identification:{order_id}',
+    ).with_for_update())
+    if job is None or job.status != 'FAILED':
+        raise DomainError('IDENTIFICATION_NOT_FAILED', '识别页当前无需重新生成', 409)
+    job.data = {key: value for key, value in job.data.items() if key not in ('availableAt', 'failureCode')}
+    job.status = 'QUEUED'
+    job.attempts = 0
+    touch(job)
+    audit(db, actor, 'production.identification_retry', 'Order', order.id)
+    return ok({'status': job.status})
 
 
 @router.get('/admin/print-tasks/{task_id}', response_model=Envelope[PrintTaskDTO])
@@ -1103,7 +1154,7 @@ def get_print_task(
     require_admin(actor, 'production.manage')
     task = _resolve_task(db, task_id)
     order = _order_of_task(db, task)
-    file = db.get(OrderFile, task.file_id)
+    file = db.get(OrderFile, task.file_id) if task.file_id else None
     name = _original_file_names(db, [file])[file.id] if file else ''
     return ok(_task_dto(db, task, order, file, name, with_attempts=True))
 
@@ -1115,10 +1166,21 @@ def start_production(
     db=Depends(get_db),
     actor: Actor = Depends(actor_dep),
 ):
-    """Record the explicit human fact that physical printing has started."""
+    """Record physical printing, optionally linked to an open customer-file attempt."""
     require_admin(actor, 'production.manage')
     _staff(actor)
     order = lock(db, Order, order_id, payload.expected_version)
+    if payload.attempt_id is not None:
+        task = db.scalar(
+            select(PrintTask).join(PrintAttempt, PrintAttempt.task_id == PrintTask.id).where(
+                PrintAttempt.id == payload.attempt_id,
+                PrintAttempt.outcome.is_(None),
+                PrintTask.order_id == order.id,
+                PrintTask.file_id.is_not(None),
+            )
+        )
+        if task is None or not _task_is_current(db, order, task):
+            raise DomainError('OPEN_DOCUMENT_ATTEMPT_REQUIRED', '请先记录当前订单正文的打印尝试', 409)
     _raise_if_delivery_started(
         db,
         actor,
@@ -1128,7 +1190,9 @@ def start_production(
         target_id=order.id,
         reason=payload.reason or '实际开印登记发生在订单进入配送之后',
     )
-    _require_production_open(db, order)
+    # A refund lock prevents new attempts, while staff can still record physical
+    # printing that already began on a verified, unresolved customer-file attempt.
+    _require_production_open(db, order, recording_open_attempt=payload.attempt_id is not None)
     if order.status != 'PENDING_PRINT':
         raise DomainError('INVALID_ORDER_STATE', '当前订单状态不能登记实际开印', 409, {'status': order.status})
     if order.actual_started_at is not None:
@@ -1148,7 +1212,11 @@ def start_production(
         'Order',
         order.id,
         payload.reason,
-        {'orderId': order.id, 'actualStartedAt': _iso(order.actual_started_at)},
+        {
+            'orderId': order.id,
+            'actualStartedAt': _iso(order.actual_started_at),
+            **({'attemptId': payload.attempt_id} if payload.attempt_id is not None else {}),
+        },
     )
     return ok(
         ProductionStartDTO(
@@ -1171,6 +1239,8 @@ def create_print_attempt(
     staff_id = _staff(actor)
     task = _resolve_task(db, task_id)
     order = lock(db, Order, task.order_id, payload.expected_version)
+    db.refresh(task)
+    identification = task.file_id is None
     _raise_if_delivery_started(
         db,
         actor,
@@ -1179,9 +1249,10 @@ def create_print_attempt(
         target_type='PrintTask',
         target_id=task.id,
         reason='打印尝试发生在订单进入配送之后',
+        identification=identification,
     )
     _require_production_open(db, order)
-    if order.status != 'PENDING_PRINT':
+    if order.status != 'PENDING_PRINT' and not (identification and order.status == 'READY_FOR_DELIVERY'):
         raise DomainError('PRODUCTION_COMPLETE', '订单已完成装袋，请先撤回装袋再重新打印', 409, {'status': order.status})
     if not _task_is_current(db, order, task):
         raise DomainError('STALE_PRINT_TASK', '打印任务属于旧内容版本或已失效', 409)
@@ -1211,7 +1282,8 @@ def create_print_attempt(
     db.flush()
     task.status = 'ATTEMPTED'
     touch(task)
-    refresh_production(db, order)
+    if not identification:
+        refresh_production(db, order)
     audit(
         db,
         actor,
@@ -1233,24 +1305,30 @@ def record_print_result(
 ):
     require_admin(actor, 'production.manage')
     _staff(actor)
-    attempt = lock(db, PrintAttempt, attempt_id)
-    task = lock(db, PrintTask, attempt.task_id)
+    attempt = db.get(PrintAttempt, attempt_id)
+    if attempt is None:
+        raise DomainError('NOT_FOUND', '打印尝试不存在或不可访问', 404)
+    task = _resolve_task(db, attempt.task_id)
     order = lock(db, Order, task.order_id, payload.expected_version)
-    _raise_if_delivery_started(
-        db,
-        actor,
-        order,
-        action='PRINT_RESULT',
-        target_type='PrintAttempt',
-        target_id=attempt.id,
-        reason=payload.reason or '打印结果确认发生在订单进入配送之后',
-    )
+    attempt = lock(db, PrintAttempt, attempt_id)
+    db.refresh(task)
+    identification = task.file_id is None
+    if not identification:
+        _raise_if_delivery_started(
+            db,
+            actor,
+            order,
+            action='PRINT_RESULT',
+            target_type='PrintAttempt',
+            target_id=attempt.id,
+            reason=payload.reason or '打印结果确认发生在订单进入配送之后',
+        )
     # Confirming an existing attempt is verification, not new production: the
     # refund-review lock must not prevent staff from resolving the open attempt
     # that the refund decision depends on.
     _require_order_active(order)
-    _require_paid(order)
-    if order.status != 'PENDING_PRINT':
+    _require_paid(order, allow_after_delivery=identification)
+    if not identification and order.status != 'PENDING_PRINT':
         raise DomainError('PRODUCTION_COMPLETE', '订单已完成装袋，请先撤回装袋再记录打印结果', 409)
     if not _task_is_current(db, order, task):
         raise DomainError('STALE_PRINT_TASK', '打印任务属于旧内容版本或已失效', 409)
@@ -1268,7 +1346,7 @@ def record_print_result(
         _artifact_current(db, order, attempt.artifact_id)
     else:
         raise DomainError('STALE_PRINT_ATTEMPT', '该尝试对应的打印产物已失效', 409)
-    if payload.outcome == 'COMPLETED' and order.actual_started_at is None:
+    if not identification and payload.outcome == 'COMPLETED' and order.actual_started_at is None:
         raise DomainError(
             'ACTUAL_START_REQUIRED',
             '请先登记实际开印，才能把实体打印确认完成',
@@ -1282,7 +1360,7 @@ def record_print_result(
     touch(attempt)
     task.status = {'COMPLETED': 'COMPLETED', 'FAILED': 'EXCEPTION', 'CANCELLED': 'PENDING'}[payload.outcome]
     touch(task)
-    if payload.outcome == 'COMPLETED':
+    if not identification and payload.outcome == 'COMPLETED':
         open_reprint_exceptions = list(
             db.scalars(
                 select(BusinessException).where(
@@ -1303,7 +1381,8 @@ def record_print_result(
             data['resolution'] = 'REPRINT_COMPLETED'
             exception.data = data
             touch(exception)
-    refresh_production(db, order)
+    if not identification:
+        refresh_production(db, order)
     audit(
         db,
         actor,
@@ -1338,6 +1417,8 @@ def create_reprint(
     staff_id = _staff(actor)
     task = _resolve_task(db, task_id)
     order = lock(db, Order, task.order_id, payload.expected_version)
+    db.refresh(task)
+    identification = task.file_id is None
     _require_order_active(order)
     _raise_if_delivery_started(
         db,
@@ -1347,6 +1428,7 @@ def create_reprint(
         target_type='PrintTask',
         target_id=task.id,
         reason=payload.reason,
+        identification=identification,
     )
     _require_production_open(db, order)
     if order.status not in PRODUCTION_STATUSES:
@@ -1370,6 +1452,8 @@ def create_reprint(
     sheet_ids: list[str] = []
     artifact_id = task.artifact_id
     if payload.mode == 'SHEETS':
+        if identification:
+            raise DomainError('IDENTIFICATION_REPRINT_WHOLE', '订单识别页请整份补打', 422)
         selected, errors = validate_sheet_selection(sheet_catalog(artifact, task.settings), payload.unique_sheet_ids())
         if errors:
             raise DomainError(
@@ -1382,7 +1466,7 @@ def create_reprint(
         reprint_artifact = _create_reprint_artifact(db, order, task, sheet_ids, actor)
         artifact_id = reprint_artifact.id
 
-    was_completed = task.status == 'COMPLETED'
+    was_completed = not identification and task.status == 'COMPLETED'
     exception_id = None
     if was_completed:
         # A missing/damaged sheet after completion must open a production
@@ -1456,7 +1540,8 @@ def create_reprint(
     task.settings = settings
     task.status = 'ATTEMPTED'
     touch(task)
-    refresh_production(db, order)
+    if not identification:
+        refresh_production(db, order)
     audit(
         db,
         actor,
@@ -1763,6 +1848,8 @@ def apply_correction(
     _staff(actor)
     if payload.action == 'REOPEN_PRINT':
         task = _resolve_task(db, payload.target_id)
+        if task.file_id is None:
+            raise DomainError('IDENTIFICATION_REPRINT_REQUIRED', '请在订单识别页任务中补打', 409)
         order = lock(db, Order, task.order_id)
         _require_expected_version(payload.expected_version, order, task)
         _raise_if_delivery_started(

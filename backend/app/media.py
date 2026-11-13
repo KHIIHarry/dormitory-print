@@ -89,10 +89,12 @@ router = APIRouter()
 BYTES_PER_MB = 1024 * 1024
 DEFAULT_CHUNK_BYTES = 8 * BYTES_PER_MB
 MAX_CHUNK_BYTES = 32 * BYTES_PER_MB
-PUBLIC_PURPOSES = frozenset({'PUBLIC_WECHAT_QR', 'PUBLIC_MAP'})
+IDENTIFICATION_QR_PURPOSE = 'PUBLIC_IDENTIFICATION_QR'
+PUBLIC_PURPOSES = frozenset({'PUBLIC_WECHAT_QR', 'PUBLIC_MAP', IDENTIFICATION_QR_PURPOSE})
 CUSTOMER_PURPOSES = frozenset({'PRINT_SOURCE'})
 STAFF_PURPOSES = frozenset({'DELIVERY_PROOF'})
-INTERNAL_PURPOSES = frozenset({'PRINT_NORMALIZED', 'PRINT_FINAL', 'PRINT_REPRINT'})
+IDENTIFICATION_PURPOSE = 'PRINT_IDENTIFICATION'
+INTERNAL_PURPOSES = frozenset({'PRINT_NORMALIZED', 'PRINT_FINAL', 'PRINT_REPRINT', IDENTIFICATION_PURPOSE})
 ALL_PURPOSES = PUBLIC_PURPOSES | CUSTOMER_PURPOSES | STAFF_PURPOSES | INTERNAL_PURPOSES
 # Explicit ADMIN capability scopes. There is deliberately no mapping for a
 # generic staff/admin bypass: a missing mapping means an ADMIN gets no private
@@ -472,7 +474,8 @@ def _quote_or_none(db, quote_id: str | None):
 
 def preparation_view(db, preparation: Preparation) -> dict:
     artifacts = list(
-        db.scalars(select(Artifact).where(Artifact.preparation_id == preparation.id))
+        db.scalars(select(Artifact).join(Asset, Artifact.asset_id == Asset.id).where(
+            Artifact.preparation_id == preparation.id, Asset.purpose != IDENTIFICATION_PURPOSE))
     )
     artifacts.sort(key=lambda row: int((row.settings or {}).get('sequence') or 0))
     data = dict(preparation.data or {})
@@ -799,6 +802,10 @@ def _asset_for_read(db, actor: Actor, asset_id: str) -> Asset:
         raise DomainError('NOT_FOUND', '文件不存在或不可访问', 404)
     if asset.purpose in PUBLIC_PURPOSES:
         return asset
+    if asset.purpose == IDENTIFICATION_PURPOSE:
+        if _require_admin_purpose(actor, asset.purpose):
+            return asset
+        raise DomainError('NOT_FOUND', '文件不存在或不可访问', 404)
     # Print masters are never reachable through an ORDER_VIEW order link. The
     # owner/account may read its own file; staff need the production capability
     # and the actual artifact workflow.
@@ -889,7 +896,7 @@ def _upload_session_for(db, actor: Actor, session_id: str) -> UploadSession:
 
 
 def _purpose_target(db, actor: Actor, purpose: str, assignment_id: str | None):
-    if purpose not in ALL_PURPOSES:
+    if purpose not in ALL_PURPOSES or purpose == IDENTIFICATION_QR_PURPOSE:
         raise DomainError('INVALID_PURPOSE', '文件用途无效', 422)
     if purpose in INTERNAL_PURPOSES:
         raise DomainError('INVALID_PURPOSE', '该文件用途只能由服务器生成', 422)
@@ -989,9 +996,8 @@ async def create_asset(
         try:
             info = pdf_engine.inspect_upload(temporary, name, file.content_type or '')
             if info.kind in IMAGE_KINDS and info.kind != 'SVG':
-                pdf_engine.validate_image(
-                    temporary, info.kind, max_pixels=int(services.get('maxPixels') or 40_000_000)
-                )
+                max_pixels = int(services.get('maxPixels') or 40_000_000)
+                pdf_engine.validate_image(temporary, info.kind, max_pixels=max_pixels)
             if info.kind == 'SVG' and purpose not in PUBLIC_PURPOSES:
                 raise DomainError('FORMAT_DISABLED', 'SVG 仅支持公开图片上传', 415)
             if not (info.kind == 'SVG' and purpose in PUBLIC_PURPOSES):

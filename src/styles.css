@@ -8465,6 +8465,64 @@ button.session-action svg { stroke-width: 1.7; }
 .print-task-facts dt { color: #8b7d70; margin-bottom: 5px; }
 .print-task-facts dd { margin: 0; overflow-wrap: anywhere; }
 .print-view-layout .document-preview { margin-bottom: 22px; }
+.print-view-layout.print-task-full-width { grid-template-columns: minmax(0, 1fr); }
+.print-task-full-width .document-preview .icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+@media (min-width: 1024px) {
+  .print-task-full-width .preview-canvas > canvas {
+    max-height: min(62vh, 720px);
+  }
+}
+
+.print-pdf-tools {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.print-pdf-controls {
+  gap: 8px 12px;
+}
+
+.print-pdf-controls .btn {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-align: center;
+  white-space: normal;
+}
+
+.print-pdf-tools .print-pdf-hint,
+.modal > .print-start-confirmation {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  letter-spacing: normal;
+}
+
+.modal > .print-start-confirmation { margin-bottom: 16px; }
+.modal:has(> .print-start-confirmation) > header > .icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+.modal > .print-start-confirmation + .field input { min-height: 44px; font-size: 16px; }
+.modal > .print-start-actions { justify-content: flex-end; gap: 8px; }
+.modal .print-start-actions .btn {
+  min-height: 44px;
+  font-size: 14px;
+  letter-spacing: normal;
+}
+
+@media (max-width: 375px) {
+  .print-pdf-controls .btn {
+    width: 100%;
+  }
+}
 /* Keep the supplementary sections in the reading flow after order details. */
 @media (min-width: 768px) {
   .admin-content .detail-grid { grid-template-columns: minmax(0, 1fr); }
@@ -8477,12 +8535,9 @@ button.session-action svg { stroke-width: 1.7; }
 .order-access-panel .panel-heading { flex-wrap: wrap; align-items: flex-start; }
 .admin-content .detail-grid .order-access-panel .button-row .btn { width: auto; margin-top: 0; }
 .order-access-panel > .form-hint { margin: 0 0 16px; }
-.print-start-panel > .muted, .reprint-panel > .muted { margin: 0 0 22px; line-height: 1.8; }
-.print-start-panel .growth-facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin: 0 0 24px; }
-.print-start-panel .growth-facts > div { display: grid; gap: 6px; min-width: 0; }
-.print-start-panel .growth-facts dt, .print-start-panel .growth-facts dd { margin: 0; line-height: 1.5; }
-.print-start-panel .growth-facts dd { overflow-wrap: anywhere; }
+.reprint-panel > .muted { margin: 0 0 22px; line-height: 1.8; }
 .reprint-panel > .button-row, .print-result-panel > .button-row { margin-bottom: 22px; }
+.print-result-panel .button-row .btn { min-height: 44px; }
 .reprint-panel .sheet-selector { margin: 0 0 22px; }
 @media (max-width: 767px) {
   .admin-content .detail-grid > .order-detail-sidebar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
@@ -8597,4 +8652,237 @@ button.session-action svg { stroke-width: 1.7; }
 }
 @media (max-width: 767px) {
   .slot-editor-actions > .btn { width: 100%; }
+}
+
+.print-orders {
+  display: grid;
+  gap: 12px;
+}
+
+.print-order-card {
+  min-width: 0;
+}
+
+.print-order-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.print-order-heading,
+.print-order-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 9px;
+  min-width: 0;
+}
+
+.print-order-heading strong {
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.print-order-chevron {
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.print-order-toggle[aria-expanded="true"] .print-order-chevron {
+  transform: rotate(90deg);
+}
+
+.print-order-progress .muted {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.print-order-tasks {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.print-order-tasks .print-task-card,
+.print-identification-pending {
+  min-width: 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.print-task-content {
+  min-width: 0;
+}
+
+.print-order-tasks .print-task-top {
+  display: block;
+  border: 0;
+  margin: 0 0 5px;
+  padding: 0;
+}
+
+.print-order-tasks .print-task-details {
+  padding: 0;
+  gap: 4px 12px;
+}
+
+.print-order-tasks .print-task-details > p {
+  font-size: 13px;
+}
+
+.print-order-tasks .print-task-details > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.print-order-tasks .task-card-actions {
+  border: 0;
+  padding-top: 0;
+  margin-top: 8px;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.print-order-tasks .task-card-actions > :is(.badge, .btn) {
+  flex: none;
+  white-space: nowrap;
+}
+
+.print-order-tasks .task-card-actions > .badge {
+  font-size: 12px;
+}
+
+.print-order-tasks .task-card-actions .btn,
+.print-order-detail {
+  min-height: 44px;
+}
+
+.print-order-tasks .task-card-actions .btn {
+  font-size: 13px;
+}
+
+.print-order-detail {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+}
+
+.print-identification-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.identification-config {
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.identification-config input {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  accent-color: var(--primary);
+}
+
+.identification-config-hint {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+@media (max-width: 540px) {
+  .print-order-progress {
+    flex-basis: 100%;
+    padding-left: 27px;
+  }
+}
+
+.identification-attempts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.identification-attempts li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.identification-attempt-reason {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+@media (min-width: 541px) {
+  .print-order-tasks .print-task-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 16px;
+    align-items: center;
+  }
+
+  .print-order-tasks .task-card-actions {
+    margin: 0;
+  }
+}
+
+.identification-qr {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 24px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.identification-qr-frame {
+  --qr-corner: linear-gradient(var(--muted), var(--muted));
+  flex: 0 0 auto;
+  width: 110px;
+  max-width: 100%;
+  padding: 1px;
+  background:
+    var(--qr-corner) top left / 11px 1px,
+    var(--qr-corner) top right / 11px 1px,
+    var(--qr-corner) bottom left / 11px 1px,
+    var(--qr-corner) bottom right / 11px 1px,
+    var(--qr-corner) top left / 1px 11px,
+    var(--qr-corner) top right / 1px 11px,
+    var(--qr-corner) bottom left / 1px 11px,
+    var(--qr-corner) bottom right / 1px 11px;
+  background-repeat: no-repeat;
+}
+
+.identification-qr-content {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.identification-qr-content > .field {
+  margin: 0;
+}
+
+.identification-qr-content .field input[type="url"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  font-size: 16px;
 }

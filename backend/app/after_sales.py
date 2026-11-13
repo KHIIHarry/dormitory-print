@@ -124,7 +124,7 @@ def calculate_refund(quote,affected_items):
 
 def _pending_attempts(db,order):
     return db.scalar(select(PrintAttempt.id).join(PrintTask,PrintTask.id==PrintAttempt.task_id)
-        .where(PrintTask.order_id==order.id,PrintTask.active.is_(True),PrintAttempt.outcome.is_(None)).limit(1))
+        .where(PrintTask.order_id==order.id,PrintTask.active.is_(True),PrintTask.file_id.is_not(None),PrintAttempt.outcome.is_(None)).limit(1))
 
 
 def _unlock(db,order):
@@ -289,7 +289,7 @@ def review_case(db,actor,case,body):
         if _pending_attempts(db,order):raise DomainError('PRINT_ATTEMPT_UNRESOLVED','请先核实未结打印尝试',409)
         # Rework preserves original artifacts and all old attempts/proofs, starting a new execution.
         task_ids=[]
-        for task in db.scalars(select(PrintTask).where(PrintTask.order_id==order.id,PrintTask.active.is_(True)).with_for_update()):
+        for task in db.scalars(select(PrintTask).where(PrintTask.order_id==order.id,PrintTask.active.is_(True),PrintTask.file_id.is_not(None)).with_for_update()):
             task.status='EXCEPTION';task.settings={**task.settings,'afterSaleId':case.id};touch(task);task_ids.append(task.id)
         for binding in db.scalars(select(BindingTask).where(BindingTask.order_id==order.id)):
             binding.status='WAITING_PRINT';touch(binding)

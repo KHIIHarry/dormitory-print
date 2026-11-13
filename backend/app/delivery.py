@@ -552,7 +552,8 @@ def _order_blockers(db, order: Order, assignment: DeliveryAssignment | None = No
     if order.address_review or (assignment is not None and assignment.address_review):
         blockers.append(_blocker('ADDRESS_REVIEW_REQUIRED', '地址修改后尚待管理员复核', order.id))
     active_tasks = list(db.scalars(select(PrintTask).where(PrintTask.order_id == order.id,
-                                                           PrintTask.active.is_(True))))
+                                                           PrintTask.active.is_(True),
+                                                           PrintTask.file_id.is_not(None))))
     if not active_tasks:
         blockers.append(_blocker('PRINT_NOT_COMPLETE', '没有当前有效的打印任务', order.id))
     elif any(task.status != 'COMPLETED' for task in active_tasks):

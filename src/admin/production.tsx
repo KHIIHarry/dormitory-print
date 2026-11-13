@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { ADMIN, DEMO, useStore } from "../lib/store";
+import { ApiError } from "../lib/api";
 import { expandRanges, productionCount, canPack } from "../lib/domain";
 import type { PrintFile, Order } from "../lib/types";
 import {
@@ -975,44 +976,176 @@ export function PrintCenter() {
   return DEMO ? DemoPrintCenter() : <ServerPrintCenter />;
 }
 
+const orderPrintStates = [
+  ["PENDING", "待打印", "blue"],
+  ["PRINTING", "已开印，待完成", "amber"],
+  ["COMPLETED", "打印已完成", "green"],
+] as const;
+
 function ServerPrintCenter() {
-  const { data: storeData } = useStore();
+  const { data, toast } = useStore();
+  const [params] = useSearchParams();
+  const selectedOrderId = params.get("order");
+  const [opened, setOpened] = useState(
+    () => new Set(selectedOrderId ? [selectedOrderId] : []),
+  );
+  const [currentOrderId, setCurrentOrderId] = useState(selectedOrderId);
   const [status, setStatus] = useState("");
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
   const [campus, setCampus] = useState("");
-  const path = useMemo(() => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    if (kind) params.set("kind", kind);
-    const query = params.toString();
-    return `/admin/print-tasks${query ? `?${query}` : ""}`;
-  }, [status, kind]);
-  const queue = useRemote<PrintQueueView>(path);
-  const campusTasks = (queue.data?.tasks || []).filter((task) => {
-    if (!campus) return true;
-    const order = storeData.orders.find((row) => row.id === task.orderId);
-    return campusOfOrder(storeData.campuses, storeData.buildings, order)?.id === campus;
-  });
-  const tasks = campusTasks.filter((task) =>
-    `${task.pickupCode} ${task.fileName}`.toLowerCase().includes(search.trim().toLowerCase()),
+  const [retrying, setRetrying] = useState("");
+  const queue = useRemote<PrintQueueView>("/admin/print-tasks");
+  // The order detail links here with an order ID. Closed orders' identification
+  // records are fetched on demand and remain outside the live print queue.
+  const historicalOrderId =
+    selectedOrderId &&
+    queue.data &&
+    !queue.data.tasks.some((task) => task.orderId === selectedOrderId)
+      ? selectedOrderId
+      : null;
+  const historicalQueue = useRemote<PrintQueueView>(
+    historicalOrderId
+      ? `/admin/print-tasks?orderId=${encodeURIComponent(historicalOrderId)}`
+      : null,
   );
-  const next =
-    tasks.find((task) => task.id === queue.data?.nextTaskId) ||
-    tasks.find((task) => task.status === "PENDING");
-  const counts = campus
-    ? {
-        PENDING: campusTasks.filter((task) => task.status === "PENDING").length,
-        ATTEMPTED: campusTasks.filter((task) => task.status === "ATTEMPTED").length,
-        COMPLETED: campusTasks.filter((task) => task.status === "COMPLETED").length,
-        EXCEPTION: campusTasks.filter((task) => task.status === "EXCEPTION").length,
-      }
-    : queue.data?.counts || {};
+  const pendingJobs = queue.data?.identificationJobs;
+  const refreshQueue = queue.reload;
+  useEffect(() => {
+    if (
+      queue.loading ||
+      queue.error ||
+      !Object.values(pendingJobs ?? {}).some(
+        (value) => value === "QUEUED" || value === "PROCESSING",
+      )
+    )
+      return;
+    const timer = window.setTimeout(refreshQueue, 2200);
+    return () => window.clearTimeout(timer);
+  }, [pendingJobs, queue.loading, queue.error, refreshQueue]);
+
+  const orders = useMemo(() => {
+    const tasksByOrder = new Map<string, PrintTaskView[]>();
+    const orderById = new Map(data.orders.map((order) => [order.id, order]));
+    for (const task of [
+      ...(historicalQueue.data?.tasks.filter(
+        (task) => task.orderId === historicalOrderId,
+      ) ?? []),
+      ...(queue.data?.tasks ?? []),
+    ]) {
+      if (task.orderStatus === "PENDING_CONFIRMATION") continue;
+      const tasks = tasksByOrder.get(task.orderId);
+      if (tasks) tasks.push(task);
+      else tasksByOrder.set(task.orderId, [task]);
+    }
+    return Array.from(tasksByOrder, ([id, tasks]) => {
+      const order = orderById.get(id);
+      const taskCampus = campusOfOrder(data.campuses, data.buildings, order);
+      const sorted = [...tasks].sort(
+        (a, b) =>
+          Number(b.kind === "IDENTIFICATION") -
+          Number(a.kind === "IDENTIFICATION"),
+      );
+      const job = sorted.some((task) => task.kind === "IDENTIFICATION")
+        ? undefined
+        : pendingJobs?.[id];
+      const documentTasks = sorted.filter(
+        (task) => task.kind !== "IDENTIFICATION",
+      );
+      const complete = documentTasks.filter(
+        (task) => task.status === "COMPLETED",
+      ).length;
+      const total = documentTasks.length;
+      const attempted = documentTasks.some(
+        (task) => task.status === "ATTEMPTED" || task.openAttemptId,
+      );
+      const exception = documentTasks.some(
+        (task) => task.status === "EXCEPTION",
+      );
+      const progress =
+        complete === total
+          ? "COMPLETED"
+          : sorted[0].actualStartedAt
+            ? "PRINTING"
+            : "PENDING";
+      return {
+        id,
+        historical: id === historicalOrderId,
+        tasks: sorted,
+        documentTasks,
+        code: sorted[0].pickupCode,
+        campus: taskCampus,
+        locked: sorted[0].refundLocked,
+        job,
+        complete,
+        total,
+        attempted,
+        exception,
+        progress,
+      };
+    }).filter((order) => !campus || order.campus?.id === campus);
+  }, [
+    campus,
+    data.buildings,
+    data.campuses,
+    data.orders,
+    historicalOrderId,
+    historicalQueue.data?.tasks,
+    pendingJobs,
+    queue.data?.tasks,
+  ]);
+
+  const query = search.trim().toLowerCase();
+  const visibleOrders = orders.filter(
+    (order) =>
+      (!status ||
+        (status === "EXCEPTION"
+          ? order.exception
+          : order.progress === status)) &&
+      (!kind ||
+        order.tasks.some((task) => task.kind === kind) ||
+        (kind === "IDENTIFICATION" && !!order.job)) &&
+      (!query ||
+        order.code.toLowerCase().includes(query) ||
+        order.tasks.some((task) =>
+          task.fileName.toLowerCase().includes(query),
+        ) ||
+        (!!order.job && "订单识别页.pdf".includes(query))),
+  );
+  const nextOrders = [
+    ...visibleOrders.filter((order) => order.id === currentOrderId),
+    ...visibleOrders.filter((order) => order.id !== currentOrderId),
+  ];
+  const next = nextOrders
+    .filter((order) => !order.locked && !order.historical)
+    .flatMap((order) => order.documentTasks)
+    .find((task) =>
+      ["PENDING", "ATTEMPTED", "EXCEPTION"].includes(task.status),
+    );
+
+  async function retryIdentification(orderId: string) {
+    setRetrying(orderId);
+    try {
+      await growthRequest(
+        `/admin/orders/${encodeURIComponent(orderId)}/identification/retry`,
+        {
+          method: "POST",
+          body: {},
+        },
+      );
+      refreshQueue();
+    } catch (error) {
+      toast(errorText(error));
+    } finally {
+      setRetrying("");
+    }
+  }
+
   return (
     <>
       <PageHeading
         title="打印中心"
-        description="服务端任务逐项打印；浏览器窗口事件不代表实际出纸，必须人工确认结果。"
+        description="按订单逐项打印，实际出纸后确认结果。"
         action={
           next && (
             <Link className="btn" to={`${ADMIN}/print/${next.id}`}>
@@ -1023,44 +1156,54 @@ function ServerPrintCenter() {
         }
       />
       <div className="production-stats">
-        {[
-          ["待打印", counts.PENDING || 0, "blue"],
-          ["待结果确认", counts.ATTEMPTED || 0, "amber"],
-          ["打印已完成", counts.COMPLETED || 0, "green"],
-          ["打印异常", counts.EXCEPTION || 0, "red"],
-        ].map(([label, count, color]) => (
-          <div key={String(label)}>
-            <i className={`dot ${color}`} />
-            <span>{label}</span>
-            <strong>{count}</strong>
-          </div>
-        ))}
+        {[...orderPrintStates, ["EXCEPTION", "打印异常", "red"] as const].map(
+          ([value, label, color]) => (
+            <div key={value}>
+              <i className={`dot ${color}`} />
+              <span>{label}</span>
+              <strong>
+                {
+                  orders.filter(
+                    (order) =>
+                      !order.historical &&
+                      (value === "EXCEPTION"
+                        ? order.exception
+                        : order.progress === value),
+                  ).length
+                }
+              </strong>
+            </div>
+          ),
+        )}
       </div>
       <Panel className="filter-panel">
         <div className="filter-row">
           <div className="search-input grow">
             <Search size={17} />
             <input
+              aria-label="搜索提取码或文件"
               placeholder="搜索提取码或文件"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
           </div>
           <CampusFilter
-            campuses={storeData.campuses}
+            campuses={data.campuses}
             value={campus}
             onChange={setCampus}
           />
           <select
-            aria-label="任务状态"
+            aria-label="订单打印状态"
             value={status}
             onChange={(event) => setStatus(event.target.value)}
           >
             <option value="">全部状态</option>
-            <option value="PENDING">待打印</option>
-            <option value="ATTEMPTED">待结果确认</option>
-            <option value="COMPLETED">已完成</option>
-            <option value="EXCEPTION">异常</option>
+            {orderPrintStates.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+            <option value="EXCEPTION">打印异常</option>
           </select>
           <select
             aria-label="文件类型"
@@ -1070,64 +1213,146 @@ function ServerPrintCenter() {
             <option value="">全部类型</option>
             <option value="DOCUMENT">文档</option>
             <option value="PHOTO">照片</option>
+            <option value="IDENTIFICATION">订单识别页</option>
           </select>
         </div>
       </Panel>
       <Notice>
-        打印前请登记“实际开印”；退款审核中的订单会锁住新生产。每个任务的份数已在最终 PDF
-        展开，打印窗口只需 1 份。
+        机器开始打印首份正文时，请回到任务确认开印。打印窗口统一选 1 份，单双面和翻转按任务设置。
       </Notice>
       <ServerQueueState
-        loading={queue.loading}
-        error={queue.error}
-        empty={!queue.loading && !queue.error && !tasks.length}
-        reload={queue.reload}
+        loading={
+          queue.loading ||
+          (historicalOrderId !== null && historicalQueue.loading)
+        }
+        error={queue.error || historicalQueue.error}
+        empty={
+          !queue.loading &&
+          !historicalQueue.loading &&
+          !queue.error &&
+          !historicalQueue.error &&
+          !visibleOrders.length
+        }
+        reload={historicalQueue.error ? historicalQueue.reload : refreshQueue}
       />
-      <div className="production-list">
-        {tasks.map((task) => {
-          const order = storeData.orders.find((row) => row.id === task.orderId);
-          const taskCampus = campusOfOrder(
-            storeData.campuses,
-            storeData.buildings,
-            order,
-          );
-          const locked = order?.blockers?.some(
-            (blocker) => blocker.code === "REFUND_LOCKED",
-          );
+      <div className="production-list print-orders">
+        {visibleOrders.map((order) => {
+          const expanded = opened.has(order.id);
+          const [, label, color] = orderPrintStates.find(
+            ([value]) => value === order.progress,
+          )!;
           return (
-            <Panel key={task.id} className="print-task-card">
-              <div className="print-task-top">
-                <Link className="table-code" to={`${ADMIN}/orders/${task.orderId}`}>
-                  {task.pickupCode}
-                </Link>
-                <strong className="production-file-name">
-                  {task.fileName?.trim() || "文件名未记录"}
-                </strong>
-                <CampusTag campus={taskCampus} />
-                <Badge status={task.status} />
-                {task.openAttemptId && (
-                  <span className="soft-tag">存在未确认尝试</span>
-                )}
-                {locked && <span className="soft-tag">退款审核锁定</span>}
-              </div>
-              <div className="print-task-details">
-                <p>
-                  {task.pageRange ? `第 ${task.pageRange} 页` : "整文件"} ·{" "}
-                  {taskPaperLabel(task)}
-                </p>
-                {task.bindingType !== "NONE" && <span>需装订</span>}
-              </div>
-              <div className="task-card-actions">
-                <span className="muted">
-                  {task.openAttemptId
-                    ? "先核实未结尝试，再决定完成、失败或补打"
-                    : "按服务端任务独立打印"}
+            <Panel key={order.id} className="print-order-card">
+              <button
+                type="button"
+                className="print-order-toggle"
+                aria-expanded={expanded}
+                onClick={() => {
+                  setOpened((current) => {
+                    const next = new Set(current);
+                    if (next.has(order.id)) next.delete(order.id);
+                    else next.add(order.id);
+                    return next;
+                  });
+                  setCurrentOrderId(expanded ? null : order.id);
+                }}
+              >
+                <span className="print-order-heading">
+                  <ChevronRight
+                    size={18}
+                    className="print-order-chevron"
+                    aria-hidden="true"
+                  />
+                  <strong>{order.code}</strong>
+                  <CampusTag campus={order.campus} />
                 </span>
-                <Link className="btn secondary" to={`${ADMIN}/print/${task.id}`}>
-                  打开任务
-                  <ArrowRight size={16} />
-                </Link>
-              </div>
+                <span className="print-order-progress">
+                  <span
+                    className={`badge ${order.historical ? "gray" : color}`}
+                  >
+                    {order.historical ? "识别页记录" : label}
+                  </span>
+                  {order.total > 0 && (
+                    <span className="muted">
+                      {order.complete}/{order.total} 项完成
+                    </span>
+                  )}
+                  {order.attempted && (
+                    <span className="soft-tag">待结果确认</span>
+                  )}
+                  {order.exception && (
+                    <span className="badge red">打印异常</span>
+                  )}
+                  {order.locked && (
+                    <span className="soft-tag">退款审核锁定</span>
+                  )}
+                </span>
+              </button>
+              {expanded && (
+                <div className="print-order-tasks">
+                  {order.job && (
+                    <div className="print-identification-pending">
+                      <strong>订单识别页.pdf</strong>
+                      <span className="muted">可选</span>
+                      {order.job === "FAILED" ? (
+                        <>
+                          <span className="badge red">生成失败</span>
+                          <Button
+                            variant="secondary"
+                            busy={retrying === order.id}
+                            onClick={() => retryIdentification(order.id)}
+                          >
+                            重新生成
+                          </Button>
+                        </>
+                      ) : (
+                        <span className="muted" role="status">
+                          正在生成识别页…
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {order.tasks.map((task) => (
+                    <section key={task.id} className="print-task-card">
+                      <div className="print-task-content">
+                        <div className="print-task-top">
+                          <strong className="production-file-name">
+                            {task.fileName?.trim() || "文件名未记录"}
+                          </strong>
+                        </div>
+                        <div className="print-task-details">
+                          <p>
+                            {task.pageRange
+                              ? `第 ${task.pageRange} 页`
+                              : "整文件"}{" "}
+                            · {taskPaperLabel(task)}
+                            {task.kind === "IDENTIFICATION" && " · 可选"}
+                          </p>
+                          {task.bindingType !== "NONE" && <span>需装订</span>}
+                          {task.openAttemptId && (
+                            <span>请先核实本次打印结果</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="task-card-actions">
+                        <Badge status={task.status} />
+                        <Link
+                          className="btn secondary"
+                          to={`${ADMIN}/print/${task.id}`}
+                        >
+                          打开任务 <ArrowRight size={16} />
+                        </Link>
+                      </div>
+                    </section>
+                  ))}
+                  <Link
+                    className="text-link print-order-detail"
+                    to={`${ADMIN}/orders/${order.id}`}
+                  >
+                    查看订单
+                  </Link>
+                </div>
+              )}
             </Panel>
           );
         })}
@@ -1144,8 +1369,7 @@ export function PrintTask() {
 
 function ServerPrintTask() {
   const { id } = useParams();
-  const { data: storeData, refresh } = useStore();
-  const toast = useStore().toast;
+  const { data: storeData, refresh, toast } = useStore();
   const taskState = useRemote<PrintTaskView>(
     id ? `/admin/print-tasks/${encodeURIComponent(id)}` : null,
   );
@@ -1155,10 +1379,13 @@ function ServerPrintTask() {
     : undefined;
   // Production endpoints use the order optimistic version as the task lock.
   const orderVersion = task?.orderVersion ?? 0;
-  const refundLocked = order?.blockers?.some(
-    (blocker) => blocker.code === "REFUND_LOCKED",
-  );
+  const refundLocked =
+    order && order.version >= orderVersion
+      ? (order.refundLocked ?? task?.refundLocked)
+      : task?.refundLocked;
   const [startReason, setStartReason] = useState("");
+  const [startDialog, setStartDialog] = useState(false);
+  const [startIssue, setStartIssue] = useState("");
   const [reason, setReason] = useState("");
   const [outcome, setOutcome] = useState<"COMPLETED" | "FAILED" | "CANCELLED">(
     "COMPLETED",
@@ -1169,33 +1396,16 @@ function ServerPrintTask() {
   const [sheetIds, setSheetIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState("");
-  const [orderMeta, setOrderMeta] = useState<{
-    status?: string;
-    actualStartedAt?: string | null;
-  } | null>(null);
-  useEffect(() => {
-    if (!task) return;
-    let active = true;
-    growthRequest<{ status?: string; actualStartedAt?: string | null }>(
-      `/admin/orders/${encodeURIComponent(task.orderId)}`,
-    )
-      .then((value) => {
-        if (active) setOrderMeta(value);
-      })
-      .catch(() => {
-        if (active) setOrderMeta(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [task?.orderId, task?.orderVersion]);
   useEffect(() => {
     setAttemptId(task?.openAttemptId || "");
-  }, [task?.openAttemptId]);
+  }, [task?.id, task?.openAttemptId]);
   useEffect(() => {
     setReprintArtifactId("");
     setSheetIds([]);
     setReason("");
+    setStartDialog(false);
+    setStartIssue("");
+    setStartReason("");
   }, [task?.id]);
   if (!id) return <Empty title="缺少打印任务" />;
   if (taskState.loading)
@@ -1214,11 +1424,28 @@ function ServerPrintTask() {
       </Notice>
     );
   if (!task)
-    return <Empty title="打印任务不存在或已失效" text="旧内容版本的任务不能继续打印。" />;
+    return (
+      <Empty
+        title="打印任务不存在或已失效"
+        text="旧内容版本的任务不能继续打印。"
+      />
+    );
   const fileName = task.fileName?.trim() || "文件名未记录";
   const orderFile = order?.files.find((item) => item.id === task.fileId);
   const pdfUrl = printAssetUrl(reprintArtifactId || task.artifactId);
   const completed = task.status === "COMPLETED";
+  const identification = task.kind === "IDENTIFICATION";
+  const needsStart = !identification && !task.actualStartedAt;
+  const canConfirmStart =
+    needsStart && !!task.openAttemptId && task.orderStatus === "PENDING_PRINT";
+  const identificationCanPrint =
+    !identification ||
+    ["PENDING_PRINT", "READY_FOR_DELIVERY"].includes(task.orderStatus);
+  const reportIssue = (cause: unknown) => {
+    setIssue(errorText(cause));
+    if (cause instanceof ApiError && cause.code === "VERSION_CONFLICT")
+      taskState.reload();
+  };
   const run = async (work: () => Promise<unknown>, success: string) => {
     setBusy(true);
     setIssue("");
@@ -1229,7 +1456,7 @@ function ServerPrintTask() {
       toast(success);
       return true;
     } catch (cause) {
-      setIssue(errorText(cause));
+      reportIssue(cause);
       return false;
     } finally {
       setBusy(false);
@@ -1250,13 +1477,57 @@ function ServerPrintTask() {
       );
       setAttemptId(attempt.attemptId);
       if (win) win.location.href = pdfUrl;
-      else
-        toast("打印窗口被拦截，请点击“打开最终 PDF”后手动打印并返回确认");
+      else toast("打印窗口被拦截，请点击“打开最终 PDF”后手动打印并返回确认");
       await taskState.reload();
       await refresh();
     } catch (cause) {
       win?.close();
-      setIssue(errorText(cause));
+      reportIssue(cause);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmStart = async () => {
+    setBusy(true);
+    setStartIssue("");
+    setIssue("");
+    try {
+      const latest = await growthRequest<PrintTaskView>(
+        `/admin/print-tasks/${encodeURIComponent(task.id)}`,
+      );
+      if (latest.actualStartedAt) {
+        toast("此订单已确认开印");
+      } else {
+        if (!latest.openAttemptId || latest.openAttemptId !== task.openAttemptId)
+          throw new ApiError(
+            "OPEN_DOCUMENT_ATTEMPT_REQUIRED",
+            "当前打印尝试已变化，请重新核对",
+            409,
+          );
+        await growthRequest(
+          `/admin/orders/${encodeURIComponent(task.orderId)}/start-production`,
+          {
+            method: "POST",
+            body: actualStartPayload(
+              latest.orderVersion,
+              startReason,
+              latest.openAttemptId,
+            ),
+          },
+        );
+        toast("已确认开印");
+      }
+      setStartDialog(false);
+      taskState.reload();
+      void refresh();
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        setStartDialog(false);
+        setIssue(errorText(cause));
+        taskState.reload();
+      } else {
+        setStartIssue(errorText(cause));
+      }
     } finally {
       setBusy(false);
     }
@@ -1264,14 +1535,17 @@ function ServerPrintTask() {
   const confirmResult = () =>
     run(
       () =>
-        growthRequest(`/admin/print-attempts/${encodeURIComponent(attemptId)}/result`, {
-          method: "POST",
-          body: {
-            expectedVersion: orderVersion,
-            outcome,
-            reason: outcome === "COMPLETED" ? "" : reason,
+        growthRequest(
+          `/admin/print-attempts/${encodeURIComponent(attemptId)}/result`,
+          {
+            method: "POST",
+            body: {
+              expectedVersion: orderVersion,
+              outcome,
+              reason: outcome === "COMPLETED" ? "" : reason,
+            },
           },
-        }),
+        ),
       "实际打印结果已记录",
     );
   const submitReprint = async () => {
@@ -1280,13 +1554,18 @@ function ServerPrintTask() {
     setBusy(true);
     setIssue("");
     try {
-      const result = await growthRequest<{ artifactId: string; attemptId: string }>(
-        `/admin/print-tasks/${encodeURIComponent(task.id)}/reprints`,
-        {
-          method: "POST",
-          body: reprintPayload(task, reprintMode, sheetIds, reason),
-        },
-      );
+      const result = await growthRequest<{
+        artifactId: string;
+        attemptId: string;
+      }>(`/admin/print-tasks/${encodeURIComponent(task.id)}/reprints`, {
+        method: "POST",
+        body: reprintPayload(
+          task,
+          identification ? "WHOLE" : reprintMode,
+          sheetIds,
+          reason,
+        ),
+      });
       setReprintArtifactId(result.artifactId);
       setAttemptId(result.attemptId);
       const url = printAssetUrl(result.artifactId);
@@ -1297,14 +1576,17 @@ function ServerPrintTask() {
       toast("补打已建立，请打印补打 PDF 后确认结果");
     } catch (cause) {
       win?.close();
-      setIssue(errorText(cause));
+      reportIssue(cause);
     } finally {
       setBusy(false);
     }
   };
   return (
     <>
-      <Link className="back-link" to={`${ADMIN}/print`}>
+      <Link
+        className="back-link"
+        to={`${ADMIN}/print?order=${encodeURIComponent(task.orderId)}`}
+      >
         <ArrowLeft size={16} />
         返回打印中心
       </Link>
@@ -1317,7 +1599,7 @@ function ServerPrintTask() {
       </div>
       {refundLocked && (
         <Notice type="error">
-          退款审核中，新生产已锁定；请先在售后流程完成未结打印尝试核实与审批。
+          退款审核期间暂停新的打印和补打。已有尝试仍可核实开印和打印结果。
         </Notice>
       )}
       {issue && (
@@ -1325,7 +1607,7 @@ function ServerPrintTask() {
           <span role="alert">{issue}</span>
         </Notice>
       )}
-      <div className="print-view-layout">
+      <div className="print-view-layout print-task-full-width">
         <Panel title="服务端任务">
           <div className="print-settings" aria-label="打印设置">
             {[
@@ -1334,7 +1616,9 @@ function ServerPrintTask() {
               task.colorMode === "BW" ? "黑白" : "彩色",
               `${task.sheetCount} 张纸`,
               `打印页码 ${task.pageRange || "整文件"}`,
-            ].map((value) => <span key={value}>{value}</span>)}
+            ].map((value) => (
+              <span key={value}>{value}</span>
+            ))}
           </div>
           <details className="print-task-metadata">
             <summary>任务技术信息</summary>
@@ -1358,92 +1642,114 @@ function ServerPrintTask() {
             </dl>
           </details>
           <DocPreview
-            file={orderFile
-              ? { ...orderFile, name: fileName }
-              : { id: task.fileId, assetId: task.artifactId, name: fileName, kind: "DOCUMENT", pages: task.pages } as PrintFile}
+            file={
+              orderFile
+                ? { ...orderFile, name: fileName }
+                : ({
+                    id: task.fileId,
+                    assetId: task.artifactId,
+                    name: fileName,
+                    kind: "DOCUMENT",
+                    pages: task.pages,
+                  } as PrintFile)
+            }
             pdfUrl={pdfUrl}
           />
-          <div className="button-row">
-            <a className="btn secondary" href={pdfUrl} target="_blank" rel="noreferrer">
-              {reprintArtifactId ? "打开补打 PDF" : "打开最终 PDF"}
-            </a>
-            <Button
-              disabled={completed || !!task.openAttemptId || busy || refundLocked}
-              onClick={startAttempt}
-            >
-              记录打印尝试并打开 PDF
-            </Button>
+          <div className="print-pdf-tools">
+            <div className="button-row print-pdf-controls">
+              <a
+                className="btn secondary"
+                href={pdfUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {reprintArtifactId ? "打开补打 PDF" : "打开最终 PDF"}
+              </a>
+              {!task.openAttemptId && !attemptId && (
+                <Button
+                  disabled={completed || busy || refundLocked || !identificationCanPrint}
+                  onClick={startAttempt}
+                >
+                  记录打印尝试并打开 PDF
+                </Button>
+              )}
+              {canConfirmStart && (
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    setStartIssue("");
+                    setStartDialog(true);
+                  }}
+                >
+                  确认已开印
+                </Button>
+              )}
+            </div>
+            {!identification && task.actualStartedAt && (
+              <p className="print-pdf-hint">
+                <strong>已开印</strong>{" "}
+                <time dateTime={task.actualStartedAt}>
+                  {new Date(task.actualStartedAt).toLocaleString("zh-CN", {
+                    timeZone: "Asia/Shanghai",
+                  })}
+                </time>
+              </p>
+            )}
+            {!completed && identificationCanPrint && (
+              <p className="muted print-pdf-hint">
+                {canConfirmStart
+                  ? "确认机器已开始打印正文后，点击「确认已开印」。打印结束后回到本页确认结果。"
+                  : task.openAttemptId
+                    ? "打印结束后，请在下方确认本次结果。"
+                    : "打印前请先记录尝试，打印结束后回到本页确认结果。"}
+              </p>
+            )}
           </div>
-          {!completed && !task.openAttemptId && (
-            <p className="muted">
-              打开打印窗口只创建尝试。关闭窗口、afterprint 或失焦都不会自动算作完成。
-            </p>
-          )}
-        </Panel>
-        <Panel className="print-start-panel" title="实际开印">
-          <p className="muted">
-            实际开印必须由管理员明确登记；未登记前不能确认实体打印完成。后端只允许登记一次，重复提交会返回已登记错误。
-          </p>
-          <dl className="growth-facts v1-facts">
-            <div>
-              <dt>订单状态</dt>
-              <dd><Badge status={orderMeta?.status || task.orderStatus} /></dd>
-            </div>
-            <div>
-              <dt>实际开印</dt>
-              <dd>
-                {orderMeta?.actualStartedAt
-                  ? new Date(orderMeta.actualStartedAt).toLocaleString("zh-CN")
-                  : "尚未登记"}
-              </dd>
-            </div>
-          </dl>
-          <Field label="开印说明（选填）">
-            <input
-              value={startReason}
-              onChange={(event) => setStartReason(event.target.value)}
-              placeholder="例如：开始打印第一份任务"
-            />
-          </Field>
-          <Button
-            variant="secondary"
-            busy={busy}
-            disabled={
-              !!orderMeta?.actualStartedAt ||
-              (orderMeta?.status || task.orderStatus) !== "PENDING_PRINT"
-            }
-            onClick={async () => {
-              let body: ReturnType<typeof actualStartPayload>;
-              try {
-                body = actualStartPayload(orderVersion, startReason);
-              } catch (error) {
-                setIssue(errorText(error));
-                return;
-              }
-              const ok = await run(
-                () =>
-                  growthRequest(`/admin/orders/${encodeURIComponent(task.orderId)}/start-production`, {
-                    method: "POST",
-                    body,
-                  }),
-                "实际开印已登记",
-              );
-              if (ok)
-                setOrderMeta((current) => ({
-                  ...(current || {}),
-                  status: "PENDING_PRINT",
-                  actualStartedAt: new Date().toISOString(),
-                }));
-            }}
-          >
-            {orderMeta?.actualStartedAt ? "实际开印已登记" : "登记实际开印"}
-          </Button>
         </Panel>
       </div>
+      <Modal
+        title="确认已开印"
+        open={startDialog && canConfirmStart}
+        onClose={() => {
+          if (!busy) setStartDialog(false);
+        }}
+      >
+        <p className="print-start-confirmation">
+          请确认机器已开始打印本订单的正文。确认后，用户端将显示「打印中」，用户原因退款将按已开印处理。
+        </p>
+        <Field label="开印说明（选填）">
+          <input
+            value={startReason}
+            maxLength={1000}
+            onChange={(event) => setStartReason(event.target.value)}
+          />
+        </Field>
+        {startIssue && (
+          <Notice type="error">
+            <span role="alert">{startIssue}</span>
+          </Notice>
+        )}
+        <footer className="button-row print-start-actions">
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => setStartDialog(false)}
+          >
+            返回
+          </Button>
+          <Button busy={busy} disabled={busy} onClick={confirmStart}>
+            确认开印
+          </Button>
+        </footer>
+      </Modal>
       {attemptId && !completed && (
         <Panel className="print-result-panel" title="确认本次打印结果">
           <Notice>
-            请核对实体纸张的颜色、单双面、翻转与页序。确认完成后才能进入装订/装袋。
+            {identification
+              ? "请核对提取码和页数。实际出纸后确认本次结果。"
+              : needsStart
+                ? "如果机器已开始打印，即使中途停止，也请先确认开印，再记录本次结果。"
+                : "请核对实体纸张的颜色、单双面、翻转与页序。确认完成后才能进入装订/装袋。"}
           </Notice>
           <div className="button-row">
             {(["COMPLETED", "FAILED", "CANCELLED"] as const).map((value) => (
@@ -1462,61 +1768,115 @@ function ServerPrintTask() {
           </div>
           {outcome !== "COMPLETED" && (
             <Field label="失败/取消原因（必填）">
-              <textarea value={reason} onChange={(event) => setReason(event.target.value)} />
+              <textarea
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+              />
             </Field>
           )}
-          <Button busy={busy} onClick={confirmResult}>
+          <Button
+            busy={busy}
+            disabled={busy || (needsStart && outcome === "COMPLETED")}
+            onClick={confirmResult}
+          >
             确认记录当前尝试
           </Button>
         </Panel>
       )}
-      <Panel className="reprint-panel" title="实体纸张与补打">
-        <p className="muted">
-          指定纸张补打按服务端页纸映射选择完整实体纸张；双面会自动包含正反面与空白背面，整任务补打不增加费用。
-        </p>
-        <div className="button-row">
-          {(["WHOLE", "SHEETS"] as const).map((mode) => (
-            <Button
-              key={mode}
-              variant={reprintMode === mode ? "" : "secondary"}
-              onClick={() => setReprintMode(mode)}
-            >
-              {mode === "WHOLE" ? "整任务重打" : "指定实体纸张"}
-            </Button>
-          ))}
-        </div>
-        {reprintMode === "SHEETS" && (
-          <div className="sheet-selector">
-            {task.sheetCatalog.map((sheet) => (
-              <label className="checkbox-label" key={sheet.sheetId}>
-                <input
-                  type="checkbox"
-                  checked={sheetIds.includes(sheet.sheetId)}
-                  onChange={(event) =>
-                    setSheetIds((current) =>
-                      event.target.checked
-                        ? [...current, sheet.sheetId]
-                        : current.filter((value) => value !== sheet.sheetId),
-                    )
-                  }
-                />
-                第 {sheet.copyIndex} 份 · 第 {sheet.sheet} 张 · 正面{" "}
-                {sheet.frontPage ?? "—"} / 背面 {sheet.backPage ?? (sheet.blankBack ? "空白" : "—")}
-              </label>
-            ))}
-          </div>
-        )}
-        <Field label="补打原因（必填）">
-          <textarea value={reason} onChange={(event) => setReason(event.target.value)} />
-        </Field>
-        <Button
-          busy={busy}
-          disabled={!!task.openAttemptId}
-          onClick={submitReprint}
-        >
-          建立补打并记录尝试
-        </Button>
-      </Panel>
+      {identification && task.generatedAt && (
+        <Panel title="识别页记录">
+          <p className="muted">
+            生成于{" "}
+            {new Date(task.generatedAt).toLocaleString("zh-CN", {
+              timeZone: "Asia/Shanghai",
+            })}
+          </p>
+          {task.attempts?.length ? (
+            <ul className="identification-attempts">
+              {task.attempts.map((attempt) => (
+                <li key={attempt.attemptId}>
+                  <span>
+                    {new Date(attempt.createdAt).toLocaleString("zh-CN", {
+                      timeZone: "Asia/Shanghai",
+                    })}
+                  </span>
+                  <Badge
+                    status={
+                      attempt.outcome === "FAILED"
+                        ? "EXCEPTION"
+                        : attempt.outcome || "ATTEMPTED"
+                    }
+                  />
+                  {attempt.reason && (
+                    <span className="identification-attempt-reason">
+                      {attempt.reason}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">暂无打印记录</p>
+          )}
+        </Panel>
+      )}
+      {identificationCanPrint && (
+        <Panel className="reprint-panel" title="实体纸张与补打">
+          <p className="muted">
+            {identification
+              ? "按原识别页整份补打，打印窗口选 1 份。"
+              : "指定纸张补打按服务端页纸映射选择完整实体纸张；双面会自动包含正反面与空白背面，整任务补打不增加费用。"}
+          </p>
+          {!identification && (
+            <div className="button-row">
+              {(["WHOLE", "SHEETS"] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  variant={reprintMode === mode ? "" : "secondary"}
+                  onClick={() => setReprintMode(mode)}
+                >
+                  {mode === "WHOLE" ? "整任务重打" : "指定实体纸张"}
+                </Button>
+              ))}
+            </div>
+          )}
+          {!identification && reprintMode === "SHEETS" && (
+            <div className="sheet-selector">
+              {task.sheetCatalog.map((sheet) => (
+                <label className="checkbox-label" key={sheet.sheetId}>
+                  <input
+                    type="checkbox"
+                    checked={sheetIds.includes(sheet.sheetId)}
+                    onChange={(event) =>
+                      setSheetIds((current) =>
+                        event.target.checked
+                          ? [...current, sheet.sheetId]
+                          : current.filter((value) => value !== sheet.sheetId),
+                      )
+                    }
+                  />
+                  第 {sheet.copyIndex} 份 · 第 {sheet.sheet} 张 · 正面{" "}
+                  {sheet.frontPage ?? "—"} / 背面{" "}
+                  {sheet.backPage ?? (sheet.blankBack ? "空白" : "—")}
+                </label>
+              ))}
+            </div>
+          )}
+          <Field label="补打原因（必填）">
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </Field>
+          <Button
+            busy={busy}
+            disabled={busy || refundLocked || !!task.openAttemptId}
+            onClick={submitReprint}
+          >
+            建立补打并记录尝试
+          </Button>
+        </Panel>
+      )}
     </>
   );
 }

@@ -371,6 +371,7 @@ class ReprintInput(DTO):
 class ActualStartInput(DTO):
     expected_version: int
     reason: str = Field(default='', max_length=1000)
+    attempt_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @field_validator('reason')
     @classmethod
@@ -476,9 +477,13 @@ class PrintTaskDTO(DTO):
     flip: str = 'NONE'
     open_attempt_id: str | None = None
     last_attempt: PrintAttemptDTO | None = None
+    attempts: list[PrintAttemptDTO] = Field(default_factory=list)
+    generated_at: str | None = None
     reprints: list[ReprintRecordDTO] = Field(default_factory=list)
     order_status: str = ''
     order_version: int = 0
+    actual_started_at: str | None = None
+    refund_locked: bool = False
     sheet_catalog: list[SheetDTO] = Field(default_factory=list)
 
 
@@ -486,6 +491,7 @@ class PrintQueueDTO(DTO):
     tasks: list[PrintTaskDTO]
     counts: dict[str, int] = Field(default_factory=dict)
     next_task_id: str | None = None
+    identification_jobs: dict[str, str] = Field(default_factory=dict)
 
 
 class AttemptResultDTO(DTO):

@@ -218,6 +218,19 @@
       "ActualStartInput": {
         "additionalProperties": false,
         "properties": {
+          "attemptId": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attemptid"
+          },
           "expectedVersion": {
             "title": "Expectedversion",
             "type": "integer"
@@ -12962,6 +12975,13 @@
             "title": "Counts",
             "type": "object"
           },
+          "identificationJobs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Identificationjobs",
+            "type": "object"
+          },
           "nextTaskId": {
             "anyOf": [
               {
@@ -13024,6 +13044,17 @@
             "title": "Active",
             "type": "boolean"
           },
+          "actualStartedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualstartedat"
+          },
           "artifactId": {
             "title": "Artifactid",
             "type": "string"
@@ -13032,6 +13063,13 @@
             "default": "",
             "title": "Artifactsha256",
             "type": "string"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/PrintAttemptDTO"
+            },
+            "title": "Attempts",
+            "type": "array"
           },
           "bindingType": {
             "default": "NONE",
@@ -13061,6 +13099,17 @@
             "default": "NONE",
             "title": "Flip",
             "type": "string"
+          },
+          "generatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generatedat"
           },
           "id": {
             "title": "Id",
@@ -13120,6 +13169,11 @@
             "default": "",
             "title": "Pickupcode",
             "type": "string"
+          },
+          "refundLocked": {
+            "default": false,
+            "title": "Refundlocked",
+            "type": "boolean"
           },
           "reprints": {
             "items": {
@@ -18052,6 +18106,7 @@
               "PRINT_FINAL",
               "PRINT_REPRINT",
               "PUBLIC_WECHAT_QR",
+              "PUBLIC_IDENTIFICATION_QR",
               "PUBLIC_MAP",
               "DELIVERY_PROOF"
             ],
@@ -18677,6 +18732,33 @@
             ],
             "title": "Locationmaxageseconds"
           },
+          "orderIdentificationDefaultWebsiteUrl": {
+            "title": "Orderidentificationdefaultwebsiteurl",
+            "type": "string"
+          },
+          "orderIdentificationEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orderidentificationenabled"
+          },
+          "orderIdentificationWebsiteUrl": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orderidentificationwebsiteurl"
+          },
           "pauses": {
             "anyOf": [
               {
@@ -18723,7 +18805,8 @@
           }
         },
         "required": [
-          "version"
+          "version",
+          "orderIdentificationDefaultWebsiteUrl"
         ],
         "title": "WorkflowConfigView",
         "type": "object"
@@ -18760,6 +18843,29 @@
               }
             ],
             "title": "Locationmaxageseconds"
+          },
+          "orderIdentificationEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orderidentificationenabled"
+          },
+          "orderIdentificationWebsiteUrl": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orderidentificationwebsiteurl"
           },
           "pauses": {
             "anyOf": [
@@ -26690,6 +26796,91 @@
         "summary": "Confirm Payment"
       }
     },
+    "/admin/orders/{order_id}/identification/retry": {
+      "post": {
+        "operationId": "retry_order_identification_api_v1_admin_orders__order_id__identification_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Retry Order Identification"
+      }
+    },
     "/admin/orders/{order_id}/pack": {
       "post": {
         "operationId": "pack_order_api_v1_admin_orders__order_id__pack_post",
@@ -27176,7 +27367,7 @@
     },
     "/admin/orders/{order_id}/start-production": {
       "post": {
-        "description": "Record the explicit human fact that physical printing has started.",
+        "description": "Record physical printing, optionally linked to an open customer-file attempt.",
         "operationId": "start_production_api_v1_admin_orders__order_id__start_production_post",
         "parameters": [
           {

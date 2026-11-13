@@ -45,7 +45,8 @@ async function mount(
       const data=createDemo();data.config.prices={bwSingle:40,bwDuplex:60,colorSingle:70,colorDuplex:95,photo:200,corner:5,side:10,delivery:250};
       if(${free === true})Object.keys(data.config.prices).forEach(k=>data.config.prices[k]=0);
       if(${free === "blank"}){data.config.prices.corner=null;data.config.prices.delivery=null;data.config.prices.bwSingle=0;}
-      data.config.sections={prices:{version:1}};
+      Object.assign(data.config,{locationMaxAgeSeconds:300,locationMaxAccuracyMeters:100,shortCodeLength:5});
+      data.config.sections={prices:{version:1},workflow:{version:1,orderIdentificationDefaultWebsiteUrl:"https://print.example.test/u/"}};
       window.priceFixture={writes:[],store:{data,resources:{config:{hasData:true,loading:false}},refresh:async()=>{},toast:()=>{},act:async()=>true}};
       const policy={id:'p',version:1,enabled:false,effectiveAt:null,description:'',tiers:[]};
       const quote=buildQuote([{key:'binding',relatedId:'file',unit:'BOOKLET',quantity:3,unitPriceCents:5,amountCents:15,service:'BINDING'}],policy,[],{},null,undefined,${free === true ? 0 : 250});
@@ -199,4 +200,111 @@ test("settings edits and saves delivery in cents with binding per copy", async (
       body: { delivery: expected },
     });
   }
+});
+
+
+test("workflow opts in to identification sheets for new orders", async ({ page }, info) => {
+  await mount(page, "settings");
+  await page.getByRole("button", { name: "工作流与暂停", exact: true }).click();
+  const toggle = page.getByRole("checkbox", { name: /自动生成订单识别页/ });
+  const row = page.locator(".identification-config");
+  await expect(toggle).not.toBeChecked();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const bounds = await row.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const panel = element.closest(".panel")!;
+      const parent = panel.getBoundingClientRect();
+      const padding = getComputedStyle(panel);
+      return {
+        height: box.height,
+        left: box.left - (parent.left + parseFloat(padding.paddingLeft)),
+        right: parent.right - parseFloat(padding.paddingRight) - box.right,
+        overflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+    expect(bounds.left).toBeGreaterThanOrEqual(-1);
+    expect(bounds.right).toBeGreaterThanOrEqual(-1);
+    expect(bounds.overflow).toBeLessThanOrEqual(1);
+    if (width === 320 || width === 1440) {
+      await row.screenshot({ path: info.outputPath(`identification-setting-${width}.png`) });
+    }
+  }
+  await toggle.check();
+  await page.getByRole("button", { name: "预览并保存", exact: true }).click();
+  await page.getByRole("button", { name: "确认保存当前分区", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).priceFixture.writes.at(-1))).toMatchObject({
+    path: "/admin/config/workflow", body: { orderIdentificationEnabled: true },
+  });
+});
+
+
+test("generates a framed website QR from a workflow link", async ({ page }, info) => {
+  await mount(page, "settings");
+  await page.getByRole("button", { name: "工作流与暂停", exact: true }).click();
+  const link = page.getByRole("textbox", { name: "网站链接", exact: true });
+  const preview = page.getByRole("img", { name: "网站二维码预览" });
+  const save = page.getByRole("button", { name: "预览并保存", exact: true });
+  await expect(preview).toHaveAttribute("src", /^data:image\/png;base64,/);
+  const defaultQr = await preview.getAttribute("src");
+
+  await link.fill("javascript:alert(1)");
+  await expect(link).toHaveAttribute("aria-invalid", "true");
+  await expect(preview).toHaveCount(0);
+  await expect(save).toBeDisabled();
+
+  const url = "https://print.example.test/campus?from=order%2Fsheet#upload";
+  await link.fill(url);
+  await expect(preview).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(preview).not.toHaveAttribute("src", defaultQr!);
+  await link.blur();
+  const panel = page.locator(".identification-qr");
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await panel.evaluate((element) => {
+      const parent = element.closest(".panel")!;
+      const parentRect = parent.getBoundingClientRect();
+      const padding = getComputedStyle(parent);
+      const left = parentRect.left + parseFloat(padding.paddingLeft);
+      const right = parentRect.right - parseFloat(padding.paddingRight);
+      const input = element.querySelector("input")!;
+      const frame = element.querySelector(".identification-qr-frame")!;
+      const bounds = [input, frame].map((item) => item.getBoundingClientRect());
+      return {
+        fits: bounds.every((box) => box.left >= left - 1 && box.right <= right + 1),
+        overflow: document.documentElement.scrollWidth - innerWidth,
+        height: bounds[0].height,
+        font: parseFloat(getComputedStyle(input).fontSize),
+        decoration: getComputedStyle(frame).backgroundImage,
+        framePadding: parseFloat(getComputedStyle(frame).paddingLeft),
+      };
+    });
+    expect(layout.fits).toBe(true);
+    expect(layout.overflow).toBeLessThanOrEqual(1);
+    expect(layout.height).toBeGreaterThanOrEqual(44);
+    expect(layout.font).toBeGreaterThanOrEqual(16);
+    expect(layout.decoration).toContain("linear-gradient");
+    expect(layout.framePadding).toBeLessThanOrEqual(1);
+    if (width === 390 || width === 1440) {
+      await panel.screenshot({ path: info.outputPath(`website-qr-${width}.png`), scale: "css" });
+    }
+  }
+  const confirm = page.getByRole("button", { name: "确认保存当前分区", exact: true });
+  await save.click();
+  await confirm.click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).priceFixture.writes.at(-1))).toMatchObject({
+    path: "/admin/config/workflow", body: { orderIdentificationWebsiteUrl: url },
+  });
+  await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+  await link.fill("");
+  await expect(preview).toHaveAttribute("src", defaultQr!);
+  await save.click();
+  await confirm.click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).priceFixture.writes.at(-1))).toMatchObject({
+    path: "/admin/config/workflow", body: { orderIdentificationWebsiteUrl: "" },
+  });
 });

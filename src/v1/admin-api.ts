@@ -1,4 +1,5 @@
 import { SERVICE_PRICES } from "../lib/service-prices";
+import { validateIdentificationWebsite } from "../lib/link-qr";
 import type { SlotBrief } from "./customer";
 
 /**
@@ -267,6 +268,12 @@ export function configSectionPayload(
     return {
       expectedVersion,
       ...workflow,
+      ...(typeof config.orderIdentificationEnabled === "boolean"
+        ? { orderIdentificationEnabled: config.orderIdentificationEnabled }
+        : {}),
+      ...(typeof config.orderIdentificationWebsiteUrl === "string"
+        ? { orderIdentificationWebsiteUrl: validateIdentificationWebsite(config.orderIdentificationWebsiteUrl) }
+        : {}),
       pauses: pauses(config.pauses),
     };
   }
@@ -463,9 +470,13 @@ export type PrintTaskView = {
   flip: string;
   openAttemptId: string | null;
   lastAttempt: PrintAttemptView | null;
+  attempts?: PrintAttemptView[];
+  generatedAt?: string | null;
   reprints: ReprintRecordView[];
   orderStatus: string;
   orderVersion: number;
+  actualStartedAt?: string | null;
+  refundLocked?: boolean;
   sheetCatalog: SheetView[];
 };
 
@@ -473,6 +484,7 @@ export type PrintQueueView = {
   tasks: PrintTaskView[];
   counts: Record<string, number>;
   nextTaskId: string | null;
+  identificationJobs?: Record<string, string>;
 };
 
 export type BindingTaskView = {
@@ -703,10 +715,18 @@ export function slotChangePayload(
 }
 
 /** Actual start can be recorded once; reason is optional in the backend contract. */
-export function actualStartPayload(orderVersion: number, reason: string) {
+export function actualStartPayload(
+  orderVersion: number,
+  reason: string,
+  attemptId?: string,
+) {
   if (!Number.isSafeInteger(orderVersion) || orderVersion < 1)
     throw new Error("订单版本尚未加载，请刷新订单后重试");
-  return { expectedVersion: orderVersion, reason: reason.trim() };
+  return {
+    expectedVersion: orderVersion,
+    reason: reason.trim(),
+    ...(attemptId ? { attemptId } : {}),
+  };
 }
 
 export type ExportKind = "ORDERS" | "FINANCE";

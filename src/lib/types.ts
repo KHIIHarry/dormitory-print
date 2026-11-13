@@ -112,6 +112,8 @@ export type Order = {
   version: number;
   contentRevision: number;
   status: OrderStatus;
+  actualStartedAt?: string | null;
+  refundLocked?: boolean;
   nickname: string;
   phone: string;
   locationId: string;

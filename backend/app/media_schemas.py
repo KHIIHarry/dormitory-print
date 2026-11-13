@@ -28,6 +28,7 @@ AssetPurpose = Literal[
     'PRINT_FINAL',
     'PRINT_REPRINT',
     'PUBLIC_WECHAT_QR',
+    'PUBLIC_IDENTIFICATION_QR',
     'PUBLIC_MAP',
     'DELIVERY_PROOF',
 ]

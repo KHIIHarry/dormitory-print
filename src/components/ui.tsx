@@ -152,6 +152,7 @@ export function Badge({ status }: { status: OrderStatus | string }) {
   const map: Record<string, [string, string]> = {
     PENDING_CONFIRMATION: ["待确认", "amber"],
     PENDING_PRINT: ["待打印", "blue"],
+    PRINTING: ["打印中", "amber"],
     READY_FOR_DELIVERY: ["待配送", "purple"],
     DELIVERING: ["配送中", "cyan"],
     DELIVERED: ["已送达", "green"],

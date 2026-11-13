@@ -1373,7 +1373,7 @@ def test_admin_without_production_capability_is_forbidden(db):
 
 
 # Mount commerce+auth only for the cross-module end-to-end route test.
-APP_MODULES = ['commerce', 'production', 'after_sales', 'auth']
+APP_MODULES = ['commerce', 'production', 'after_sales', 'auth', 'media']
 
 
 def _seed_checkout(db):
@@ -2758,3 +2758,204 @@ def test_refund_lock_also_allows_existing_attempt_completion_when_start_was_reco
     assert db.get(PrintAttempt, attempt_id).outcome == 'COMPLETED'
     assert db.get(Order, seed.order.id).actual_started_at is not None
     assert db.get(AfterSale, case.id).status == 'REQUESTED'
+
+
+def _enable_order_identification(api, admin_client, db):
+    from app.config import get_config
+
+    workflow = get_config(db, 'workflow')
+    enabled = api(admin_client, '/admin/config/workflow', {
+        'expectedVersion': workflow.version, 'orderIdentificationEnabled': True,
+    }, method='PATCH')
+    assert enabled.status_code == 200, enabled.text
+
+
+def test_settlement_creates_private_identification_task_without_changing_order_files(
+    api, admin_client, client, db,
+):
+    import pymupdf
+    from app.jobs import run_one
+    from app.models import Job
+
+    order, customer_artifact = _seed_checkout(db)
+    _enable_order_identification(api, admin_client, db)
+    paid = _settle_real(api, admin_client, order)
+    job = db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=order.id).one()
+    assert job.status == 'QUEUED'
+    assert run_one(('ORDER_IDENTIFICATION',)) is True
+    assert run_one(('ORDER_IDENTIFICATION',)) is None
+
+    queue = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
+    sheet, customer = queue['tasks']
+    assert (sheet['kind'], sheet['status'], sheet['copies'], sheet['sides'], sheet['colorMode']) == (
+        'IDENTIFICATION', 'PENDING', 1, 'SINGLE', 'BW',
+    )
+    assert queue['nextTaskId'] == customer['id']
+    assert customer['artifactId'] == customer_artifact.id
+    assert customer['artifactSha256'] == customer_artifact.sha256
+    pdf_path = f"/assets/{sheet['artifactId']}/content"
+    assert api(client, pdf_path, method='GET').status_code == 404
+    pdf = api(admin_client, pdf_path, method='GET')
+    assert pdf.status_code == 200, pdf.text
+    with pymupdf.open(stream=pdf.content, filetype='pdf') as document:
+        assert len(document) == 1
+        assert order.pickup_code in document[0].get_text()
+        assert '装订方式' in document[0].get_text()
+
+    attempt = api(admin_client, f"/admin/print-tasks/{sheet['id']}/attempts", {
+        'expectedVersion': sheet['orderVersion'], 'artifactId': sheet['artifactId'],
+    })
+    assert attempt.status_code == 200, attempt.text
+    start = api(admin_client, f'/admin/orders/{order.id}/start-production', {
+        'expectedVersion': sheet['orderVersion'], 'attemptId': attempt.json()['data']['attemptId'],
+    })
+    assert start.status_code == 409
+    assert start.json()['error']['code'] == 'OPEN_DOCUMENT_ATTEMPT_REQUIRED'
+    duplicate = api(admin_client, f"/admin/print-tasks/{sheet['id']}/attempts", {
+        'expectedVersion': sheet['orderVersion'], 'artifactId': sheet['artifactId'],
+    })
+    assert duplicate.status_code == 409
+    result = api(admin_client, f"/admin/print-attempts/{attempt.json()['data']['attemptId']}/result", {
+        'expectedVersion': sheet['orderVersion'], 'outcome': 'COMPLETED',
+    })
+    assert result.status_code == 200, result.text
+    current = api(admin_client, f'/admin/orders/{order.id}', method='GET').json()['data']
+    assert current['files'] == paid['files']
+    assert current['actualStartedAt'] is None
+    assert current['packingStatus'] == 'BLOCKED'
+
+
+def test_identification_is_off_by_default_for_new_orders(api, admin_client, db):
+    from app.models import Job
+
+    order, _ = _seed_checkout(db)
+    config = api(admin_client, '/admin/config', method='GET').json()['data']['sections']
+    assert config['workflow']['orderIdentificationEnabled'] is False
+    _settle_real(api, admin_client, order)
+    assert db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=order.id).count() == 0
+
+
+def test_identification_result_after_departure_does_not_create_delivery_exception(api, admin_client, db):
+    from app.jobs import run_one
+    from app.models import BusinessException
+
+    order, _ = _seed_checkout(db)
+    _enable_order_identification(api, admin_client, db)
+    _settle_real(api, admin_client, order)
+    assert run_one(('ORDER_IDENTIFICATION',)) is True
+    queue = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
+    sheet = queue['tasks'][0]
+    attempt = api(admin_client, f"/admin/print-tasks/{sheet['id']}/attempts", {
+        'expectedVersion': sheet['orderVersion'], 'artifactId': sheet['artifactId'],
+    })
+    assert attempt.status_code == 200, attempt.text
+
+    db.refresh(order)
+    order.status = 'DELIVERING'
+    db.commit()
+    response = api(admin_client, f"/admin/print-attempts/{attempt.json()['data']['attemptId']}/result", {
+        'expectedVersion': order.version, 'outcome': 'COMPLETED',
+    })
+    assert response.status_code == 200, response.text
+    assert db.query(BusinessException).filter_by(order_id=order.id, blocks_delivery=True).count() == 0
+    live = api(admin_client, '/admin/print-tasks', method='GET').json()['data']
+    assert all(task['orderId'] != order.id for task in live['tasks'])
+    history = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
+    assert [task['id'] for task in history['tasks']] == [sheet['id']]
+    assert history['nextTaskId'] is None
+    detail = api(admin_client, f"/admin/print-tasks/{sheet['id']}", method='GET').json()['data']
+    assert detail['generatedAt']
+    assert [record['outcome'] for record in detail['attempts']] == ['COMPLETED']
+
+
+def test_identification_generation_failure_can_be_requeued_without_an_extra_job(api, admin_client, db):
+    from app.jobs import run_one
+    from app.models import Job
+
+    order, _ = _seed_checkout(db)
+    _enable_order_identification(api, admin_client, db)
+    _settle_real(api, admin_client, order)
+    job = db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=order.id).one()
+    job.status = 'FAILED'
+    db.commit()
+
+    failed = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
+    assert failed['identificationJobs'] == {order.id: 'FAILED'}
+    retry = api(admin_client, f'/admin/orders/{order.id}/identification/retry', {})
+    assert retry.status_code == 200, retry.text
+    assert run_one(('ORDER_IDENTIFICATION',)) is True
+    assert db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=order.id).count() == 1
+    ready = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
+    assert not ready['identificationJobs']
+    assert ready['tasks'][0]['kind'] == 'IDENTIFICATION'
+
+
+def test_identification_pdf_uses_website_link_snapshotted_at_settlement(api, admin_client, db):
+    import pymupdf
+    import qrcode
+    from app.jobs import run_one
+    from app.config import get_config, identification_default_website_url
+    from app.models import Job
+
+    order, _ = _seed_checkout(db)
+    url = 'https://example.test/campus?from=order%2Fsheet#upload'
+    workflow = get_config(db, 'workflow')
+    workflow.data = {**workflow.data, 'orderIdentificationQrUrl': '/api/v1/assets/legacy/content'}
+    db.commit()
+    section = api(admin_client, '/admin/config', method='GET').json()['data']['sections']['workflow']
+    assert section['orderIdentificationDefaultWebsiteUrl'] == identification_default_website_url()
+    assert 'orderIdentificationQrUrl' not in section
+    for invalid in ('javascript:alert(1)', 'https://user:pass@example.test/', 'https://example.test/a b',
+                    'https:///example.test/', 'https://example.test/' + '页' * 90):
+        response = api(admin_client, '/admin/config/workflow', {
+            'expectedVersion': section['version'], 'orderIdentificationWebsiteUrl': invalid,
+        }, method='PATCH')
+        assert response.status_code == 422, response.text
+    saved = api(admin_client, '/admin/config/workflow', {
+        'expectedVersion': section['version'],
+        'orderIdentificationEnabled': True,
+        'orderIdentificationWebsiteUrl': f'  {url}  ',
+    }, method='PATCH')
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['data']['orderIdentificationWebsiteUrl'] == url
+    _settle_real(api, admin_client, order)
+    job = db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=order.id).one()
+    assert job.data['website'] == url
+
+    cleared = api(admin_client, '/admin/config/workflow', {
+        'expectedVersion': saved.json()['data']['version'],
+        'orderIdentificationWebsiteUrl': '',
+    }, method='PATCH')
+    assert cleared.status_code == 200, cleared.text
+    assert run_one(('ORDER_IDENTIFICATION',)) is True
+    queue = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
+    sheet = queue['tasks'][0]
+    pdf = admin_client.get(f"/api/v1/assets/{sheet['artifactId']}/content")
+    assert pdf.status_code == 200, pdf.text
+    with pymupdf.open(stream=pdf.content, filetype='pdf') as document:
+        page = document[0]
+        qr = qrcode.QRCode(border=4)
+        qr.add_data(url)
+        matrix = qr.get_matrix()
+        modules = max(page.get_drawings(), key=lambda path: len(path['items']))
+        assert len(modules['items']) == sum(sum(row) for row in matrix)
+        x0, y0, x1, y1 = modules['rect']
+        corners = [path for path in page.get_drawings() if (
+            len(path['items']) == 2 and all(item[0] == 'l' for item in path['items'])
+            and path['rect'].width > 5 and path['rect'].height > 5
+            and path['rect'].y0 > 700
+        )]
+        assert len(corners) == 4
+        module_width = (x1 - x0) / (len(matrix) - 8)
+        frame_gaps = (
+            x0 - min(path['rect'].x0 for path in corners),
+            max(path['rect'].x1 for path in corners) - x1,
+            y0 - min(path['rect'].y0 for path in corners),
+            max(path['rect'].y1 for path in corners) - y1,
+        )
+        for gap in frame_gaps:
+            assert 4 <= gap / module_width <= 4.5
+    next_order, _ = _seed_checkout(db)
+    _settle_real(api, admin_client, next_order, key='website-link-default-settlement')
+    fallback_job = db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=next_order.id).one()
+    assert fallback_job.data['website'] == identification_default_website_url()
