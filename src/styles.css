@@ -2651,6 +2651,9 @@ input[type="date"],
   gap: 22px;
   margin-bottom: 27px;
 }
+.customer-orders > .empty {
+  grid-column: 1 / -1;
+}
 .customer-order-card {
   display: block;
   background: white;

@@ -377,6 +377,43 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
   await expect(page.getByRole("button", { name: "确认记录当前尝试" })).toBeEnabled();
 });
 
+test("我的订单空状态在整个列表内居中", async ({ page }, info) => {
+  const { config, orders } = createDemo();
+  let items: typeof orders = [];
+  await page.route("**/api/v1/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const data = path === "/api/v1/public/config" ? config : { items };
+    return route.fulfill({ json: { data } });
+  });
+
+  await page.goto(`${baseURL}/u/orders`);
+  const list = page.locator(".customer-orders");
+  const emptyTitle = list.getByRole("heading", { name: "还没有这样的订单" });
+  const expectCentered = async () => {
+    await expect(emptyTitle).toBeVisible();
+    const listBox = (await list.boundingBox())!;
+    const titleBox = (await emptyTitle.boundingBox())!;
+    const centerOffset = titleBox.x + titleBox.width / 2 - (listBox.x + listBox.width / 2);
+    expect(Math.abs(centerOffset)).toBeLessThanOrEqual(1);
+  };
+
+  for (const width of [1440, 768, 430, 390, 375, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectCentered();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    if (width === 390 || width === 1440) {
+      await page.screenshot({ path: info.outputPath(`customer-orders-empty-${width}.png`), scale: "css" });
+    }
+  }
+
+  items = [orders[1]];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await expect(list.locator(".customer-order-card")).toHaveCount(1);
+  await page.getByPlaceholder("搜索提取码或文件名").fill("no-matching-order");
+  await expectCentered();
+});
+
 test("用户订单在实际开印后自动显示打印中并可筛选", async ({ page }, info) => {
   const { config, buildings, slots, orders } = createDemo();
   const order = { ...orders[1], actualStartedAt: null as string | null };
