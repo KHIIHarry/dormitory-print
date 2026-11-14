@@ -182,19 +182,6 @@ def staff_client(client_factory, db, account_factory, capabilities):
     return client
 
 
-def customer_client_for(client_factory, db, account):
-    from app.core import token_hash
-
-    token = secrets.token_urlsafe(32)
-    db.add(AuthSession(kind='CUSTOMER', account_id=account.id, principal_id=account.principal_id,
-                       token_hash=token_hash(token), expires_at=utcnow() + timedelta(days=1)))
-    db.commit()
-    client = client_factory()
-    client.cookies.set('dormprint_account_session', token)
-    client.account = account
-    return client
-
-
 # ---------------------------------------------------------------------------
 # Promotion records export (legacy frontend paths)
 # ---------------------------------------------------------------------------
@@ -365,59 +352,30 @@ def test_export_row_limit_is_enforced_before_queueing(admin_client, api, db, mon
 
 
 # ---------------------------------------------------------------------------
-# Customer personal data export (single ExportJob model)
+# Retired customer personal-data export
 # ---------------------------------------------------------------------------
 
 
-def test_customer_personal_export_only_contains_own_redacted_data(
-        customer_client, api, db, account_factory, client_factory):
-    mine = make_order(db, principal=db.get(Principal, customer_client.account.principal_id),
-                      status='DELIVERED', nickname='我的订单', phone='13611112222')
-    other_account = account_factory(email='other@example.test')
-    other = make_order(db, principal=db.get(Principal, other_account.principal_id),
-                       status='DELIVERED', nickname='别人订单', phone='13699998888')
+def test_personal_export_endpoints_are_removed_and_legacy_jobs_do_not_generate_files(
+    customer_client, api, db,
+):
+    job = ExportJob(account_id=customer_client.account.id, kind='PERSONAL_DATA',
+                    status='QUEUED', expires_at=utcnow() + timedelta(hours=1), data={})
+    db.add(job)
+    db.commit()
+    for method, path in (
+        ('POST', '/customer/account/export-request'),
+        ('POST', '/customer/account/exports'),
+        ('GET', f'/customer/account/exports/{job.id}'),
+        ('GET', f'/customer/account/exports/{job.id}/download'),
+    ):
+        response = api(customer_client, path, method=method)
+        assert response.status_code == 404, response.text
 
-    created = api(customer_client, '/customer/account/exports', {})
-    assert created.status_code == 200, created.text
-    job_id = created.json()['data']['exportJobId']
-    process_job(job_id)
-
-    download = api(customer_client, f'/customer/account/exports/{job_id}/download', method='GET')
-    assert download.status_code == 200, download.text
-    text = download.content.decode('utf-8-sig')
-    assert mine.id in text
-    assert other.id not in text
-    assert 'other@example.test' not in text
-    assert '13699998888' not in text
-    assert 'password' not in text.lower()
-    assert 'token' not in text.lower()
-    assert '13611112222' in text
-
-    other_client = customer_client_for(client_factory, db, other_account)
-    from conftest import api_request
-    denied = api_request(other_client, f'/customer/account/exports/{job_id}', method='GET')
-    assert denied.status_code == 404
-
-
-def test_legacy_auth_export_request_reuses_the_same_export_job_model(customer_client, api, db):
-    created = api(customer_client, '/customer/account/export-request', {'reason': '旧入口'})
-    assert created.status_code == 200, created.text
-    job_id = created.json()['data']['exportJobId']
-
-    # The legacy auth route only persisted the row; our status route must enqueue
-    # the same shared ExportJob instead of creating a second export system.
-    status = api(customer_client, f'/customer/account/exports/{job_id}', method='GET')
-    assert status.status_code == 200, status.text
-    assert status.json()['data']['id'] == job_id
-    refresh(db)
-    job = db.get(ExportJob, job_id)
-    assert job.kind == 'PERSONAL_DATA' and job.account_id == customer_client.account.id
-    queued = db.scalar(select(Job).where(Job.business_key == f'export:{job_id}'))
-    assert queued is not None and queued.kind == 'EXPORT'
-
-    process_job(job_id)
-    status = api(customer_client, f'/customer/account/exports/{job_id}', method='GET')
-    assert status.json()['data']['status'] == 'READY'
+    process_job(job.id)
+    db.refresh(job)
+    assert job.status == 'EXPIRED'
+    assert job.storage_key is None
 
 
 def test_expired_or_other_export_download_is_rejected(admin_client, api, db):

@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { Filter } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import {
   Button,
@@ -61,6 +62,10 @@ const customerActions: Record<string, string> = {
 export function CustomersPage() {
   const access = useAdminAccess("customer.manage");
   const [query, setQuery] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreId = useId();
+  const activeFilters = new URLSearchParams(query);
+  activeFilters.delete("q");
   const resource = useGrowthResource<{ items: CustomerRecord[] }>(
     `/admin/customers${query}`,
   );
@@ -76,47 +81,80 @@ export function CustomersPage() {
     <div className="admin-growth">
       <PageHeading
         title="客户管理"
-        description="按验证状态、业务记录及邀请码查找客户。联系方式仅显示掩码。"
+        description="按客户名称、编号或邮箱搜索，也可按验证状态和业务记录筛选。"
       />
       <AccessState access={access} />
       <Panel>
-        <form onSubmit={submit} className="growth-filter">
-          <Field label="客户搜索">
-            <input name="q" placeholder="客户名称或编号" />
-          </Field>
-          <Field label="邮箱验证">
-            <select name="verified">
-              <option value="">全部</option>
-              <option value="true">已验证</option>
-              <option value="false">未验证</option>
-            </select>
-          </Field>
-          <Field label="账号状态">
-            <select name="status">
-              <option value="">全部</option>
-              {Object.entries(statuses).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="邀请码">
-            <input name="inviteCode" />
-          </Field>
-          <Field label="注册开始日期">
-            <input type="date" name="createdFrom" />
-          </Field>
-          <Field label="注册结束日期">
-            <input type="date" name="createdTo" />
-          </Field>
-          <Field label="最低订单数">
-            <input type="number" name="minOrders" min="0" step="1" />
-          </Field>
-          <Field label="最低券数">
-            <input type="number" name="minCoupons" min="0" step="1" />
-          </Field>
-          <Button type="submit">筛选客户</Button>
+        <form
+          className="customer-filter"
+          onSubmit={submit}
+          onInvalid={(event) => {
+            if (moreOpen) return;
+            setMoreOpen(true);
+            const invalid =
+              event.currentTarget.querySelector<HTMLElement>("input:invalid");
+            requestAnimationFrame(() => invalid?.focus());
+          }}
+        >
+          <div className="customer-search-row">
+            <Field label="客户搜索">
+              <input
+                type="search"
+                name="q"
+                placeholder="客户名称、编号或邮箱"
+              />
+            </Field>
+            <div className="customer-search-actions">
+              <Button
+                variant="secondary"
+                type="button"
+                aria-expanded={moreOpen}
+                aria-controls={moreId}
+                onClick={() => setMoreOpen((open) => !open)}
+              >
+                <Filter size={16} />
+                更多筛选
+                {activeFilters.size > 0 && (
+                  <span>已应用 {activeFilters.size} 项</span>
+                )}
+              </Button>
+              <Button type="submit">筛选客户</Button>
+            </div>
+          </div>
+          <div id={moreId} className="customer-extra-filters" hidden={!moreOpen}>
+            <Field label="邮箱验证">
+              <select name="verified">
+                <option value="">全部</option>
+                <option value="true">已验证</option>
+                <option value="false">未验证</option>
+              </select>
+            </Field>
+            <Field label="账号状态">
+              <select name="status">
+                <option value="">全部</option>
+                {Object.entries(statuses).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="邀请码">
+              <input name="inviteCode" />
+            </Field>
+            <Field label="注册开始日期">
+              <input type="date" name="createdFrom" />
+            </Field>
+            <Field label="注册结束日期">
+              <input type="date" name="createdTo" />
+            </Field>
+            <Field label="最低订单数">
+              <input type="number" name="minOrders" min="0" step="1" />
+            </Field>
+            <Field label="最低券数">
+              <input type="number" name="minCoupons" min="0" step="1" />
+            </Field>
+          </div>
         </form>
       </Panel>
       <ResourceState {...resource} empty={resource.data?.items.length === 0} />
@@ -129,7 +167,7 @@ export function CustomersPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>客户 / 掩码邮箱</th>
+                    <th>客户 / 邮箱</th>
                     <th>验证 / 状态</th>
                     <th>订单 / 券 / 邀请</th>
                     <th>邀请码</th>
@@ -142,7 +180,7 @@ export function CustomersPage() {
                     <tr key={c.id}>
                       <td>
                         <b>{c.displayName}</b>
-                        <small>{c.emailMasked}</small>
+                        <small className="customer-email">{c.email || c.emailMasked}</small>
                       </td>
                       <td>
                         {c.verified ? "已验证" : "未验证"} ·{" "}
@@ -205,7 +243,7 @@ export function CustomerDetailPage() {
             <dl className="growth-facts">
               <div>
                 <dt>邮箱</dt>
-                <dd>{customer.emailMasked}</dd>
+                <dd className="customer-email">{customer.email || customer.emailMasked}</dd>
               </div>
               <div>
                 <dt>验证状态</dt>

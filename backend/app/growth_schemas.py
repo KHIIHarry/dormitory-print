@@ -422,6 +422,7 @@ class CustomerOrderSummary(DTO):
 
 
 class CustomerRecord(CustomerAccountDTO):
+    email: str
     created_at: datetime
     order_count: int
     coupon_count: int

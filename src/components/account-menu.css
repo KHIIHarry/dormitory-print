@@ -52,6 +52,17 @@
 .account-menu-panel svg {
   color: var(--primary);
 }
+@media (min-width: 768px) {
+  .account-menu-panel > .account-menu-mobile-link {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  .account-menu-trigger {
+    min-width: 44px;
+    justify-content: center;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .account-menu-panel,
   .account-menu-trigger > svg {

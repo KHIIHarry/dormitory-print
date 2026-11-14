@@ -525,10 +525,10 @@ test.describe("one customer login (real API contract, not backend acceptance)", 
 
     // The invite QR is generated locally from the authorized invite URL and is
     // not rendered until the explicit preview action.
-    await page
-      .getByRole("link", { name: "邀请好友", exact: true })
-      .last()
-      .click();
+    const invite = page.getByRole("link", { name: "邀请好友", exact: true });
+    if (!(await invite.isVisible()))
+      await page.getByRole("button", { name: "我的账户", exact: true }).click();
+    await invite.click();
     await expect(page).toHaveURL(`${base}/u/invite`);
     await expect(
       page.getByRole("button", { name: "邀请二维码", exact: true }),
@@ -542,7 +542,7 @@ test.describe("one customer login (real API contract, not backend acceptance)", 
       }),
     ).toBeVisible();
 
-    await page.goto(`${base}/u/account`);
+    await page.goto(`${base}/u/account/security`);
     await page.getByRole("button", { name: "退出客户账号" }).click();
     await expect(page).toHaveURL(`${base}/u/`);
 

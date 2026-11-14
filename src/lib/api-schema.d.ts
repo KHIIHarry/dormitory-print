@@ -2764,74 +2764,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/customer/account/export-request": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Customer Export Request */
-        post: operations["customer_export_request_api_v1_customer_account_export_request_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/customer/account/exports": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Customer Export Create */
-        post: operations["customer_export_create_api_v1_customer_account_exports_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/customer/account/exports/{job_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Customer Export Status */
-        get: operations["customer_export_status_api_v1_customer_account_exports__job_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/customer/account/exports/{job_id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Customer Export Download */
-        get: operations["customer_export_download_api_v1_customer_account_exports__job_id__download_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/customer/account/import-order": {
         parameters: {
             query?: never;
@@ -5330,14 +5262,6 @@ export interface components {
             /** Version */
             version: number;
         };
-        /** CustomerExportCreate */
-        CustomerExportCreate: {
-            /**
-             * Reason
-             * @default 个人资料导出
-             */
-            reason: string;
-        };
         /** CustomerList */
         CustomerList: {
             /** Items */
@@ -5394,6 +5318,8 @@ export interface components {
             createdAt: string;
             /** Displayname */
             displayName: string;
+            /** Email */
+            email: string;
             /** Emailmasked */
             emailMasked: string;
             /** Id */
@@ -6156,12 +6082,6 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
-        /** Envelope[ExportRequestResult] */
-        Envelope_ExportRequestResult_: {
-            data: components["schemas"]["ExportRequestResult"];
-            /** Requestid */
-            requestId: string;
-        };
         /** Envelope[FinanceSummary] */
         Envelope_FinanceSummary_: {
             data: components["schemas"]["FinanceSummary"];
@@ -6719,33 +6639,6 @@ export interface components {
              * @default false
              */
             truncated: boolean;
-        };
-        /** ExportRequestInput */
-        ExportRequestInput: {
-            /** Fields */
-            fields?: string[] | null;
-            /**
-             * Reason
-             * @default 个人资料导出
-             */
-            reason: string;
-        };
-        /** ExportRequestResult */
-        ExportRequestResult: {
-            /**
-             * Expiresat
-             * Format: date-time
-             */
-            expiresAt: string;
-            /** Exportjobid */
-            exportJobId: string;
-            /**
-             * Message
-             * @default 导出申请已受理，文件生成后可受权下载，排队不代表已完成
-             */
-            message: string;
-            /** Status */
-            status: string;
         };
         /** FileView */
         FileView: {
@@ -20045,202 +19938,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_DeletionRequestList_"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    customer_export_request_api_v1_customer_account_export_request_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExportRequestInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_ExportRequestResult_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    customer_export_create_api_v1_customer_account_exports_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CustomerExportCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_ExportCreated_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    customer_export_status_api_v1_customer_account_exports__job_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_ExportJobView_"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    customer_export_download_api_v1_customer_account_exports__job_id__download_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */

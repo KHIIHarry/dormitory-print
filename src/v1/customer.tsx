@@ -3,11 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
-  Download,
   FileClock,
   RefreshCw,
   RotateCcw,
-  ShieldAlert,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -35,11 +33,6 @@ import {
 import { DEMO, useStore } from "../lib/store";
 import type { Order } from "../lib/types";
 import "./customer.css";
-
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(
-  /\/$/,
-  "",
-);
 
 /* ------------------------------------------------------------------------- */
 /* Local V1 DTOs. Shared src/lib/types.ts is owned by Codex; these interfaces  */
@@ -118,18 +111,6 @@ type V1Order = Order & {
   capabilities?: Record<string, unknown>;
 };
 
-type ExportJob = {
-  id: string;
-  status: string;
-  kind?: string;
-  createdAt?: string;
-  expiresAt?: string | null;
-  error?: string | null;
-  downloadUrl?: string | null;
-  rowCount?: number | null;
-  truncated?: boolean;
-};
-
 function deletionBlockerLabel(blocker: string) {
   if (blocker.startsWith("LAST_SUPER_ADMIN"))
     return "唯一超级管理员须先完成权限交接";
@@ -141,22 +122,6 @@ function deletionBlockerLabel(blocker: string) {
     return "仍有待结算工资";
   return "仍有待处理的业务或账务事项";
 }
-
-type DeletionRequestView = {
-  id: string;
-  status: string;
-  createdAt?: string;
-  requestedAt?: string;
-  reason?: string;
-  blockers?: string[];
-  reviewedAt?: string | null;
-  recoveryUntil?: string | null;
-};
-
-type DeletionRequestList = {
-  items: DeletionRequestView[];
-  nextCursor?: string | null;
-};
 
 const orderActionCandidates = [
   // Canonical action from app/commerce.py order_view.
@@ -827,105 +792,16 @@ export function CustomerAfterSalesPage() {
   );
 }
 
-/* ------------------------------------------------------------------------- */
-/* Personal data export and account deletion request                          */
-/* ------------------------------------------------------------------------- */
-
-export function PersonalDataPanel() {
+function AccountDeletionForm() {
   const navigate = useNavigate();
   const identity = useIdentity();
-  const verified =
-    identity.customer.authKind === "REGISTERED" &&
-    !!identity.customer.account?.verified;
-  const [job, setJob] = useState<ExportJob | null>(null);
-  const [deletions, setDeletions] = useState<DeletionRequestView[]>([]);
-  const [listLoading, setListLoading] = useState(true);
-  const [listError, setListError] = useState("");
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const [recoveryMessage, setRecoveryMessage] = useState("");
   const action = useV1Action();
-  const sequence = useRef(0);
 
-  const loadDeletions = useCallback(async () => {
-    const seq = ++sequence.current;
-    setListLoading(true);
-    setListError("");
-    try {
-      const result = await request<DeletionRequestList | DeletionRequestView[]>(
-        "/customer/account/deletion-requests",
-      );
-      if (seq !== sequence.current) return;
-      const items = Array.isArray(result) ? result : result.items;
-      setDeletions(Array.isArray(items) ? items : []);
-    } catch (e) {
-      if (seq !== sequence.current) return;
-      setListError(errorMessage(e));
-    } finally {
-      if (seq === sequence.current) setListLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (DEMO || !verified) {
-      setListLoading(false);
-      return;
-    }
-    void loadDeletions();
-  }, [DEMO, verified, loadDeletions]);
-
-  useEffect(() => {
-    if (!job || !["QUEUED", "PROCESSING"].includes(job.status)) return;
-    let active = true;
-    const poll = async () => {
-      if (!active || document.hidden || !navigator.onLine) return;
-      try {
-        const next = await request<ExportJob>(
-          `/customer/account/exports/${encodeURIComponent(job.id)}`,
-        );
-        if (active) setJob(next);
-      } catch {
-        // The job remains in its last confirmed state; the next tick retries.
-      }
-    };
-    const timer = window.setInterval(poll, 3000);
-    const onVisible = () => void poll();
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onVisible);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onVisible);
-    };
-  }, [job]);
-
-  const requestExport = async () => {
-    await action.run("export", async () => {
-      const created = await mutation<{ exportJobId: string }>(
-        "/customer/account/exports",
-        {},
-      );
-      setJob({ id: created.exportJobId, status: "QUEUED" });
-      try {
-        const next = await request<ExportJob>(
-          `/customer/account/exports/${encodeURIComponent(created.exportJobId)}`,
-        );
-        setJob(next);
-      } catch {
-        // The creation result is authoritative; the status poll will retry.
-      }
-      action.setSuccess(
-        "导出申请已提交，正在服务端生成。生成完成后可下载，文件到期会自动失效。",
-      );
-    });
-  };
-
-  const requestDeletion = async () => {
-    if (!confirmed) {
-      action.setError("请先确认已了解注销与 7 天恢复期规则。");
-      return;
-    }
+  const requestDeletion = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!confirmed || DEMO) return;
     await action.run("deletion", async () => {
       const result = await mutation<{
         status: string;
@@ -940,17 +816,10 @@ export function PersonalDataPanel() {
         action.setError(
           `暂不能注销：${[...new Set(reasons)].join("；") || result.message}`,
         );
-        await loadDeletions();
         return;
       }
       if (result.status !== "RECOVERY")
-        throw new Error("注销状态需要核实，请刷新记录后再操作。");
-      setReason("");
-      setConfirmed(false);
-      setRecoveryMessage(
-        `${result.message}${result.recoveryUntil ? ` 恢复截止：${formatTime(result.recoveryUntil)}。` : ""}`,
-      );
-      setDeletions([]);
+        throw new Error("注销状态需要核实，请稍后重试。");
       identity.clearCustomer();
       navigate("/u/account/login", {
         replace: true,
@@ -965,268 +834,71 @@ export function PersonalDataPanel() {
     });
   };
 
-  const pendingDeletion = deletions.find((item) =>
-    ["RECOVERY"].includes(item.status),
-  );
-  const downloadUrl = job?.downloadUrl
-    ? job.downloadUrl
-    : job
-      ? `${API_BASE}/customer/account/exports/${encodeURIComponent(job.id)}/download`
-      : "";
-  const exportStatus =
-    job?.status === "READY"
-      ? "已就绪，可下载"
-      : job?.status === "PROCESSING"
-        ? "生成中"
-        : job?.status === "QUEUED"
-          ? "排队中"
-          : job?.status === "FAILED"
-            ? "生成失败"
-            : job?.status === "EXPIRED"
-              ? "已过期"
-              : job
-                ? `状态 ${job.status}`
-                : "";
-
   return (
-    <div className="v1-account-data">
-      <Panel title="导出我的个人资料">
-        <p>
-          由服务端生成受控导出，仅包含账号资料与业务记录白名单字段；不包含密码、会话凭据、原始打印文件或他人资料。导出文件有有效期，请及时下载。
-        </p>
-        {DEMO ? (
-          <Notice type="warning">
-            演示模式不提供真实个人资料导出。连接真实服务后才能申请、查询和下载。
-          </Notice>
-        ) : !verified ? (
-          <Notice>登录并验证邮箱后才能申请导出本人资料。</Notice>
-        ) : (
-          <>
-            <TaskFeedback state={action} label="正在申请资料导出" />
+    <Panel className="account-deletion-panel" title="申请注销账号">
+      <p>
+        所有订单已结束且没有待处理的售后、退款或账务事项时，可自助注销。注销后退出所有设备，7
+        天内使用原账号密码登录即可恢复。期满后按数据保留规则处理。唯一超级管理员须先完成管理权限交接。
+      </p>
+      {DEMO ? (
+        <Notice type="warning">正式环境满足条件后，提交即进入 7 天恢复期。</Notice>
+      ) : (
+        <>
+          {action.uncertain ? (
+            <Notice type="warning">
+              <div className="account-deletion-uncertain">
+                <span role="alert">
+                  暂时无法确认注销结果。请刷新页面核实登录状态。若已退出，使用原账号登录即可恢复。
+                </span>
+                <Button variant="secondary" onClick={() => window.location.reload()}>
+                  刷新页面
+                </Button>
+              </div>
+            </Notice>
+          ) : (
+            <TaskFeedback state={action} label="正在提交注销申请" />
+          )}
+          <form className="v1-form" onSubmit={(event) => void requestDeletion(event)}>
+            <Field label="注销原因（选填）">
+              <textarea
+                rows={2}
+                maxLength={300}
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="可说明注销原因"
+              />
+            </Field>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(event) => setConfirmed(event.target.checked)}
+              />
+              <span>
+                我已了解注销后将退出所有设备，7
+                天内登录可恢复，期满后无法通过登录找回。
+              </span>
+            </label>
             <div className="v1-actions">
               <Button
-                busy={action.pending === "export"}
-                busyLabel="正在申请…"
-                disabled={!!action.pending || !!job}
-                onClick={() => void requestExport()}
+                type="submit"
+                variant="danger"
+                busy={action.pending === "deletion"}
+                busyLabel="正在提交…"
+                disabled={!!action.pending || action.uncertain || !confirmed}
               >
-                <Download size={16} />
-                申请导出我的资料
+                <Trash2 size={16} />
+                提交注销申请
               </Button>
-              {job && (
-                <Button
-                  variant="secondary"
-                  disabled={!!action.pending}
-                  onClick={() => {
-                    setJob(null);
-                    action.clear();
-                  }}
-                >
-                  重新申请
-                </Button>
-              )}
             </div>
-            {job && (
-              <div className="v1-job" aria-live="polite">
-                <div>
-                  <FileClock size={18} />
-                  <span>
-                    <strong>{exportStatus}</strong>
-                    <small>导出任务 {job.id}</small>
-                    {job.expiresAt && (
-                      <small>有效期至 {formatTime(job.expiresAt)}</small>
-                    )}
-                    {typeof job.rowCount === "number" && (
-                      <small>
-                        记录 {job.rowCount} 行
-                        {job.truncated ? "（已达导出上限，内容被截断）" : ""}
-                      </small>
-                    )}
-                    {job.error && <small role="alert">{job.error}</small>}
-                  </span>
-                </div>
-                {job.status === "READY" && (
-                  <a className="btn secondary" href={downloadUrl} download>
-                    <Download size={16} />
-                    下载资料
-                  </a>
-                )}
-                {job.status === "FAILED" && (
-                  <Button
-                    variant="secondary"
-                    disabled={!!action.pending}
-                    onClick={() => void requestExport()}
-                  >
-                    <RefreshCw size={15} />
-                    重试导出
-                  </Button>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
-
-      <Panel title="申请注销账号">
-        <p>
-          无需管理员审核。所有订单已结束且没有待处理的售后、退款或账务事项时，可自助注销。注销后退出所有设备；7
-          天内使用原账号密码登录即可恢复，期满后按数据保留规则处理。唯一超级管理员须先完成管理权限交接。
-        </p>
-        {recoveryMessage && (
-          <Notice type="success">
-            {recoveryMessage} <Link to="/u/account/login">前往登录恢复</Link>
-          </Notice>
-        )}
-        {DEMO ? (
-          <Notice type="warning">
-            演示模式不执行真实注销。正式环境满足条件后立即进入 7 天恢复期。
-          </Notice>
-        ) : !verified ? (
-          <Notice>登录并验证邮箱后才能提交注销申请。</Notice>
-        ) : (
-          <>
-            <TaskFeedback state={action} label="正在提交注销申请" />
-            {pendingDeletion ? (
-              <div className="v1-job" role="status">
-                <div>
-                  <ShieldAlert size={18} />
-                  <span>
-                    <strong>账号处于 7 天恢复期</strong>
-                    <small>
-                      提交于{" "}
-                      {formatTime(
-                        pendingDeletion.createdAt ||
-                          pendingDeletion.requestedAt,
-                      )}
-                    </small>
-                    {(pendingDeletion.blockers || []).length > 0 && (
-                      <small>
-                        待处理事项：
-                        {pendingDeletion.blockers
-                          ?.map(deletionBlockerLabel)
-                          .join("、")}
-                      </small>
-                    )}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="v1-form">
-                <Field label="注销原因（选填）">
-                  <textarea
-                    rows={2}
-                    maxLength={300}
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    placeholder="可说明注销原因"
-                  />
-                </Field>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={confirmed}
-                    onChange={(e) => setConfirmed(e.target.checked)}
-                  />
-                  <span>
-                    我已了解注销后将退出所有设备，7
-                    天内登录可恢复，期满后无法通过登录找回。
-                  </span>
-                </label>
-                <div className="v1-actions">
-                  <Button
-                    variant="danger"
-                    busy={action.pending === "deletion"}
-                    busyLabel="正在提交…"
-                    disabled={!!action.pending || !confirmed}
-                    onClick={() => void requestDeletion()}
-                  >
-                    <Trash2 size={16} />
-                    提交注销申请
-                  </Button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
-
-      <Panel
-        title="我的注销申请"
-        action={
-          !DEMO && verified ? (
-            <button
-              className="text-button"
-              disabled={listLoading}
-              onClick={() => void loadDeletions()}
-            >
-              <RefreshCw size={14} />
-              刷新
-            </button>
-          ) : undefined
-        }
-      >
-        {DEMO ? (
-          <Notice>演示模式不读取真实注销申请。</Notice>
-        ) : !verified ? (
-          <Notice>登录后查看本人注销申请。</Notice>
-        ) : listLoading && deletions.length === 0 ? (
-          <Loading label="正在读取注销申请…" />
-        ) : listError ? (
-          <ErrorState message={listError} retry={() => void loadDeletions()} />
-        ) : deletions.length === 0 ? (
-          <Empty
-            title="还没有注销申请"
-            text="如确需注销，可在上方提交；提交后不会立即删除。"
-          />
-        ) : (
-          <ul className="v1-deletions">
-            {deletions.map((item) => (
-              <li key={item.id}>
-                <span
-                  className={`v1-status ${
-                    ["COMPLETED", "DELETED"].includes(item.status)
-                      ? "terminal"
-                      : ""
-                  }`}
-                >
-                  {item.status === "RECOVERY"
-                    ? "7 天恢复期"
-                    : item.status === "RECOVERED"
-                      ? "已登录恢复"
-                      : item.status === "BLOCKED"
-                        ? "存在未完成事项"
-                        : item.status === "FINALIZED"
-                          ? "恢复期已结束"
-                          : item.status === "REQUESTED" ||
-                              item.status === "PENDING_REVIEW"
-                            ? "等待管理员审核"
-                            : item.status === "UNDER_REVIEW"
-                              ? "管理员审核中"
-                              : item.status === "APPROVED"
-                                ? "审核通过，等待执行"
-                                : item.status === "COMPLETED" ||
-                                    item.status === "DELETED"
-                                  ? "已按保留规则处理"
-                                  : item.status === "REJECTED"
-                                    ? "未通过审核"
-                                    : item.status === "CANCELLED"
-                                      ? "已撤回"
-                                      : item.status}
-                </span>
-                <span>
-                  提交于 {formatTime(item.createdAt || item.requestedAt)}
-                  {item.reason ? ` · ${item.reason}` : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-    </div>
+          </form>
+        </>
+      )}
+    </Panel>
   );
 }
 
-function AccountDataGate({ children }: { children: React.ReactNode }) {
+function AccountDeletionGate({ children }: { children: React.ReactNode }) {
   const { customer } = useIdentity();
   return customer.authKind === "REGISTERED" && customer.account?.verified ? (
     <>{children}</>
@@ -1234,7 +906,7 @@ function AccountDataGate({ children }: { children: React.ReactNode }) {
     <Panel>
       <Empty
         title="登录已验证的账号"
-        text="个人资料导出与注销申请需要邮箱验证的本人账号。"
+        text="注销账号需要本人登录并验证邮箱。"
         action={
           <div className="account-actions">
             <Link className="btn" to="/u/account/login">
@@ -1248,7 +920,7 @@ function AccountDataGate({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function CustomerAccountDataPage() {
+export function CustomerAccountDeletionPage() {
   return (
     <main className="content-page">
       <Link className="back-link" to="/u/account">
@@ -1256,12 +928,12 @@ export function CustomerAccountDataPage() {
         返回账号设置
       </Link>
       <PageHeading
-        title="个人资料与账号数据"
-        description="导出个人资料，或在完成所有订单后自助注销账号。"
+        title="注销账号"
+        description="完成所有订单并处理待办事项后，可自助注销。"
       />
-      <AccountDataGate>
-        <PersonalDataPanel />
-      </AccountDataGate>
+      <AccountDeletionGate>
+        <AccountDeletionForm />
+      </AccountDeletionGate>
     </main>
   );
 }

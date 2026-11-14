@@ -4553,19 +4553,6 @@
         "title": "CustomerAccountView",
         "type": "object"
       },
-      "CustomerExportCreate": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "default": "个人资料导出",
-            "maxLength": 500,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "title": "CustomerExportCreate",
-        "type": "object"
-      },
       "CustomerList": {
         "additionalProperties": false,
         "properties": {
@@ -4688,6 +4675,10 @@
             "title": "Displayname",
             "type": "string"
           },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
           "emailMasked": {
             "title": "Emailmasked",
             "type": "string"
@@ -4764,6 +4755,7 @@
           "status",
           "version",
           "notificationPreferences",
+          "email",
           "createdAt",
           "orderCount",
           "couponCount",
@@ -6968,24 +6960,6 @@
         "title": "Envelope[ExportJobView]",
         "type": "object"
       },
-      "Envelope_ExportRequestResult_": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ExportRequestResult"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "data",
-          "requestId"
-        ],
-        "title": "Envelope[ExportRequestResult]",
-        "type": "object"
-      },
       "Envelope_FinanceSummary_": {
         "additionalProperties": false,
         "properties": {
@@ -8578,63 +8552,6 @@
           "expiresAt"
         ],
         "title": "ExportJobView",
-        "type": "object"
-      },
-      "ExportRequestInput": {
-        "additionalProperties": false,
-        "properties": {
-          "fields": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fields"
-          },
-          "reason": {
-            "default": "个人资料导出",
-            "maxLength": 500,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "title": "ExportRequestInput",
-        "type": "object"
-      },
-      "ExportRequestResult": {
-        "additionalProperties": false,
-        "properties": {
-          "expiresAt": {
-            "format": "date-time",
-            "title": "Expiresat",
-            "type": "string"
-          },
-          "exportJobId": {
-            "title": "Exportjobid",
-            "type": "string"
-          },
-          "message": {
-            "default": "导出申请已受理，文件生成后可受权下载，排队不代表已完成",
-            "title": "Message",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "exportJobId",
-          "status",
-          "expiresAt"
-        ],
-        "title": "ExportRequestResult",
         "type": "object"
       },
       "FileView": {
@@ -34481,278 +34398,6 @@
           }
         },
         "summary": "Customer Deletion Requests"
-      }
-    },
-    "/customer/account/export-request": {
-      "post": {
-        "operationId": "customer_export_request_api_v1_customer_account_export_request_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExportRequestInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_ExportRequestResult_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Customer Export Request",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/customer/account/exports": {
-      "post": {
-        "operationId": "customer_export_create_api_v1_customer_account_exports_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CustomerExportCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_ExportCreated_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Customer Export Create",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/customer/account/exports/{job_id}": {
-      "get": {
-        "operationId": "customer_export_status_api_v1_customer_account_exports__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_ExportJobView_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Customer Export Status"
-      }
-    },
-    "/customer/account/exports/{job_id}/download": {
-      "get": {
-        "operationId": "customer_export_download_api_v1_customer_account_exports__job_id__download_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Customer Export Download"
       }
     },
     "/customer/account/import-order": {

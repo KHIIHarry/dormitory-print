@@ -750,24 +750,40 @@ def test_customer_coupon_route_only_returns_own_account(client_factory, db, api)
     assert items[0]['minSpendCents'] == 100
 
 
-def test_admin_customer_list_is_masked_and_counts_business(admin_client, account_factory, api):
+def test_admin_customer_search_matches_email_and_returns_full_address(admin_client, account_factory, api):
     account = account_factory(email='listed-customer@example.invalid', invite_code=uid('i'))
-    response = api(admin_client, '/admin/customers?q=listed-customer', method='GET')
+    response = api(admin_client, '/admin/customers?q=LISTED-CUSTOMER%40EXAMPLE.INVALID', method='GET')
     assert response.status_code == 200, response.text
     items = response.json()['data']['items']
     assert len(items) == 1
     assert items[0]['id'] == account.id
     assert items[0]['emailMasked'] == 'l***@example.invalid'
-    assert 'listed-customer@' not in response.text
+    assert items[0]['email'] == account.email
     assert items[0]['status'] == 'ACTIVE'
     detail = api(admin_client, f'/admin/customers/{account.id}', method='GET')
     assert detail.status_code == 200
     assert detail.json()['data']['orderCount'] == 0
+    assert detail.json()['data']['email'] == account.email
+    profile = api(admin_client, '/customer/account', method='GET').json()['data']
+    assert 'email' not in profile
+    assert profile['emailMasked']
 
 
 def test_admin_routes_require_admin_capability(client, api):
     response = api(client, '/admin/customers', method='GET')
     assert response.status_code in (401, 403)
+
+
+@pytest.mark.parametrize('role,capabilities', [('ADMIN', ['orders.view']), ('COURIER', ['customer.manage'])])
+def test_customer_email_is_restricted_to_customer_management(
+    customer_client, staff_factory, account_factory, api, role, capabilities,
+):
+    account = account_factory(email='private-address@example.invalid', invite_code=uid('i'))
+    staff_factory(role=role, capabilities=capabilities, account_id=customer_client.account.id)
+    for path in ('/admin/customers?q=private-address', f'/admin/customers/{account.id}'):
+        response = api(customer_client, path, method='GET')
+        assert response.status_code == 403, response.text
+        assert account.email not in response.text
 
 
 def test_coupon_freeze_requires_reason_and_version(admin_client, db, api):

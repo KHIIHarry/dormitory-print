@@ -59,19 +59,16 @@ from .core import (
     DomainError,
     Envelope,
     actor_dep,
-    advisory_lock,
     audit,
     enqueue_job,
     lock,
     ok,
     require_admin,
-    require_customer,
     seal,
     touch,
     unseal,
 )
 from .data_ops_schemas import (
-    CustomerExportCreate,
     ExportCreate,
     ExportCreated,
     ExportJobView,
@@ -86,7 +83,6 @@ from .models import (
     Coupon,
     DeliveryAssignment,
     DeliveryProof,
-    DeletionRequest,
     ExportJob,
     Location,
     Order,
@@ -96,10 +92,8 @@ from .models import (
     ReceiptAdjustment,
     Refund,
     DeliverySlot,
-    Referral,
     Staff,
     SupplementaryCharge,
-    SupplementaryDispute,
     SupplementaryMovement,
     TrashEntry,
     WageEntry,
@@ -166,7 +160,6 @@ PAYROLL_FIELDS = (
     'entryId', 'staffId', 'staffName', 'period', 'kind', 'amountCents', 'orderId',
     'assignmentId', 'sourceKey', 'reason', 'createdAt', 'settlementId', 'settledAt',
 )
-PERSONAL_HEADERS = ('section', 'recordId', 'field', 'value')
 PAYROLL_PERIOD_RE = re.compile(r'^\d{4}-(0[1-9]|1[0-2])$')
 SHANGHAI = ZoneInfo('Asia/Shanghai')
 
@@ -325,12 +318,10 @@ def _require_job_admin(actor: Actor, job: ExportJob, extras=()) -> None:
 
 def _audience(job: ExportJob) -> str:
     stored = (job.data or {}).get('audience')
-    if stored in ('ADMIN', 'PROMOTION', 'CUSTOMER'):
+    if stored in ('ADMIN', 'PROMOTION'):
         return stored
     if job.kind == 'PROMOTION_RECORDS':
         return 'PROMOTION'
-    if job.kind == 'PERSONAL_DATA':
-        return 'CUSTOMER'
     return 'ADMIN'
 
 
@@ -338,18 +329,15 @@ def _assert_audience(job: ExportJob, audience: str) -> None:
     allowed = {
         'ADMIN': {'ORDERS', 'FINANCE', 'PAYROLL'},
         'PROMOTION': {'PROMOTION_RECORDS'},
-        'CUSTOMER': {'PERSONAL_DATA'},
     }[audience]
     if job.kind not in allowed:
         raise DomainError('NOT_FOUND', '导出任务不存在或不可访问', 404)
 
 
-def _download_url(job: ExportJob) -> str | None:
+def _download_url(job: ExportJob) -> str:
     audience = _audience(job)
     if audience == 'PROMOTION':
         return f'/api/v1/admin/promotions/exports/{job.id}/download'
-    if audience == 'CUSTOMER':
-        return f'/api/v1/customer/account/exports/{job.id}/download'
     return f'/api/v1/admin/exports/{job.id}/download'
 
 
@@ -972,128 +960,6 @@ def _payroll_rows(db, filters: dict, limit: int) -> list[dict]:
     return rows
 
 
-def _personal_rows(db, account_id: str, limit: int):
-    account = db.get(Account, account_id)
-    if account is None:
-        raise DomainError('EXPORT_ACCOUNT_MISSING', '账号不存在或已删除', 410)
-    rows = [
-        ['PROFILE', '', 'email', account.email],
-        ['PROFILE', '', 'displayName', account.display_name],
-        ['PROFILE', '', 'status', account.status],
-        ['PROFILE', '', 'verifiedAt', _iso(account.verified_at)],
-        ['PROFILE', '', 'createdAt', _iso(account.created_at)],
-    ]
-    from .models import Principal
-    owner_principals = select(Principal.id).where(or_(
-        Principal.id == account.principal_id, Principal.account_id == account_id))
-    orders = list(db.scalars(select(Order).where(
-        Order.deleted_at.is_(None),
-        or_(Order.checkout_account_id == account_id,
-            Order.principal_id.in_(owner_principals))).order_by(
-        Order.created_at.desc()).limit(limit)))
-    for order in orders:
-        rows.append(['ORDER', order.id, 'pickupCode', order.pickup_code])
-        rows.append(['ORDER', order.id, 'status', order.status])
-        rows.append(['ORDER', order.id, 'totalCents', order.total_cents])
-        rows.append(['ORDER', order.id, 'refundedCents', order.refunded_cents])
-        rows.append(['ORDER', order.id, 'nickname', order.nickname])
-        rows.append(['ORDER', order.id, 'phone', order.phone])
-        rows.append(['ORDER', order.id, 'createdAt', _iso(order.created_at)])
-    order_ids = [order.id for order in orders]
-    if order_ids:
-        charges = list(db.scalars(select(SupplementaryCharge).where(
-            SupplementaryCharge.order_id.in_(order_ids)).order_by(
-            SupplementaryCharge.created_at.desc()).limit(limit)))
-        charge_map = {charge.id: charge for charge in charges}
-        for charge in charges:
-            active = charge.status == 'ACTIVE'
-            net_received = max(0, charge.cash_received_cents - charge.refunded_cents)
-            outstanding = (max(0, charge.amount_cents - charge.cash_received_cents)
-                           if active else 0)
-            rows += [
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'orderId', charge.order_id],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'purpose', charge.purpose],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'amountCents', charge.amount_cents],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'includeInPayroll',
-                 'true' if charge.include_in_payroll else 'false'],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'status', charge.status],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'grossReceivedCents',
-                 charge.cash_received_cents],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'refundedCents', charge.refunded_cents],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'netReceivedCents', net_received],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'outstandingCents', outstanding],
-                ['SUPPLEMENTARY_CHARGE', charge.id, 'createdAt', _iso(charge.created_at)],
-            ]
-        charge_ids = list(charge_map)
-        if charge_ids:
-            for movement in db.scalars(select(SupplementaryMovement).where(
-                    SupplementaryMovement.charge_id.in_(charge_ids)).order_by(
-                    SupplementaryMovement.created_at.desc()).limit(limit)):
-                rows += [
-                    ['SUPPLEMENTARY_MOVEMENT', movement.id, 'chargeId', movement.charge_id],
-                    ['SUPPLEMENTARY_MOVEMENT', movement.id, 'orderId',
-                     charge_map[movement.charge_id].order_id],
-                    ['SUPPLEMENTARY_MOVEMENT', movement.id, 'kind', movement.kind],
-                    ['SUPPLEMENTARY_MOVEMENT', movement.id, 'amountCents',
-                     movement.amount_cents],
-                    ['SUPPLEMENTARY_MOVEMENT', movement.id, 'reason', movement.reason],
-                    ['SUPPLEMENTARY_MOVEMENT', movement.id, 'createdAt',
-                     _iso(movement.created_at)],
-                ]
-            disputes = db.scalars(select(SupplementaryDispute).where(
-                SupplementaryDispute.charge_id.in_(charge_ids),
-                or_(SupplementaryDispute.principal_id.is_(None),
-                    SupplementaryDispute.principal_id == account.principal_id),
-            ).order_by(SupplementaryDispute.created_at.desc()).limit(limit))
-            for dispute in disputes:
-                rows += [
-                    ['SUPPLEMENTARY_DISPUTE', dispute.id, 'chargeId', dispute.charge_id],
-                    ['SUPPLEMENTARY_DISPUTE', dispute.id, 'orderId',
-                     charge_map[dispute.charge_id].order_id],
-                    ['SUPPLEMENTARY_DISPUTE', dispute.id, 'reason', dispute.reason],
-                    ['SUPPLEMENTARY_DISPUTE', dispute.id, 'status', dispute.status],
-                    ['SUPPLEMENTARY_DISPUTE', dispute.id, 'resolution', dispute.resolution],
-                    ['SUPPLEMENTARY_DISPUTE', dispute.id, 'createdAt',
-                     _iso(dispute.created_at)],
-                ]
-    # Only the Staff row linked to this exact account may disclose wage entries;
-    # names, phones and e-mail addresses are never used to infer an employee.
-    staff = db.scalar(select(Staff).where(Staff.account_id == account_id))
-    if staff is not None:
-        entries = list(db.scalars(select(WageEntry).where(
-            WageEntry.staff_id == staff.id).order_by(
-            WageEntry.created_at.desc()).limit(limit)))
-        settlements = _settlement_index(db, [entry.id for entry in entries])
-        for entry in entries:
-            settlement, _item = settlements.get(entry.id, (None, None))
-            rows += [
-                ['WAGE_ENTRY', entry.id, 'period', entry.period],
-                ['WAGE_ENTRY', entry.id, 'kind', entry.kind],
-                ['WAGE_ENTRY', entry.id, 'amountCents', entry.amount_cents],
-                ['WAGE_ENTRY', entry.id, 'orderId', entry.order_id or ''],
-                ['WAGE_ENTRY', entry.id, 'reason', entry.reason],
-                ['WAGE_ENTRY', entry.id, 'createdAt', _iso(entry.created_at)],
-                ['WAGE_ENTRY', entry.id, 'settlementId', settlement.id if settlement else ''],
-                ['WAGE_ENTRY', entry.id, 'settledAt',
-                 _iso(settlement.paid_at) if settlement else ''],
-            ]
-    for coupon in db.scalars(select(Coupon).where(Coupon.account_id == account_id).order_by(
-            Coupon.created_at.desc()).limit(limit)):
-        rows.append(['COUPON', coupon.id, 'status', coupon.status])
-        rows.append(['COUPON', coupon.id, 'amountCents', coupon.amount_cents])
-        rows.append(['COUPON', coupon.id, 'validUntil', _iso(coupon.valid_until)])
-    for referral in db.scalars(select(Referral).where(or_(
-            Referral.inviter_id == account_id, Referral.invitee_id == account_id)).limit(limit)):
-        rows.append(['REFERRAL', referral.id, 'status', referral.status])
-        rows.append(['REFERRAL', referral.id, 'qualifiedAt', _iso(referral.qualified_at)])
-    for request in db.scalars(select(DeletionRequest).where(
-            DeletionRequest.account_id == account_id).order_by(DeletionRequest.created_at.desc()).limit(limit)):
-        rows.append(['DELETION_REQUEST', request.id, 'status', request.status])
-        rows.append(['DELETION_REQUEST', request.id, 'createdAt', _iso(request.created_at)])
-    truncated = len(rows) > limit
-    return PERSONAL_HEADERS, rows[:limit], truncated
-
-
 def _build_export(db, job: ExportJob, limit: int):
     kind = job.kind
     filters = _validate_filters(
@@ -1156,8 +1022,6 @@ def _build_export(db, job: ExportJob, limit: int):
         truncated = len(items) > limit
         items = items[:limit]
         return fields, [[item.get(field, '') for field in fields] for item in items], truncated
-    if kind == 'PERSONAL_DATA':
-        return _personal_rows(db, job.account_id, limit + 1)
     raise DomainError('EXPORT_KIND_UNSUPPORTED', '不支持的导出类型', 422)
 
 
@@ -1167,15 +1031,13 @@ def _build_export(db, job: ExportJob, limit: int):
 
 
 def _create_job(db, actor: Actor, *, kind: str, fields: list[str], filters: dict,
-                reason: str, audience: str, account_id: str | None = None) -> ExportJob:
-    if kind in ('ORDERS', 'FINANCE', 'PROMOTION_RECORDS', 'PAYROLL'):
-        _validate_fields(kind, fields)
+                reason: str, audience: str) -> ExportJob:
+    _validate_fields(kind, fields)
     clean_filters = _validate_filters(
         filters, promotion=kind == 'PROMOTION_RECORDS', payroll=kind == 'PAYROLL')
     now = utcnow()
     job = ExportJob(
-        staff_id=actor.staff_id if audience != 'CUSTOMER' else None,
-        account_id=account_id,
+        staff_id=actor.staff_id,
         kind=kind,
         status='QUEUED',
         expires_at=now + timedelta(hours=_export_hours(db)),
@@ -1236,7 +1098,7 @@ def process_export_job(db, job_id: str) -> None:
     if job.status in ('READY', 'EXPIRED', 'FAILED'):
         return
     now = utcnow()
-    if job.expires_at <= now:
+    if job.kind == 'PERSONAL_DATA' or job.expires_at <= now:
         _expire(db, job)
         return
     job.status = 'PROCESSING'
@@ -1354,48 +1216,6 @@ def admin_export_status(job_id: str, db=Depends(get_db), actor: Actor = Depends(
 @router.get('/admin/exports/{job_id}/download')
 def admin_export_download(job_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     job = _admin_job(db, job_id, actor)
-    return _download(db, job, actor)
-
-
-@router.post('/customer/account/exports', response_model=Envelope[ExportCreated])
-def customer_export_create(payload: CustomerExportCreate, db=Depends(get_db),
-                           actor: Actor = Depends(actor_dep)):
-    require_customer(actor, verified=True)
-    advisory_lock(db, 'customer-export:' + (actor.account_id or ''))
-    existing = db.scalar(select(ExportJob).where(
-        ExportJob.account_id == actor.account_id, ExportJob.kind == 'PERSONAL_DATA',
-        ExportJob.status.in_(('QUEUED', 'PROCESSING')), ExportJob.expires_at > utcnow()))
-    if existing is not None:
-        # The legacy auth route persists the same ExportJob model but cannot
-        # enqueue the worker job itself; unify it here on the shared outbox.
-        _enqueue_export(db, existing)
-        return ok(ExportCreated(export_job_id=existing.id, status=existing.status,
-                                expires_at=existing.expires_at))
-    job = _create_job(db, actor, kind='PERSONAL_DATA', fields=[], filters={},
-                      reason=payload.reason, audience='CUSTOMER', account_id=actor.account_id)
-    return ok(ExportCreated(export_job_id=job.id, status=job.status, expires_at=job.expires_at))
-
-
-def _customer_job(db, job_id: str, actor: Actor) -> ExportJob:
-    require_customer(actor, verified=True)
-    job = _load_job(db, job_id)
-    _assert_audience(job, 'CUSTOMER')
-    if job.account_id != actor.account_id:
-        raise DomainError('NOT_FOUND', '导出任务不存在或不可访问', 404)
-    return job
-
-
-@router.get('/customer/account/exports/{job_id}', response_model=Envelope[ExportJobView])
-def customer_export_status(job_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
-    job = _customer_job(db, job_id, actor)
-    if job.status == 'QUEUED':
-        _enqueue_export(db, job)
-    return ok(_job_view(job))
-
-
-@router.get('/customer/account/exports/{job_id}/download')
-def customer_export_download(job_id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep)):
-    job = _customer_job(db, job_id, actor)
     return _download(db, job, actor)
 
 

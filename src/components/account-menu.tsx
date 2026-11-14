@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ChevronDown, ClipboardList, ShieldCheck, User } from "lucide-react";
+import { ChevronDown, ClipboardList, ShieldCheck, ShoppingBag, User, Users } from "lucide-react";
 import { useIdentity } from "../growth/identity";
 import { MOTION, usePresence } from "./presence";
 import "./account-menu.css";
@@ -91,6 +91,14 @@ export function AccountMenu() {
           <Link to="/u/orders">
             <ClipboardList size={17} />
             我的订单
+          </Link>
+          <Link className="account-menu-mobile-link" to="/u/rewards">
+            <ShoppingBag size={17} />
+            我的优惠
+          </Link>
+          <Link className="account-menu-mobile-link" to="/u/invite">
+            <Users size={17} />
+            邀请好友
           </Link>
         </div>
       )}

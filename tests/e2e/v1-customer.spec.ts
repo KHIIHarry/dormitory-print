@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { test, expect, type Page, type Route } from "@playwright/test";
 
 /**
@@ -28,7 +29,7 @@ async function reachable(url: string) {
 }
 
 test.beforeAll(async () => {
-  const port = test.info().project.name === "mobile" ? 5201 : 5200;
+  const port = 5270 + test.info().parallelIndex;
   REAL_BASE = `http://127.0.0.1:${port}`;
   if (await reachable(`${REAL_BASE}/u/`)) return;
   server = spawn(
@@ -52,10 +53,7 @@ test.afterAll(() => {
   if (startedHere) server?.kill("SIGTERM");
 });
 
-// The bundled headless shell is not installed in this workspace; use the
-// locally installed Chrome channel so the contract suite still runs.
 test.use({
-  channel: "chrome",
   // Shared test-results can be cleaned by parallel module workers; this suite
   // checks behavior, so avoid racing trace artifacts.
   trace: "off",
@@ -218,9 +216,7 @@ type ApiState = {
   calls: Call[];
   order: Record<string, unknown>;
   cases: Record<string, unknown>[];
-  deletionRequests: Record<string, unknown>[];
-  exportStatus: string;
-  exportFailures: number;
+  deletionBlockers: string[];
   sessions: Record<string, unknown>[];
 };
 
@@ -229,9 +225,8 @@ async function installApi(
   options: {
     order?: Record<string, unknown>;
     cases?: Record<string, unknown>[];
-    deletionRequests?: Record<string, unknown>[];
-    exportStatus?: string;
-    exportFailures?: number;
+    deletionBlockers?: string[];
+    admin?: boolean;
     sessions?: Record<string, unknown>[];
   } = {},
 ) {
@@ -239,9 +234,7 @@ async function installApi(
     calls: [],
     order: options.order || orderFixture(),
     cases: options.cases || [],
-    deletionRequests: options.deletionRequests || [],
-    exportStatus: options.exportStatus || "READY",
-    exportFailures: options.exportFailures || 0,
+    deletionBlockers: options.deletionBlockers || [],
     sessions: options.sessions || [],
   };
 
@@ -259,6 +252,7 @@ async function installApi(
       ),
     });
 
+  let signedIn = true;
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -277,9 +271,16 @@ async function installApi(
       headers: request.headers(),
     });
 
-    if (path === "/customer/auth/me") return json(route, customerSession);
+    if (path === "/customer/auth/logout" && method === "POST") {
+      signedIn = false;
+      return json(route, { success: true });
+    }
+    if (path === "/customer/auth/me")
+      return json(route, signedIn ? customerSession : { role: "CUSTOMER", authKind: "ANONYMOUS" });
     if (path === "/auth/me")
-      return json(route, { code: "AUTH_REQUIRED", message: "未登录" }, 401);
+      return options.admin
+        ? json(route, { id: "staff-1", role: "ADMIN", name: "验收管理员", capabilities: ["customer.manage"], emailVerified: true })
+        : json(route, { code: "AUTH_REQUIRED", message: "未登录" }, 401);
     if (path === "/customer/session") return json(route, customerSession);
     if (path === "/public/config") return json(route, publicConfig);
     if (path === "/public/map")
@@ -317,28 +318,9 @@ async function installApi(
           : state.sessions.filter((item) => item.id !== sessionId);
       return json(route, { success: true });
     }
-    if (path === "/customer/account/exports" && method === "POST") {
-      if (state.exportFailures > 0) {
-        state.exportFailures--;
-        return json(
-          route,
-          { code: "SERVICE_UNAVAILABLE", message: "服务暂时不可用，请重试" },
-          503,
-        );
-      }
-      return json(route, { exportJobId: "EXP-1" });
-    }
-    if (path === "/customer/account/exports/EXP-1" && method === "GET")
-      return json(route, {
-        id: "EXP-1",
-        status: state.exportStatus,
-        createdAt: "2026-10-30T04:00:00.000Z",
-        expiresAt: "2026-10-31T04:00:00.000Z",
-        downloadUrl: null,
-      });
-    if (path === "/customer/account/deletion-requests" && method === "GET")
-      return json(route, { items: state.deletionRequests, nextCursor: null });
     if (path === "/customer/account/deletion-request" && method === "POST") {
+      if (state.deletionBlockers.length)
+        return json(route, { status: "BLOCKED", blockers: state.deletionBlockers, message: "有未完成事项" });
       const created = {
         id: "DEL-1",
         deletionRequestId: "DEL-1",
@@ -352,7 +334,6 @@ async function installApi(
         reason: (body as { reason?: string })?.reason || "",
         blockers: [],
       };
-      state.deletionRequests = [created, ...state.deletionRequests];
       return json(route, created);
     }
     if (path === "/orders/ORD-1/after-sales" && method === "GET")
@@ -561,45 +542,215 @@ test("read-only or disallowed order never exposes after-sales creation", async (
   ).toBeVisible();
 });
 
-test("personal data export retries the same idempotency key after an uncertain response and offers a real download", async ({
-  page,
-}) => {
-  const state = await installApi(page, { exportFailures: 1 });
+test("account settings has two identity actions and mobile-only rewards navigation", async ({ page }, info) => {
+  await installApi(page);
   await page.goto(appUrl("/u/account"));
-  await expect(page.getByRole("heading", { name: "账号设置" })).toBeVisible();
-  const dataPanel = page
-    .locator("section.panel")
-    .filter({ hasText: "导出我的个人资料" });
-  await expect(dataPanel).toBeVisible();
-  await dataPanel
-    .getByRole("button", { name: "申请导出我的资料" })
-    .click();
-  await expect(
-    dataPanel.getByText(/提交结果待核实/).first(),
-  ).toBeVisible();
-  await dataPanel.getByRole("button", { name: "安全重试" }).first().click();
-  await expect(page.getByText("已就绪，可下载")).toBeVisible();
-  const download = dataPanel.getByRole("link", { name: "下载资料" });
-  await expect(download).toHaveAttribute(
-    "href",
-    /\/api\/v1\/customer\/account\/exports\/EXP-1\/download$/,
-  );
+  const identity = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "订单与身份", exact: true }) });
+  await expect(identity.getByRole("button")).toHaveText(["关联本机游客订单"]);
+  await expect(identity.getByRole("link")).toHaveText(["注销账号"]);
+  await expect(page.getByRole("heading", { name: "导出我的个人资料" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "提交注销申请" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "退出客户账号" })).toHaveCount(0);
 
-  const exports = state.calls.filter(
-    (call) => call.path === "/customer/account/exports" && call.method === "POST",
+  const trigger = page.getByRole("button", { name: "我的账户", exact: true });
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    await expect(identity.getByRole("link")).toHaveCount(1);
+    const heights = await identity.locator(".account-actions .btn").evaluateAll((buttons) =>
+      buttons.map((button) => button.getBoundingClientRect().height),
+    );
+    for (const height of heights) expect(height).toBeGreaterThanOrEqual(44);
+    await trigger.click();
+    const menu = page.locator(".account-menu-panel");
+    for (const label of ["我的优惠", "邀请好友"]) {
+      const link = menu.getByRole("link", { name: label });
+      if (width <= 767) {
+        await expect(link).toBeVisible();
+        expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      } else await expect(link).toBeHidden();
+    }
+    if (width === 390 || width === 1440) {
+      await identity.screenshot({ path: info.outputPath(`account-identity-${width}.png`), scale: "css" });
+      await trigger.scrollIntoViewIfNeeded();
+      await menu.screenshot({ path: info.outputPath(`account-menu-${width}.png`), scale: "css" });
+    }
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+  }
+  await page.goto(appUrl("/u/account/security"));
+  const logout = page.getByRole("button", { name: "退出客户账号", exact: true });
+  await expect(logout).toBeVisible();
+  await logout.click();
+  await expect(page).toHaveURL(/\/u\/$/);
+  await expect(page.getByRole("link", { name: "登录 / 注册" }).first()).toBeVisible();
+});
+
+test("account deletion keeps the form visible when unfinished work blocks it", async ({ page }, info) => {
+  await installApi(page, { deletionBlockers: ["ACTIVE_ORDER:ORD-1"] });
+  await page.goto(appUrl("/u/account/deletion"));
+  const panel = page.locator(".account-deletion-panel");
+  const reason = panel.getByLabel("注销原因（选填）");
+  const confirm = panel.getByRole("checkbox");
+  const submit = panel.getByRole("button", { name: "提交注销申请" });
+  await reason.fill("测试未结束订单");
+  await confirm.check();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    expect(await reason.evaluate((input) => parseFloat(getComputedStyle(input).fontSize))).toBeGreaterThanOrEqual(16);
+    expect((await submit.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    if (width === 390 || width === 1440)
+      await panel.screenshot({ path: info.outputPath(`account-deletion-${width}.png`), scale: "css" });
+  }
+  await submit.click();
+  await expect(panel.getByText("暂不能注销：仍有未完成的订单")).toBeVisible();
+  await expect(reason).toHaveValue("测试未结束订单");
+  await expect(page).toHaveURL(/\/account\/deletion$/);
+});
+
+test("an uncertain deletion asks to verify the session before resubmitting", async ({ page }) => {
+  await installApi(page);
+  await page.route("**/api/v1/customer/account/deletion-request", (route) =>
+    route.fulfill({ status: 503, json: errorEnvelope("SERVICE_UNAVAILABLE", "请求结果未知") }),
   );
-  expect(exports).toHaveLength(2);
-  expect(exports[0].headers["idempotency-key"]).toBe(
-    exports[1].headers["idempotency-key"],
-  );
-  expect(exports[0].headers["idempotency-key"]).toBeTruthy();
+  await page.goto(appUrl("/u/account/deletion"));
+  const panel = page.locator(".account-deletion-panel");
+  await panel.getByRole("checkbox").check();
+  const submit = panel.getByRole("button", { name: "提交注销申请" });
+  await submit.click();
+  await expect(panel.getByRole("alert")).toContainText("请刷新页面核实登录状态");
+  await expect(panel.getByRole("button", { name: "刷新页面" })).toBeVisible();
+  await expect(submit).toBeDisabled();
+});
+
+test("admin customer search submits an email and shows it on list and detail", async ({ page }, info) => {
+  await installApi(page, { admin: true });
+  const email = "averylongcustomeremailaddressfortesting@school-print.example.test";
+  const customer = {
+    ...customerSession.account,
+    email,
+    createdAt: "2026-10-30T04:00:00Z",
+    orderCount: 2,
+    couponCount: 1,
+    referralCount: 0,
+    inviteCode: "TEST",
+    allowedActions: [],
+    orders: [],
+  };
+  const searches: URLSearchParams[] = [];
+  await page.route("**/api/v1/admin/customers**", (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/customers")) {
+      const query = url.searchParams.get("q") ?? "";
+      searches.push(url.searchParams);
+      return route.fulfill({ json: envelope({ items: email.includes(query.toLowerCase()) ? [customer] : [] }) });
+    }
+    return route.fulfill({ json: envelope(customer) });
+  });
+  await page.goto(appUrl("/manage/customers"));
+  const search = page.getByRole("searchbox", { name: "客户搜索" });
+  const submit = page.getByRole("button", { name: "筛选客户" });
+  const more = page.getByRole("button", { name: /更多筛选/ });
+  const verified = page.getByLabel("邮箱验证");
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+  await expect(verified).toBeHidden();
+  await expect(search).toHaveAttribute("placeholder", "客户名称、编号或邮箱");
+  await search.fill("SCHOOL-PRINT.EXAMPLE.TEST");
+  await submit.click();
+  await expect.poll(() => searches.at(-1)?.get("q")).toBe("SCHOOL-PRINT.EXAMPLE.TEST");
+  const table = page.locator(".growth-table-wrap");
+  await expect(table.getByText(email, { exact: true })).toBeVisible();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const metrics = await search.evaluate((input) => {
+      const panel = input.closest(".panel")!;
+      const { left, right } = panel.getBoundingClientRect();
+      const { paddingLeft, paddingRight } = getComputedStyle(panel);
+      const box = input.getBoundingClientRect();
+      return {
+        fits: box.left >= left + parseFloat(paddingLeft) - 1 &&
+          box.right <= right - parseFloat(paddingRight) + 1,
+        scrollWidth: document.documentElement.scrollWidth,
+        height: box.height,
+        font: parseFloat(getComputedStyle(input).fontSize),
+      };
+    });
+    expect(metrics.fits).toBe(true);
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(width + 1);
+    expect(metrics.height).toBeGreaterThanOrEqual(44);
+    expect(metrics.font).toBeGreaterThanOrEqual(16);
+    if (width === 390 || width === 1440)
+      await search.locator("xpath=ancestor::section").screenshot({ path: info.outputPath(`customer-search-${width}.png`), scale: "css" });
+  }
+  await more.click();
+  await expect(verified).toBeVisible();
+  await verified.selectOption("true");
+  await page.getByLabel("账号状态").selectOption("ACTIVE");
+  await more.click();
+  await expect(verified).toBeHidden();
+  await search.press("Enter");
+  await expect.poll(() => searches.at(-1)?.get("verified")).toBe("true");
+  expect(searches.at(-1)?.get("status")).toBe("ACTIVE");
+  await expect(more).toContainText("2 项");
+  await more.click();
+  await expect(verified).toHaveValue("true");
+  const minimumOrders = page.getByLabel("最低订单数");
+  await minimumOrders.fill("-1");
+  await more.click();
+  await submit.click();
+  await expect(more).toHaveAttribute("aria-expanded", "true");
+  await expect(minimumOrders).toBeFocused();
+  await minimumOrders.clear();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await verified.evaluate((select) => {
+      const section = select.closest("section")!;
+      const { left, right } = section.getBoundingClientRect();
+      const { paddingLeft, paddingRight } = getComputedStyle(section);
+      const controls = select.closest(".customer-extra-filters")!.querySelectorAll("input, select");
+      return {
+        overflow: document.documentElement.scrollWidth - innerWidth,
+        controls: [...controls].map((control) => {
+          const box = control.getBoundingClientRect();
+          return {
+            fits: box.left >= left + parseFloat(paddingLeft) - 1 &&
+              box.right <= right - parseFloat(paddingRight) + 1,
+            height: box.height,
+            font: parseFloat(getComputedStyle(control).fontSize),
+          };
+        }),
+      };
+    });
+    expect(layout.overflow).toBeLessThanOrEqual(1);
+    expect(layout.controls).toHaveLength(7);
+    for (const control of layout.controls) {
+      expect(control.fits).toBe(true);
+      expect(control.height).toBeGreaterThanOrEqual(44);
+      expect(control.font).toBeGreaterThanOrEqual(16);
+    }
+    if (width === 390 || width === 1440)
+      await search.locator("xpath=ancestor::section").screenshot({ path: info.outputPath(`customer-filters-${width}.png`), scale: "css" });
+  }
+  await table.getByRole("link", { name: "查看详情" }).click();
+  const details = page.locator(".growth-facts").filter({ hasText: email });
+  await expect(details.getByText(email, { exact: true })).toBeVisible();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    if (width === 390 || width === 1440)
+      await details.screenshot({ path: info.outputPath(`customer-email-${width}.png`), scale: "css" });
+  }
 });
 
 test("deletion request needs explicit confirmation, posts the current DTO and signs out into seven-day recovery", async ({
   page,
 }) => {
-  const state = await installApi(page, { deletionRequests: [] });
+  const state = await installApi(page);
   await page.goto(appUrl("/u/account"));
+  await page.getByRole("link", { name: "注销账号", exact: true }).click();
+  await expect(page).toHaveURL(/\/u\/account\/deletion$/);
+  await expect(page.getByRole("heading", { name: "我的注销申请" })).toHaveCount(0);
   const deletion = page
     .locator("section.panel")
     .filter({ hasText: "申请注销账号" });
@@ -632,7 +783,7 @@ test("deletion request needs explicit confirmation, posts the current DTO and si
       call.path === "/customer/account/deletion-requests" &&
       call.method === "GET",
   );
-  expect(listed).toBe(true);
+  expect(listed).toBe(false);
   const stored = await page.evaluate(() =>
     Object.keys(window.localStorage),
   );
@@ -741,6 +892,14 @@ async function installUploadApi(
     preparation?: boolean;
   } = {},
 ) {
+  // WebKit route interception can omit the body of XMLHttpRequest.send(Blob).
+  // Verify its digest and acknowledge only the known test fixture bytes.
+  const fixtureChunks = new Map(
+    ["PK\u0003\u0004fake-xlsx", "fake-heic-bytes", "%PDF-1.4 fake"].map((payload) => [
+      createHash("sha256").update(payload).digest("hex"),
+      payload,
+    ]),
+  );
   const state: UploadState = {
     calls: [],
     excel: undefined,
@@ -772,7 +931,8 @@ async function installUploadApi(
     const url = new URL(request.url());
     const path = url.pathname.replace(/^\/api\/v1/, "");
     const method = request.method();
-    const postData = request.postData();
+    const postData = request.postData() ??
+      (method === "PUT" ? fixtureChunks.get(request.headers()["x-chunk-sha256"]) : undefined);
     let body: unknown;
     try {
       body = postData ? JSON.parse(postData) : undefined;
@@ -871,7 +1031,8 @@ async function installUploadApi(
             .body as { totalBytes: number }).totalBytes,
       );
       const length = postData ? Buffer.byteLength(postData) : 0;
-      void offset;
+      if (!length)
+        return json({ code: "INVALID_TEST_CHUNK", message: "未识别测试文件分片" }, 422);
       return json({ ...session(offset + length, total), name: "upload.bin" });
     }
     if (path === "/upload-sessions/S1/complete" && method === "POST")
@@ -1224,7 +1385,7 @@ test("requested slot and auto-close deadline are shown before settlement; unpaid
   ).toHaveCount(0);
 });
 
-test("Codex routes /u/orders/:id/after-sales and /u/account/data render the exported V1 pages", async ({
+test("order after-sales remains available and the legacy data route redirects to account deletion", async ({
   page,
 }) => {
   await installApi(page, { cases: [] });
@@ -1238,11 +1399,11 @@ test("Codex routes /u/orders/:id/after-sales and /u/account/data render the expo
 
   await page.goto(appUrl("/u/account/data"));
   await expect(
-    page.getByRole("heading", { name: "个人资料与账号数据" }),
+    page.getByRole("heading", { name: "注销账号", level: 1 }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "申请导出我的资料" }),
-  ).toBeVisible();
+    page.getByRole("button", { name: "提交注销申请" }),
+  ).toBeDisabled();
 });
 
 test("security page shows the owner's browser and login IP per session and marks unrecoverable history as 未记录", async ({

@@ -56,7 +56,6 @@ import {
   safeCustomerReturn,
   singleFlight,
 } from "./account/security";
-import { PersonalDataPanel } from "../v1/customer";
 import "./account.css";
 
 type AuthMode = "login" | "register" | "forgot" | "verify" | "reset";
@@ -855,9 +854,8 @@ export function AccountPage() {
 }
 function AccountContent() {
   const identity = useIdentity(),
-    { toast, refresh } = useStore(),
-    action = useAction(),
-    navigate = useNavigate();
+    { toast } = useStore(),
+    action = useAction();
   const resource = useGrowthResource<CustomerAccount>("/customer/account");
   const [name, setName] = useState(""),
     [currentPassword, setCurrentPassword] = useState(""),
@@ -1114,38 +1112,12 @@ function AccountContent() {
             <Button variant="secondary" onClick={() => setLinking(true)}>
               关联本机游客订单
             </Button>
-            <Link className="btn secondary" to="/u/orders">
-              查看我的订单
-            </Link>
-            <Link className="btn secondary" to="/u/rewards">
-              我的优惠
-            </Link>
-            <Link className="btn secondary" to="/u/invite">
-              邀请好友
-            </Link>
-            <Link className="btn secondary" to="/u/account/data">
-              资料导出与注销
+            <Link className="btn secondary" to="/u/account/deletion">
+              注销账号
             </Link>
           </div>
-          <Button
-            variant="danger"
-            busy={action.busy}
-            busyTarget={action.control}
-            disabled={action.busy}
-            onClick={() =>
-              void action.run(async () => {
-                await identity.logoutCustomer();
-                await refresh();
-                toast("客户账号已退出");
-                navigate("/u/", { replace: true });
-              })
-            }
-          >
-            退出客户账号
-          </Button>
         </div>
       </Panel>
-      <PersonalDataPanel />
       {linking && (
         <Modal title="确认关联本机游客订单" onClose={() => setLinking(false)}>
           <GuestLinkConfirm
@@ -1169,6 +1141,8 @@ export function AccountSecurityPage() {
 function SecurityContent() {
   const identity = useIdentity(),
     action = useAction();
+  const { refresh, toast } = useStore();
+  const navigate = useNavigate();
   const resource = useGrowthResource<{ items: SessionDevice[] }>(
     "/customer/account/sessions",
   );
@@ -1253,6 +1227,26 @@ function SecurityContent() {
             ))}
           </div>
         )}
+      </Panel>
+      <Panel title="当前设备">
+        <Button
+          variant="secondary"
+          className="account-logout-button"
+          busy={action.busy}
+          busyTarget={action.control}
+          disabled={action.busy}
+          onClick={() =>
+            void action.run(async () => {
+              await identity.logoutCustomer();
+              await refresh();
+              toast("客户账号已退出");
+              navigate("/u/", { replace: true });
+            })
+          }
+        >
+          <LogOut size={16} />
+          退出客户账号
+        </Button>
       </Panel>
       {selected && (
         <Modal title="确认撤销会话" onClose={() => setSelected(null)}>

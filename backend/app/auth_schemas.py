@@ -469,18 +469,6 @@ class OrderAccessExchange(DTO):
     status: str = 'EXCHANGED'
 
 
-class ExportRequestInput(DTO):
-    reason: str = Field(default='个人资料导出', max_length=500)
-    fields: list[str] | None = None
-
-
-class ExportRequestResult(DTO):
-    export_job_id: str
-    status: str
-    expires_at: datetime
-    message: str = '导出申请已受理，文件生成后可受权下载，排队不代表已完成'
-
-
 class DeletionRequestInput(DTO):
     reason: str = Field(default='用户自助申请注销', max_length=500)
 

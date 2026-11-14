@@ -37,8 +37,6 @@ from .auth_schemas import (
     DeletionRequestResult,
     EmailInput,
     ExchangeInput,
-    ExportRequestInput,
-    ExportRequestResult,
     GrantRevokeResult,
     GrantableAccountList,
     GrantableAccountView,
@@ -96,7 +94,6 @@ from .models import (
     AfterSale,
     AuthSession,
     DeletionRequest,
-    ExportJob,
     OneTimeToken,
     Order,
     Principal,
@@ -124,7 +121,6 @@ ORDER_SESSION_TTL = timedelta(days=30)
 SECURITY_TOKEN_TTL = timedelta(minutes=30)
 TEMPORARY_PASSWORD_TTL = timedelta(hours=24)
 ORDER_LINK_MAX_TTL = timedelta(days=30)
-EXPORT_TTL = timedelta(hours=24)
 
 LINK_SCOPES = (
     'ORDER_VIEW',
@@ -1443,26 +1439,6 @@ def customer_import_order(payload: ImportOrderInput, request: Request, db=Depend
         id=derived.id,
         order_id=order.id,
     ))
-
-
-@router.post('/customer/account/export-request', response_model=Envelope[ExportRequestResult])
-def customer_export_request(payload: ExportRequestInput, db=Depends(get_db), actor=Depends(actor_dep)):
-    require_customer(actor, verified=True)
-    advisory_lock(db, 'customer-export:' + (actor.account_id or ''))
-    existing = db.scalar(select(ExportJob).where(
-        ExportJob.account_id == actor.account_id, ExportJob.kind == 'PERSONAL_DATA',
-        ExportJob.status.in_(('QUEUED', 'PROCESSING')), ExportJob.expires_at > _now()))
-    if existing is not None:
-        return ok(ExportRequestResult(export_job_id=existing.id, status=existing.status,
-                                      expires_at=existing.expires_at,
-                                      message='已有个人资料导出申请在处理中'))
-    row = ExportJob(account_id=actor.account_id, kind='PERSONAL_DATA', status='QUEUED',
-                    expires_at=_now() + EXPORT_TTL,
-                    data={'requestedAt': _now().isoformat(), 'reason': payload.reason})
-    db.add(row)
-    db.flush()
-    audit(db, actor, 'CUSTOMER_EXPORT_REQUESTED', 'export_job', row.id)
-    return ok(ExportRequestResult(export_job_id=row.id, status=row.status, expires_at=row.expires_at))
 
 
 @router.post('/customer/account/deletion-request', response_model=Envelope[DeletionRequestResult])

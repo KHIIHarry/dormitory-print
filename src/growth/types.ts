@@ -73,6 +73,7 @@ export type SessionDevice = {
   current: boolean;
 };
 export type CustomerRecord = CustomerAccount & {
+  email: string;
   createdAt: string;
   verificationDeadline?: string | null;
   orderCount: number;

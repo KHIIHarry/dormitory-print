@@ -260,6 +260,7 @@ const db = {
   accounts: [
     {
       ...account,
+      email: "student@example.invalid",
       createdAt: date(),
       orderCount: 0,
       couponCount: 0,
@@ -837,6 +838,7 @@ export async function demoRequest(
     db.account = next;
     const record = {
       ...next,
+      email: registration.email,
       createdAt: date(),
       orderCount: 0,
       couponCount: 0,
@@ -1677,7 +1679,7 @@ export async function demoRequest(
         (a) =>
           (!query.get("status") || a.status === query.get("status")) &&
           (!query.get("q") ||
-            [a.id, a.displayName, a.emailMasked, a.inviteCode]
+            [a.id, a.displayName, a.email, a.inviteCode]
               .join(" ")
               .toLowerCase()
               .includes(query.get("q")!.toLowerCase())) &&
@@ -1722,8 +1724,10 @@ export async function demoRequest(
       return queued();
     }
     a!.version++;
-    if (db.customer.account?.id === a!.id)
-      Object.assign(db.customer.account, a);
+    if (db.customer.account?.id === a!.id) {
+      db.customer.account.status = a!.status;
+      db.customer.account.version = a!.version;
+    }
     return a;
   }
   if (path === "/auth/sessions")

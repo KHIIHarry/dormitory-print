@@ -2113,7 +2113,8 @@ def _close_expired_orders(db, now: datetime) -> int:
 def _queue_pending_exports(db, now: datetime) -> int:
     queued = 0
     for job in db.scalars(select(ExportJob).where(
-            ExportJob.status == 'QUEUED', ExportJob.expires_at > now)):
+            ExportJob.status == 'QUEUED', ExportJob.expires_at > now,
+            ExportJob.kind != 'PERSONAL_DATA')):
         business_key = f'export:{job.id}'
         if db.scalar(select(Job.id).where(Job.business_key == business_key)):
             continue

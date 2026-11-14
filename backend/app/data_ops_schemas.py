@@ -106,15 +106,6 @@ class PromotionExportCreate(DTO):
         return value
 
 
-class CustomerExportCreate(DTO):
-    reason: str = Field(default='个人资料导出', max_length=500)
-
-    @field_validator('reason')
-    @classmethod
-    def clean_reason(cls, value: str) -> str:
-        return value.strip() or '个人资料导出'
-
-
 class ExportJobView(DTO):
     id: str
     export_job_id: str

@@ -1457,7 +1457,7 @@ def _customer_view(db, account: Account) -> CustomerRecord:
         'referralReward': bool(data.get('referralReward')),
     }
     return CustomerRecord(
-        id=account.id, emailMasked=_mask_email(account.email),
+        id=account.id, email=account.email, emailMasked=_mask_email(account.email),
         displayName=account.display_name or '未命名客户', verified=bool(account.verified_at),
         status=status, version=account.version,
         notificationPreferences=notification,

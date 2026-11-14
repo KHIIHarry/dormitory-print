@@ -206,8 +206,8 @@ const AdminDataOperations = lazy(() =>
 const CustomerAfterSales = lazy(() =>
   import("./v1/customer").then((m) => ({ default: m.CustomerAfterSalesPage })),
 );
-const CustomerAccountData = lazy(() =>
-  import("./v1/customer").then((m) => ({ default: m.CustomerAccountDataPage })),
+const CustomerAccountDeletion = lazy(() =>
+  import("./v1/customer").then((m) => ({ default: m.CustomerAccountDeletionPage })),
 );
 import { createRouteScrollMemory } from "./lib/route-scroll";
 function AppMeta() {
@@ -401,7 +401,8 @@ function App() {
                 <Route path="account/reset" element={<AccountReset />} />
                 <Route path="account" element={<Account />} />
                 <Route path="account/security" element={<AccountSecurity />} />
-                <Route path="account/data" element={<CustomerAccountData />} />
+                <Route path="account/deletion" element={<CustomerAccountDeletion />} />
+                <Route path="account/data" element={<Navigate to="/u/account/deletion" replace />} />
                 <Route path="rewards" element={<Rewards />} />
                 <Route path="invite" element={<Invite />} />
                 <Route path="order-link" element={<OrderLink />} />

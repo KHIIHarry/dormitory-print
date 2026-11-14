@@ -35,6 +35,51 @@
 .growth-filter > .btn {
   justify-self: start;
 }
+.customer-search-row {
+  display: grid;
+  gap: 12px;
+}
+.customer-search-row .field,
+.customer-extra-filters .field {
+  min-width: 0;
+  margin: 0;
+}
+.customer-filter .field input:not([type="checkbox"]):not([type="range"]),
+.customer-filter .field select {
+  min-width: 0;
+  font-size: 16px;
+  min-height: 44px;
+}
+.customer-filter .field select { height: 44px; }
+.customer-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.customer-search-actions > .btn {
+  min-height: 44px;
+  max-width: 100%;
+  letter-spacing: normal;
+}
+.customer-search-actions > .btn > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.customer-extra-filters:not([hidden]) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: 16px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 1024px) {
+  .customer-search-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
 .growth-check {
   display: flex;
   align-items: center;
@@ -107,6 +152,11 @@
   display: block;
   margin-top: 5px;
   color: var(--muted, #666);
+}
+.growth-table-wrap .customer-email {
+  min-width: 7rem;
+  max-width: 20rem;
+  overflow-wrap: anywhere;
 }
 .verification-countdown {
   display: block;

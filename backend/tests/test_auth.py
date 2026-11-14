@@ -15,7 +15,6 @@ from app.models import (
     Account,
     AuthSession,
     DeletionRequest,
-    ExportJob,
     OneTimeToken,
     Order,
     Principal,
@@ -798,20 +797,11 @@ def test_customer_nickname_is_the_staff_display_name(client, db):
     assert db.get(Staff, staff.id).name == '管理员'
 
 
-def test_personal_export_request_and_deletion_application_do_not_execute_deletion(client, db):
+def test_deletion_application_with_open_order_does_not_execute_deletion(client, db):
     account = make_account(db)
     db.commit()
     client = new_client(client.app)
     assert login_customer(client, account.email).status_code == 200
-
-    export = api(client, '/customer/account/export-request', {'reason': '个人资料导出'})
-    assert export.status_code == 200, export.text
-    export_data = export.json()['data']
-    assert export_data['status'] == 'QUEUED'
-    assert export_data['expiresAt']
-    db.expire_all()
-    job = db.get(ExportJob, export_data['exportJobId'])
-    assert job is not None and job.account_id == account.id and job.kind == 'PERSONAL_DATA'
 
     order = make_order(db, account.principal_id)
     db.commit()

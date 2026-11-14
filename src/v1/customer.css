@@ -158,71 +158,27 @@
   background: #fff;
 }
 
-.v1-account-data {
-  display: grid;
-  gap: 16px;
-}
-
-.v1-account-data > .panel > p {
-  margin: 0 0 10px;
+.account-deletion-panel > p {
+  margin: 0 0 20px;
   color: var(--muted);
+  line-height: 1.65;
 }
 
-.v1-job {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--cream);
+.account-deletion-panel .v1-form > .field textarea {
+  font-size: 16px;
+  min-height: 72px;
 }
 
-.v1-job > div {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  min-width: 0;
+.account-deletion-panel .checkbox-label,
+.account-deletion-panel .v1-actions .btn,
+.account-deletion-uncertain .btn {
+  min-height: 44px;
 }
 
-.v1-job span {
+.account-deletion-uncertain {
   display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.v1-job small {
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
-.v1-deletions {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
+  justify-items: start;
   gap: 10px;
-}
-
-.v1-deletions li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.v1-deletions li > span:last-child {
-  color: var(--muted);
-  font-size: 12px;
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 .v1-deadline {

@@ -10,6 +10,7 @@ export default defineConfig({
     "print-task-flip.spec.ts",
     "payment-variance.spec.ts",
     "v1-courier.spec.ts",
+    "v1-customer.spec.ts",
     "upload-picker.spec.ts",
   ],
   use: {

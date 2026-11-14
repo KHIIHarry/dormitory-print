@@ -3,9 +3,7 @@
 Real PostgreSQL integration tests.  The supplementary ledger must stay a
 separate stream from the immutable original order money: a flat FINANCE export
 uses explicit row types, and the ORDER export only adds independent aggregate
-columns.  Customer personal exports only contain the account's own orders and
-the employee ledger linked through ``Staff.account_id`` (never name/phone
-matching).
+columns.
 """
 from __future__ import annotations
 
@@ -395,66 +393,6 @@ def test_extended_columns_are_whitelisted_per_kind(admin_client, api, db):
     })
     assert response.status_code == 422
     assert response.json()['error']['code'] == 'EXPORT_FIELD_DENIED'
-
-
-# ---------------------------------------------------------------------------
-# Customer personal export
-# ---------------------------------------------------------------------------
-
-
-def test_personal_export_only_contains_own_supplementary_and_wage_records(
-        api, db, account_factory, client_factory):
-    mine = account_factory(email='mine@example.test')
-    other = account_factory(email='other@example.test')
-    mine_principal = db.get(Principal, mine.principal_id)
-    other_principal = db.get(Principal, other.principal_id)
-    mine_order = make_order(db, principal=mine_principal, total_cents=900)
-    other_order = make_order(db, principal=other_principal, total_cents=800)
-    mine_charge = make_charge(db, mine_order, purpose='加急装订费', amount_cents=300,
-                              include_in_payroll=True, cash_received_cents=100)
-    make_movement(db, mine_charge, 'RECEIPT', 100, reason='现金')
-    make_dispute(db, mine_charge, '用途与约定不符', principal_id=mine.principal_id)
-    make_dispute(db, mine_charge, '他人异议不可见', principal_id=other.principal_id)
-    other_charge = make_charge(db, other_order, purpose='别人费用', amount_cents=200)
-    make_dispute(db, other_charge, '别人的异议', principal_id=other.principal_id)
-
-    mine_staff = Staff(account_id=mine.id, username='mine_staff_' + secrets.token_hex(3),
-                       name='测试员工', role='ADMIN', password_hash='!', enabled=True,
-                       status='ACTIVE', capabilities=[])
-    unlinked = Staff(account_id=None, username='unlinked_' + secrets.token_hex(3),
-                     name='测试员工', role='ADMIN', password_hash='!', enabled=True,
-                     status='ACTIVE', capabilities=[])
-    db.add_all([mine_staff, unlinked])
-    db.flush()
-    mine_entry = make_wage(db, mine_staff, 54321, period='2030-01', reason='配送工资')
-    make_wage(db, unlinked, 99999, period='2030-01', reason='同名但不是本人')
-    db.commit()
-
-    client = customer_client_for(client_factory, db, mine)
-    created = api(client, '/customer/account/exports', {'reason': '个人数据导出'})
-    assert created.status_code == 200, created.text
-    job_id = created.json()['data']['exportJobId']
-    process_job(job_id)
-    response = api(client, f'/customer/account/exports/{job_id}/download', method='GET')
-    rows = csv_rows(response)
-    text = response.content.decode('utf-8-sig')
-
-    assert rows[0] == ['section', 'recordId', 'field', 'value']
-    assert mine_order.id in text
-    assert '加急装订费' in text
-    assert '用途与约定不符' in text
-    assert '54321' in text
-    assert mine_entry.id in text
-    wage_ids = {row[1] for row in rows if row[0] == 'WAGE_ENTRY'}
-    assert wage_ids == {mine_entry.id}
-
-    assert other_order.id not in text
-    assert '别人费用' not in text
-    assert '别人的异议' not in text
-    assert '他人异议不可见' not in text
-    assert '99999' not in text
-    assert 'password' not in text.lower()
-    assert 'token' not in text.lower()
 
 
 # ---------------------------------------------------------------------------

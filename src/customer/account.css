@@ -124,6 +124,10 @@
   flex-wrap: wrap;
   align-items: center;
 }
+.account-actions > .btn,
+.account-logout-button {
+  min-height: 44px;
+}
 .account-auth-links {
   justify-content: space-between;
   font-size: 13px;
