@@ -7,7 +7,8 @@ import {
   settlementInput,
   settlementWithReceipt,
 } from "../growth/pricing";
-import { AdminAccessLinks } from "../growth/order-links";
+import { AdminOrderAccess } from "./order-access";
+import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { useIdentity } from "../growth/identity";
 import { useEffect, useState } from "react";
 import {
@@ -222,7 +223,7 @@ export function AdminOrders() {
           <table>
             <thead>
               <tr>
-                <th>提取码 / 下单时间</th>
+                <th className="order-pickup-heading">提取码 / 下单时间</th>
                 <th>联系人</th>
                 <th>打印文件</th>
                 <th>配送信息</th>
@@ -258,16 +259,7 @@ export function AdminOrders() {
                   .map((o) => (
                     <tr key={o.id}>
                       <td>
-                        <Link
-                          className="table-code"
-                          to={`${ADMIN}/orders/${o.id}`}
-                        >
-                          {o.pickupCode}
-                          {o.priority && (
-                            <Star size={12} className="order-priority-star" aria-hidden="true" />
-                          )}
-                        </Link>
-                        <small>{formatDisplayTime(o.createdAt)}</small>
+                        <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} subline={formatDisplayTime(o.createdAt)} trailing={o.priority && <Star size={12} className="order-priority-star" aria-hidden="true" />} />
                       </td>
                       <td>
                         {o.nickname}
@@ -628,8 +620,12 @@ export function AdminOrderDetail() {
           </div>
         }
       />
+      <OrderPickupCode pickup={adminPickupOf(order)} href={`${ADMIN}/orders/${order.id}`} />
       <div className="admin-detail-banner">
         <Badge status={order.status} />
+        {order.identificationProgress?.enabled && (
+          <span className="identification-progress">订单识别页面进度 {order.identificationProgress.completed}/{order.identificationProgress.total}</span>
+        )}
         <span>
           打印 {order.files.filter((f) => f.printStatus === "COMPLETED").length}
           /{order.files.length}
@@ -884,7 +880,7 @@ export function AdminOrderDetail() {
                 </>
               )}
             </Panel>
-            <AdminAccessLinks orderId={order.id} />
+            <AdminOrderAccess order={order} />
           </div>
           <div className="order-detail-column">
             <AdminSupplementaryPanel orderId={order.id} />

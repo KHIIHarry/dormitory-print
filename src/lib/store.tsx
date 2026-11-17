@@ -5,7 +5,7 @@ import {
   LatestTask,
   type ResourceSnapshot,
 } from "./feedback-state";
-import { isUncertainSubmission } from "./api";
+import { isUncertainSubmission, invalidateRequestContext } from "./api";
 import { usePresence, MOTION } from "../components/presence";
 import {
   createContext,
@@ -25,7 +25,14 @@ import { useLocation } from "react-router-dom";
 import { DEMO, ADMIN, mutation, request, now } from "./api";
 import { trashBlockers } from "./trash-blockers";
 import { normalizePrintFile } from "./print-settings";
-import type { DataState, Config, PrintFile, Role, Order, Campus } from "./types";
+import type {
+  DataState,
+  Config,
+  PrintFile,
+  Role,
+  Order,
+  Campus,
+} from "./types";
 const emptyConfig: Config = {
   serviceEnabled: false,
   announcement: "",
@@ -207,7 +214,9 @@ export function Provider({ children }: { children: ReactNode }) {
   const [message, setMessage] = useState("");
   const location = useLocation();
   const today = useShanghaiToday();
-  const courierToday = /^\/courier\/?$/.test(location.pathname) ? today : undefined;
+  const courierToday = /^\/courier\/?$/.test(location.pathname)
+    ? today
+    : undefined;
   const queryClient = useQueryClient();
   const sessionReady = useRef(false);
   const sessionRequest = useRef<Promise<unknown> | null>(null);
@@ -337,7 +346,8 @@ export function Provider({ children }: { children: ReactNode }) {
                   state.buildings.length
                     ? state.buildings
                     : value,
-                ...(resource.name === "buildings" && Array.isArray(payload.campuses)
+                ...(resource.name === "buildings" &&
+                Array.isArray(payload.campuses)
                   ? {
                       campuses:
                         DEMO && state.campuses.length
@@ -364,7 +374,9 @@ export function Provider({ children }: { children: ReactNode }) {
                 ...state,
                 [resource.name]: resource.name === "config" ? emptyConfig : [],
                 ...(resource.name === "buildings" ? { campuses: [] } : {}),
-                ...(resource.name === "orders" && realm === "courier" ? { batches: [] } : {}),
+                ...(resource.name === "orders" && realm === "courier"
+                  ? { batches: [] }
+                  : {}),
               }));
               queryClient.clear();
               if (item.status === 401 && realm !== "customer")
@@ -456,7 +468,13 @@ export function Provider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     void refresh();
-  }, [role, location.pathname, location.search, identity.generation, courierToday]);
+  }, [
+    role,
+    location.pathname,
+    location.search,
+    identity.generation,
+    courierToday,
+  ]);
   useEffect(() => {
     if (DEMO) return;
     const t = setInterval(() => {
@@ -472,7 +490,13 @@ export function Provider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", listener);
       window.removeEventListener("online", listener);
     };
-  }, [role, location.pathname, location.search, identity.generation, courierToday]);
+  }, [
+    role,
+    location.pathname,
+    location.search,
+    identity.generation,
+    courierToday,
+  ]);
   useEffect(() => {
     if (DEMO)
       import("../growth/demo").then((m) => {
@@ -480,6 +504,33 @@ export function Provider({ children }: { children: ReactNode }) {
         m.getDemoGrowth().deliveryFeeCents = data.config.prices.delivery;
       });
   }, [data.orders, data.config.prices.delivery]);
+  useEffect(() => {
+    const endAccess = (event: Event) => {
+      const orderId = (event as CustomEvent<{ orderId: string }>).detail
+        .orderId;
+      invalidateRequestContext();
+      latest.current.invalidate();
+      running.current.forEach((task) => task.controller.abort());
+      running.current.clear();
+      void queryClient.cancelQueries();
+      queryClient.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "public-config",
+      });
+      setData((state) => ({
+        ...state,
+        orders: state.orders.filter((order) => order.id !== orderId),
+      }));
+      setSavedAccessLinks((links) => {
+        const next = { ...links };
+        delete next[orderId];
+        return next;
+      });
+      setEditingOrderId((current) => (current === orderId ? null : current));
+    };
+    window.addEventListener("dormprint:order-access-ended", endAccess);
+    return () =>
+      window.removeEventListener("dormprint:order-access-ended", endAccess);
+  }, [queryClient]);
   useEffect(() => {
     const reset = () => {
       latest.current.invalidate();

@@ -215,6 +215,7 @@ def make_pending_order(db, principal, *, checkout_account=None, auth_kind='ANONY
     order = Order(
         principal_id=principal.id,
         checkout_account_id=checkout_account.id if checkout_account else None,
+        owner_account_id=checkout_account.id if checkout_account else None,
         pickup_code=secrets.token_hex(4).upper(), status='PENDING_CONFIRMATION',
         preparation_id=preparation.id, quote_id=quote.id, total_cents=0,
         nickname='同学', phone='13800000000', location_id=location.id,
@@ -222,6 +223,11 @@ def make_pending_order(db, principal, *, checkout_account=None, auth_kind='ANONY
         data={'checkoutAuthKind': auth_kind},
     )
     db.add(order)
+    db.flush()
+    if not order.owner_account_id:
+        from app.auth import issue_order_grant
+        from app.core import Actor
+        issue_order_grant(db, order, Actor(principal_id=principal.id))
     db.commit()
     return SimpleNamespace(order=order, preparation=preparation, quote=quote,
                            location=location, slot=slot)
@@ -967,7 +973,7 @@ def test_adopt_and_withdraw_checkout_dual_session(client_factory, db):
     db.add_all([location, slot])
     db.flush()
     order = Order(
-        principal_id=account.principal_id, pickup_code='TEST1', status='PENDING_CONFIRMATION',
+        principal_id=account.principal_id, owner_account_id=account.id, pickup_code='TEST1', status='PENDING_CONFIRMATION',
         preparation_id=prep_id, quote_id=quote.id, total_cents=quote.total_cents,
         nickname='测试', phone='13800000000', location_id=location.id,
         requested_slot_id=slot.id, close_at=utcnow() + timedelta(hours=24), data={},
@@ -1603,7 +1609,7 @@ def test_verified_account_upload_prep_settles_with_account_without_adopt(client,
     ).status_code == 409
 
 
-def test_delegated_revision_inherits_checkout_and_rechecks_source_grant(client_factory, db):
+def test_historical_edit_grant_cannot_create_a_delegated_revision(client_factory, db):
     from datetime import timedelta
 
     from sqlalchemy import select
@@ -1643,57 +1649,9 @@ def test_delegated_revision_inherits_checkout_and_rechecks_source_grant(client_f
     body['replacesOrderId'] = order.id
     body['expectedOrderVersion'] = order.version
     created = json_write(editor, '/api/v1/preparations', body)
-    assert created.status_code == 200, created.text
-    prep = created.json()['data']
-    assert prep['sourceGrantId'] == grant.id
-    assert prep['checkoutAccountId'] == owner.id
-    assert prep['checkoutAuthKind'] == 'REGISTERED'
-    prep_id = prep['id']
-    stored_prep = db.get(Preparation, prep_id)
-    db.refresh(stored_prep)
-    assert stored_prep.principal_id == order.principal_id
-    assert stored_prep.source_grant_id == grant.id
-    assert json_write(editor, f'/api/v1/preparations/{prep_id}', None, method='GET').status_code == 200
-    listed = json_write(editor, '/api/v1/preparations', None, method='GET').json()['data']['items']
-    assert any(item['id'] == prep_id for item in listed)
-
-    process_preparation(db, prep_id)
-    view = json_write(editor, f'/api/v1/preparations/{prep_id}', None, method='GET').json()['data']
-    assert view['status'] == 'READY'
-    assert view['quote']['checkoutAccountId'] == owner.id
-    assert len(view['artifacts']) == 1
-    # The source grant also authorizes the editor to preview the final artifact
-    # before the order revision is submitted.
-    artifact_url = view['artifacts'][0]['url']
-    assert editor.get(artifact_url).status_code == 200
-    row = db.get(Preparation, prep_id)
-    db.refresh(row)
-    assert row.source_grant_id == grant.id
-    assert row.checkout_account_id == owner.id
-
-    # A second delegated draft created before revocation must not publish after
-    # the source grant is revoked mid-generation.
-    second_asset = upload(editor, make_pdf(2), 'delegated-2.pdf').json()['data']['assetId']
-    process_asset(db, second_asset)
-    body2 = preparation_payload(second_asset, 2)
-    body2['replacesOrderId'] = order.id
-    body2['expectedOrderVersion'] = order.version
-    second = json_write(editor, '/api/v1/preparations', body2).json()['data']
-    assert second['sourceGrantId'] == grant.id
-    grant_row = db.get(AccessGrant, grant.id)
-    grant_row.revoked_at = utcnow()
-    db.commit()
-    process_preparation(db, second['id'])
-    stale = json_write(editor, f"/api/v1/preparations/{second['id']}", None, method='GET')
-    assert stale.status_code == 404  # revoked source grant removes delegated access
-    stored = db.get(Preparation, second['id'])
-    db.refresh(stored)
-    assert stored.status == 'FAILED'
-    assert stored.data['failureCode'] == 'SOURCE_GRANT_REVOKED'
-    assert db.scalar(select(Artifact.id).where(Artifact.preparation_id == stored.id)) is None
-    # Revoking the source grant also removes delegated access to earlier final
-    # artifacts of this order revision.
-    assert editor.get(artifact_url).status_code == 404
+    assert created.status_code == 404, created.text
+    assert db.scalar(select(Preparation.id).where(Preparation.replaces_order_id == order.id)) is None
+    assert json_write(editor, f'/api/v1/orders/{order.id}', None, method='GET').status_code == 404
 
 
 def test_job_claim_rejects_wrong_lease_token_without_changing_state(client, db):

@@ -1,220 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AccessLinkInput": {
-        "additionalProperties": false,
-        "properties": {
-          "expiresAt": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiresat"
-          },
-          "reason": {
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          },
-          "reissue": {
-            "default": false,
-            "title": "Reissue",
-            "type": "boolean"
-          },
-          "revokePrevious": {
-            "default": false,
-            "title": "Revokeprevious",
-            "type": "boolean"
-          },
-          "scope": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope"
-          },
-          "scopes": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scopes"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "title": "AccessLinkInput",
-        "type": "object"
-      },
-      "AccessLinkIssued": {
-        "additionalProperties": false,
-        "properties": {
-          "accessToken": {
-            "title": "Accesstoken",
-            "type": "string"
-          },
-          "grant": {
-            "$ref": "#/components/schemas/AccessLinkView"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "orderId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Orderid"
-          },
-          "revokedGrantIds": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Revokedgrantids",
-            "type": "array"
-          },
-          "status": {
-            "default": "ISSUED",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "grant",
-          "accessToken"
-        ],
-        "title": "AccessLinkIssued",
-        "type": "object"
-      },
-      "AccessLinkList": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/AccessLinkView"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "AccessLinkList",
-        "type": "object"
-      },
-      "AccessLinkView": {
-        "additionalProperties": false,
-        "properties": {
-          "createdAt": {
-            "format": "date-time",
-            "title": "Createdat",
-            "type": "string"
-          },
-          "createdBy": {
-            "title": "Createdby",
-            "type": "string"
-          },
-          "expiresAt": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expiresat"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "lastAccessAt": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lastaccessat"
-          },
-          "orderId": {
-            "title": "Orderid",
-            "type": "string"
-          },
-          "revokedAt": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Revokedat"
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Scopes",
-            "type": "array"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "orderId",
-          "version",
-          "scopes",
-          "createdAt",
-          "createdBy"
-        ],
-        "title": "AccessLinkView",
-        "type": "object"
-      },
       "ActualStartInput": {
         "additionalProperties": false,
         "properties": {
@@ -277,6 +63,136 @@
           "reason"
         ],
         "title": "AddressReviewInput",
+        "type": "object"
+      },
+      "AdminCaseList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminCaseView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminCaseList",
+        "type": "object"
+      },
+      "AdminCaseView": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustmentBasis": {
+            "title": "Adjustmentbasis",
+            "type": "string"
+          },
+          "adminPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPickup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approvedCents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approvedcents"
+          },
+          "createdAt": {
+            "title": "Createdat",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "orderCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordercode"
+          },
+          "orderId": {
+            "title": "Orderid",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "responsibility": {
+            "title": "Responsibility",
+            "type": "string"
+          },
+          "solution": {
+            "title": "Solution",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "suggestedCents": {
+            "title": "Suggestedcents",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "version",
+          "status",
+          "source",
+          "responsibility",
+          "solution",
+          "reason",
+          "suggestedCents",
+          "adjustmentBasis",
+          "data",
+          "createdAt"
+        ],
+        "title": "AdminCaseView",
         "type": "object"
       },
       "AdminConfigView": {
@@ -659,6 +575,36 @@
           "expectedVersion"
         ],
         "title": "AdminOrderPatch",
+        "type": "object"
+      },
+      "AdminOrderPickup": {
+        "additionalProperties": false,
+        "properties": {
+          "customerDetailId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customerdetailid"
+          },
+          "pickupCode": {
+            "title": "Pickupcode",
+            "type": "string"
+          },
+          "placedWithAccount": {
+            "title": "Placedwithaccount",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pickupCode",
+          "placedWithAccount"
+        ],
+        "title": "AdminOrderPickup",
         "type": "object"
       },
       "AffectedItem": {
@@ -2289,6 +2235,16 @@
       "BindingTaskDTO": {
         "additionalProperties": false,
         "properties": {
+          "adminPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPickup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "bindingType": {
             "default": "NONE",
             "title": "Bindingtype",
@@ -3874,21 +3830,6 @@
         "title": "ConfirmCheckoutInput",
         "type": "object"
       },
-      "ConfirmInput": {
-        "additionalProperties": false,
-        "properties": {
-          "confirm": {
-            "const": true,
-            "title": "Confirm",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "confirm"
-        ],
-        "title": "ConfirmInput",
-        "type": "object"
-      },
       "ConfirmPayment": {
         "additionalProperties": false,
         "properties": {
@@ -4553,6 +4494,71 @@
         "title": "CustomerAccountView",
         "type": "object"
       },
+      "CustomerGuestAccessView": {
+        "additionalProperties": false,
+        "properties": {
+          "canClaimOnDevice": {
+            "default": false,
+            "title": "Canclaimondevice",
+            "type": "boolean"
+          },
+          "canOpen": {
+            "default": false,
+            "title": "Canopen",
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
+          },
+          "openedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openedat"
+          },
+          "serverNow": {
+            "format": "date-time",
+            "title": "Servernow",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "CLOSED",
+              "NO_LINK"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "serverNow"
+        ],
+        "title": "CustomerGuestAccessView",
+        "type": "object"
+      },
       "CustomerList": {
         "additionalProperties": false,
         "properties": {
@@ -4626,6 +4632,16 @@
       "CustomerOrderSummary": {
         "additionalProperties": false,
         "properties": {
+          "adminPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPickup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -6096,11 +6112,11 @@
         "title": "EmailInput",
         "type": "object"
       },
-      "Envelope_AccessLinkIssued_": {
+      "Envelope_AdminCaseList_": {
         "additionalProperties": false,
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/AccessLinkIssued"
+            "$ref": "#/components/schemas/AdminCaseList"
           },
           "requestId": {
             "title": "Requestid",
@@ -6111,14 +6127,14 @@
           "data",
           "requestId"
         ],
-        "title": "Envelope[AccessLinkIssued]",
+        "title": "Envelope[AdminCaseList]",
         "type": "object"
       },
-      "Envelope_AccessLinkList_": {
+      "Envelope_AdminCaseView_": {
         "additionalProperties": false,
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/AccessLinkList"
+            "$ref": "#/components/schemas/AdminCaseView"
           },
           "requestId": {
             "title": "Requestid",
@@ -6129,7 +6145,7 @@
           "data",
           "requestId"
         ],
-        "title": "Envelope[AccessLinkList]",
+        "title": "Envelope[AdminCaseView]",
         "type": "object"
       },
       "Envelope_AdminConfigView_": {
@@ -6672,6 +6688,24 @@
         "title": "Envelope[CustomerAccountView]",
         "type": "object"
       },
+      "Envelope_CustomerGuestAccessView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CustomerGuestAccessView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[CustomerGuestAccessView]",
+        "type": "object"
+      },
       "Envelope_CustomerList_": {
         "additionalProperties": false,
         "properties": {
@@ -6978,24 +7012,6 @@
         "title": "Envelope[FinanceSummary]",
         "type": "object"
       },
-      "Envelope_GrantRevokeResult_": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/GrantRevokeResult"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "data",
-          "requestId"
-        ],
-        "title": "Envelope[GrantRevokeResult]",
-        "type": "object"
-      },
       "Envelope_GrantableAccountList_": {
         "additionalProperties": false,
         "properties": {
@@ -7014,11 +7030,11 @@
         "title": "Envelope[GrantableAccountList]",
         "type": "object"
       },
-      "Envelope_ImportOrderResult_": {
+      "Envelope_GuestAccessOpenView_": {
         "additionalProperties": false,
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/ImportOrderResult"
+            "$ref": "#/components/schemas/GuestAccessOpenView"
           },
           "requestId": {
             "title": "Requestid",
@@ -7029,14 +7045,14 @@
           "data",
           "requestId"
         ],
-        "title": "Envelope[ImportOrderResult]",
+        "title": "Envelope[GuestAccessOpenView]",
         "type": "object"
       },
-      "Envelope_LinkGuestResult_": {
+      "Envelope_GuestAccessView_": {
         "additionalProperties": false,
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/LinkGuestResult"
+            "$ref": "#/components/schemas/GuestAccessView"
           },
           "requestId": {
             "title": "Requestid",
@@ -7047,7 +7063,7 @@
           "data",
           "requestId"
         ],
-        "title": "Envelope[LinkGuestResult]",
+        "title": "Envelope[GuestAccessView]",
         "type": "object"
       },
       "Envelope_LocationView_": {
@@ -7246,6 +7262,24 @@
           "requestId"
         ],
         "title": "Envelope[OrderList]",
+        "type": "object"
+      },
+      "Envelope_OrderOwnerView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OrderOwnerView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[OrderOwnerView]",
         "type": "object"
       },
       "Envelope_OrderResult_": {
@@ -8827,65 +8861,6 @@
         "title": "FinanceSummary",
         "type": "object"
       },
-      "GrantRevokeResult": {
-        "additionalProperties": false,
-        "properties": {
-          "affectedGrantIds": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Affectedgrantids",
-            "type": "array"
-          },
-          "grantId": {
-            "title": "Grantid",
-            "type": "string"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "orderId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Orderid"
-          },
-          "ownerPreserved": {
-            "default": true,
-            "title": "Ownerpreserved",
-            "type": "boolean"
-          },
-          "revoked": {
-            "title": "Revoked",
-            "type": "boolean"
-          },
-          "status": {
-            "default": "REVOKED",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "revoked",
-          "grantId",
-          "affectedGrantIds"
-        ],
-        "title": "GrantRevokeResult",
-        "type": "object"
-      },
       "GrantableAccountList": {
         "additionalProperties": false,
         "properties": {
@@ -8932,6 +8907,180 @@
           "emailMasked"
         ],
         "title": "GrantableAccountView",
+        "type": "object"
+      },
+      "GuestAccessActionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "reason"
+        ],
+        "title": "GuestAccessActionInput",
+        "type": "object"
+      },
+      "GuestAccessOpenView": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "title": "Accesstoken",
+            "type": "string"
+          },
+          "orderId": {
+            "title": "Orderid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orderId",
+          "accessToken"
+        ],
+        "title": "GuestAccessOpenView",
+        "type": "object"
+      },
+      "GuestAccessResetInput": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "default": 14,
+            "maximum": 14,
+            "minimum": 1,
+            "title": "Days",
+            "type": "integer"
+          },
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "reason"
+        ],
+        "title": "GuestAccessResetInput",
+        "type": "object"
+      },
+      "GuestAccessView": {
+        "additionalProperties": false,
+        "properties": {
+          "canOpen": {
+            "default": false,
+            "title": "Canopen",
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
+          },
+          "openedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openedat"
+          },
+          "serverNow": {
+            "format": "date-time",
+            "title": "Servernow",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "EXPIRED",
+              "CLOSED",
+              "NO_LINK"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "serverNow"
+        ],
+        "title": "GuestAccessView",
+        "type": "object"
+      },
+      "GuestOrderClaimInput": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "title": "GuestOrderClaimInput",
+        "type": "object"
+      },
+      "GuestOwnerInput": {
+        "additionalProperties": false,
+        "properties": {
+          "accountId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Accountid",
+            "type": "string"
+          },
+          "expectedVersion": {
+            "minimum": 1,
+            "title": "Expectedversion",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "reason",
+          "accountId"
+        ],
+        "title": "GuestOwnerInput",
         "type": "object"
       },
       "HistoryView": {
@@ -9005,93 +9154,6 @@
         "title": "ImpactView",
         "type": "object"
       },
-      "ImportOrderInput": {
-        "additionalProperties": false,
-        "properties": {
-          "confirm": {
-            "const": true,
-            "title": "Confirm",
-            "type": "boolean"
-          },
-          "orderId": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Orderid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "orderId",
-          "confirm"
-        ],
-        "title": "ImportOrderInput",
-        "type": "object"
-      },
-      "ImportOrderResult": {
-        "additionalProperties": false,
-        "properties": {
-          "accountOrderGrantId": {
-            "title": "Accountordergrantid",
-            "type": "string"
-          },
-          "expiresAt": {
-            "format": "date-time",
-            "title": "Expiresat",
-            "type": "string"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "orderId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Orderid"
-          },
-          "ownerPreserved": {
-            "default": true,
-            "title": "Ownerpreserved",
-            "type": "boolean"
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Scopes",
-            "type": "array"
-          },
-          "sourceGrantId": {
-            "title": "Sourcegrantid",
-            "type": "string"
-          },
-          "status": {
-            "default": "IMPORTED",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "accountOrderGrantId",
-          "sourceGrantId",
-          "scopes",
-          "expiresAt"
-        ],
-        "title": "ImportOrderResult",
-        "type": "object"
-      },
       "LedgerSummaryDTO": {
         "additionalProperties": false,
         "properties": {
@@ -9154,52 +9216,6 @@
           "staffName"
         ],
         "title": "LedgerSummaryDTO",
-        "type": "object"
-      },
-      "LinkGuestResult": {
-        "additionalProperties": false,
-        "properties": {
-          "customerPrincipalId": {
-            "title": "Customerprincipalid",
-            "type": "string"
-          },
-          "guestPrincipalId": {
-            "title": "Guestprincipalid",
-            "type": "string"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "rotationCompleted": {
-            "title": "Rotationcompleted",
-            "type": "boolean"
-          },
-          "status": {
-            "default": "LINKED",
-            "title": "Status",
-            "type": "string"
-          },
-          "visibleScope": {
-            "const": "LINKED_ORDERS",
-            "default": "LINKED_ORDERS",
-            "title": "Visiblescope",
-            "type": "string"
-          }
-        },
-        "required": [
-          "rotationCompleted",
-          "customerPrincipalId",
-          "guestPrincipalId"
-        ],
-        "title": "LinkGuestResult",
         "type": "object"
       },
       "LocationExceptionApprovalView": {
@@ -10582,6 +10598,11 @@
             ],
             "title": "Orderid"
           },
+          "serverNow": {
+            "format": "date-time",
+            "title": "Servernow",
+            "type": "string"
+          },
           "status": {
             "default": "EXCHANGED",
             "title": "Status",
@@ -10590,7 +10611,8 @@
         },
         "required": [
           "order",
-          "access"
+          "access",
+          "serverNow"
         ],
         "title": "OrderAccessExchange",
         "type": "object"
@@ -10848,6 +10870,25 @@
         "title": "OrderLocationSnapshot",
         "type": "object"
       },
+      "OrderOwnerView": {
+        "additionalProperties": false,
+        "properties": {
+          "orderId": {
+            "title": "Orderid",
+            "type": "string"
+          },
+          "ownerAccountId": {
+            "title": "Owneraccountid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orderId",
+          "ownerAccountId"
+        ],
+        "title": "OrderOwnerView",
+        "type": "object"
+      },
       "OrderResult": {
         "additionalProperties": false,
         "properties": {
@@ -10926,6 +10967,11 @@
             "title": "Accesskind",
             "type": "string"
           },
+          "accountOwned": {
+            "default": false,
+            "title": "Accountowned",
+            "type": "boolean"
+          },
           "actualStartedAt": {
             "anyOf": [
               {
@@ -10940,6 +10986,16 @@
           "addressReview": {
             "title": "Addressreview",
             "type": "boolean"
+          },
+          "adminPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPickup"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "allowedActions": {
             "items": {
@@ -11025,6 +11081,18 @@
             "title": "Customernote",
             "type": "string"
           },
+          "customerSummary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customersummary"
+          },
           "deliveryAssignmentId": {
             "anyOf": [
               {
@@ -11061,6 +11129,18 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "identificationProgress": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identificationprogress"
           },
           "locationId": {
             "title": "Locationid",
@@ -11384,6 +11464,16 @@
       "PackingTaskDTO": {
         "additionalProperties": false,
         "properties": {
+          "adminPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPickup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "checklist": {
             "$ref": "#/components/schemas/ProductionChecklistDTO"
           },
@@ -12971,6 +13061,16 @@
               }
             ],
             "title": "Actualstartedat"
+          },
+          "adminPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPickup"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "artifactId": {
             "title": "Artifactid",
@@ -19449,10 +19549,6 @@
         "$ref": "#/components/schemas/OrderAccessView",
         "description": "前端兼容别名，实际后端 DTO 为 OrderAccessView。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。"
       },
-      "AccessLink": {
-        "$ref": "#/components/schemas/AccessLinkView",
-        "description": "前端兼容别名，实际后端 DTO 为 AccessLinkView。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。"
-      },
       "MailConfig": {
         "$ref": "#/components/schemas/MailConfigDTO",
         "description": "前端兼容别名，实际后端 DTO 为 MailConfigDTO。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。"
@@ -19670,7 +19766,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseList_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseList_"
                 }
               }
             },
@@ -19719,7 +19815,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseView_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseView_"
                 }
               }
             },
@@ -19806,7 +19902,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseView_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseView_"
                 }
               }
             },
@@ -19903,7 +19999,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseView_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseView_"
                 }
               }
             },
@@ -20097,7 +20193,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseView_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseView_"
                 }
               }
             },
@@ -20194,7 +20290,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseView_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseView_"
                 }
               }
             },
@@ -26078,354 +26174,6 @@
         "summary": "Update Admin Order"
       }
     },
-    "/admin/orders/{order_id}/access-links": {
-      "get": {
-        "operationId": "admin_access_links_api_v1_admin_orders__order_id__access_links_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "order_id",
-            "required": true,
-            "schema": {
-              "title": "Order Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_AccessLinkList_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Admin Access Links"
-      },
-      "post": {
-        "operationId": "admin_issue_access_link_api_v1_admin_orders__order_id__access_links_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "order_id",
-            "required": true,
-            "schema": {
-              "title": "Order Id",
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccessLinkInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_AccessLinkIssued_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Admin Issue Access Link"
-      }
-    },
-    "/admin/orders/{order_id}/access-links/reissue": {
-      "post": {
-        "description": "Explicit lost-credential reissue: revoke the order's prior links first.",
-        "operationId": "admin_reissue_access_link_api_v1_admin_orders__order_id__access_links_reissue_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "order_id",
-            "required": true,
-            "schema": {
-              "title": "Order Id",
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccessLinkInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_AccessLinkIssued_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Admin Reissue Access Link"
-      }
-    },
-    "/admin/orders/{order_id}/access-links/{grant_id}/revoke": {
-      "post": {
-        "operationId": "admin_revoke_access_link_api_v1_admin_orders__order_id__access_links__grant_id__revoke_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "order_id",
-            "required": true,
-            "schema": {
-              "title": "Order Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "grant_id",
-            "required": true,
-            "schema": {
-              "title": "Grant Id",
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReasonInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_GrantRevokeResult_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Admin Revoke Access Link"
-      }
-    },
     "/admin/orders/{order_id}/after-sales": {
       "post": {
         "operationId": "admin_create_api_v1_admin_orders__order_id__after_sales_post",
@@ -26483,7 +26231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_CaseView_"
+                  "$ref": "#/components/schemas/Envelope_AdminCaseView_"
                 }
               }
             },
@@ -26716,6 +26464,395 @@
           }
         },
         "summary": "Confirm Payment"
+      }
+    },
+    "/admin/orders/{order_id}/guest-access": {
+      "get": {
+        "operationId": "admin_guest_access_api_v1_admin_orders__order_id__guest_access_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GuestAccessView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Guest Access"
+      }
+    },
+    "/admin/orders/{order_id}/guest-access/close": {
+      "post": {
+        "operationId": "admin_close_guest_access_api_v1_admin_orders__order_id__guest_access_close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestAccessActionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GuestAccessView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Close Guest Access"
+      }
+    },
+    "/admin/orders/{order_id}/guest-access/open": {
+      "get": {
+        "operationId": "admin_open_guest_access_api_v1_admin_orders__order_id__guest_access_open_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GuestAccessOpenView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Open Guest Access"
+      }
+    },
+    "/admin/orders/{order_id}/guest-access/reset": {
+      "post": {
+        "operationId": "admin_reset_guest_access_api_v1_admin_orders__order_id__guest_access_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestAccessResetInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_GuestAccessView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Reset Guest Access"
+      }
+    },
+    "/admin/orders/{order_id}/guest-owner": {
+      "post": {
+        "operationId": "admin_bind_guest_owner_api_v1_admin_orders__order_id__guest_owner_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestOwnerInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrderOwnerView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Admin Bind Guest Owner"
       }
     },
     "/admin/orders/{order_id}/identification/retry": {
@@ -34405,182 +34542,6 @@
         "summary": "Customer Deletion Requests"
       }
     },
-    "/customer/account/import-order": {
-      "post": {
-        "operationId": "customer_import_order_api_v1_customer_account_import_order_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImportOrderInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_ImportOrderResult_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Customer Import Order",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/customer/account/link-guest": {
-      "post": {
-        "operationId": "customer_link_guest_api_v1_customer_account_link_guest_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConfirmInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_LinkGuestResult_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Customer Link Guest",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Origin",
-            "in": "header",
-            "required": false,
-            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
     "/customer/account/notification-preferences": {
       "patch": {
         "operationId": "customer_notification_preferences_api_v1_customer_account_notification_preferences_patch",
@@ -35689,6 +35650,152 @@
           }
         },
         "summary": "Customer Orders"
+      }
+    },
+    "/customer/orders/{order_id}/claim": {
+      "post": {
+        "operationId": "customer_claim_order_api_v1_customer_orders__order_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GuestOrderClaimInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OrderOwnerView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Customer Claim Order"
+      }
+    },
+    "/customer/orders/{order_id}/guest-access": {
+      "get": {
+        "operationId": "customer_guest_access_api_v1_customer_orders__order_id__guest_access_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CustomerGuestAccessView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Customer Guest Access"
       }
     },
     "/customer/referrals": {

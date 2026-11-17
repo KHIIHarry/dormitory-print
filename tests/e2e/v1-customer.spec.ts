@@ -546,8 +546,8 @@ test("account settings has two identity actions and mobile-only rewards navigati
   await installApi(page);
   await page.goto(appUrl("/u/account"));
   const identity = page.locator("section.panel").filter({ has: page.getByRole("heading", { name: "订单与身份", exact: true }) });
-  await expect(identity.getByRole("button")).toHaveText(["关联本机游客订单"]);
-  await expect(identity.getByRole("link")).toHaveText(["注销账号"]);
+  await expect(identity.getByRole("button")).toHaveCount(0);
+  await expect(identity.getByRole("link")).toHaveText(["前往本机订单", "注销账号"]);
   await expect(page.getByRole("heading", { name: "导出我的个人资料" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "提交注销申请" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "退出客户账号" })).toHaveCount(0);
@@ -556,7 +556,7 @@ test("account settings has two identity actions and mobile-only rewards navigati
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
-    await expect(identity.getByRole("link")).toHaveCount(1);
+    await expect(identity.getByRole("link")).toHaveCount(2);
     const heights = await identity.locator(".account-actions .btn").evaluateAll((buttons) =>
       buttons.map((button) => button.getBoundingClientRect().height),
     );
@@ -741,6 +741,94 @@ test("admin customer search submits an email and shows it on list and detail", a
     if (width === 390 || width === 1440)
       await details.screenshot({ path: info.outputPath(`customer-email-${width}.png`), scale: "css" });
   }
+});
+
+for (const denial of [
+  { status: 401, code: "AUTH_REQUIRED", message: "请先建立客户会话", name: "expired session" },
+  { status: 403, code: "ACCOUNT_VERIFICATION_REQUIRED", message: "请登录已验证账号", name: "replaced session with a guest cookie" },
+]) {
+  test(`account reload opens login after ${denial.name}`, async ({ page }, info) => {
+    await installApi(page);
+    let signedIn = true;
+    await page.route("**/api/v1/customer/auth/me", (route) =>
+      route.fulfill({ json: envelope(signedIn ? customerSession : { role: "CUSTOMER", authKind: "ANONYMOUS" }) }),
+    );
+    await page.route("**/api/v1/customer/account", (route) =>
+      signedIn
+        ? route.fulfill({ json: envelope(customerSession.account) })
+        : route.fulfill({ status: denial.status, json: errorEnvelope(denial.code, denial.message) }),
+    );
+    await page.route("**/api/v1/customer/auth/login", (route) => {
+      signedIn = true;
+      return route.fulfill({ json: envelope(customerSession) });
+    });
+
+    await page.goto(appUrl("/u/account"));
+    await expect(page.getByRole("heading", { name: "账号设置" })).toBeVisible();
+    signedIn = false;
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    const reload = page.getByRole("button", { name: "重新加载" });
+    await expect(reload).toBeVisible();
+    await expect(page.getByText(denial.message, { exact: true })).toBeVisible();
+    expect((await reload.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await reload.click();
+
+    await expect(page).toHaveURL(/\/u\/account\/login\?returnTo=%2Fu%2Faccount$/);
+    await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible();
+    await expect(page.locator("a.header-profile")).toHaveAttribute("href", "/u/account/login");
+    const email = page.getByRole("textbox", { name: "邮箱" });
+    const password = page.getByLabel("密码", { exact: true });
+    const submit = page.getByRole("button", { name: "登录", exact: true });
+    const showPassword = page.getByRole("button", { name: "显示密码" });
+    for (const width of [320, 375, 390, 430, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+      for (const control of [email, password, showPassword, submit]) {
+        const layout = await control.evaluate((element) => {
+          const panel = element.closest(".panel")!;
+          const panelBox = panel.getBoundingClientRect();
+          const { paddingLeft, paddingRight } = getComputedStyle(panel);
+          const box = element.getBoundingClientRect();
+          return {
+            fits: box.left >= panelBox.left + parseFloat(paddingLeft) - 1 &&
+              box.right <= panelBox.right - parseFloat(paddingRight) + 1,
+            height: box.height,
+            font: parseFloat(getComputedStyle(element).fontSize),
+          };
+        });
+        expect(layout.fits).toBe(true);
+        expect(layout.height).toBeGreaterThanOrEqual(44);
+        if (control === email || control === password)
+          expect(layout.font).toBeGreaterThanOrEqual(16);
+      }
+      if (width === 390 || width === 1440)
+        await page.screenshot({ path: info.outputPath(`account-relogin-${width}.png`), scale: "css" });
+    }
+    await email.fill("test@example.com");
+    await password.fill("fixture-password");
+    await submit.click();
+    await expect(page).toHaveURL(/\/u\/account$/);
+    await expect(page.getByRole("heading", { name: "账号设置" })).toBeVisible();
+  });
+}
+
+test("account reload retries temporary failures without redirecting to login", async ({ page }) => {
+  const state = await installApi(page);
+  let unavailable = true;
+  await page.route("**/api/v1/customer/account", (route) =>
+    unavailable
+      ? route.fulfill({ status: 503, json: errorEnvelope("SERVICE_UNAVAILABLE", "暂时无法连接服务") })
+      : route.fulfill({ json: envelope(customerSession.account) }),
+  );
+  await page.goto(appUrl("/u/account"));
+  const reload = page.getByRole("button", { name: "重新加载" });
+  await expect(reload).toBeVisible();
+  const probes = state.calls.filter((call) => call.path === "/customer/auth/me").length;
+  unavailable = false;
+  await reload.click();
+  await expect(page.getByRole("heading", { name: "账号设置" })).toBeVisible();
+  await expect(page).toHaveURL(/\/u\/account$/);
+  expect(state.calls.filter((call) => call.path === "/customer/auth/me")).toHaveLength(probes);
 });
 
 test("deletion request needs explicit confirmation, posts the current DTO and signs out into seven-day recovery", async ({

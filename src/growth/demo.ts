@@ -8,7 +8,6 @@ import {
 } from "./demo-promotions";
 import { DEFAULT_TEMPLATE_HTML } from "./mailTemplates";
 import type {
-  AccessLink,
   Campaign,
   Coupon,
   CustomerAccount,
@@ -298,7 +297,8 @@ const db = {
   referrals: [] as PromotionReferral[],
   links: [] as AccessLink[],
   orders: new Map<string, Order>(),
-  tokens: new Map<string, { orderId: string; grantId: string }>(),
+  tokens: new Map<string, { orderId: string; grantId: string; token: string }>(),
+  guestVersions: new Map<string, number>(),
   access: null as OrderAccess | null,
   preps: new Map<string, Record<string, unknown>>(),
   exports: new Map<
@@ -309,18 +309,17 @@ const db = {
     string,
     { email: string; token: string; inviteCode?: string }
   >(),
-  imports: new Map<
-    string,
-    {
-      id: string;
-      accountId: string;
-      orderId: string;
-      sourceGrantId: string;
-      scopes: string[];
-      expiresAt: string | null;
-    }
-  >(),
   qualified: new Set<string>(),
+};
+type AccessLink = {
+  id: string;
+  orderId: string;
+  version: number;
+  scopes: string[];
+  createdAt: string;
+  createdBy: string;
+  expiresAt: string;
+  revokedAt: string | null;
 };
 export function setDemoStaff(staff: StaffSession | null) {
   db.staff = staff;
@@ -343,8 +342,7 @@ export function syncDemoOrders(orders: Order[]) {
   for (const projected of orders) {
     const previous = db.orders.get(projected.id);
     const restricted =
-      projected.accessKind === "ORDER_GRANT" ||
-      projected.accessKind === "IMPORTED_GRANT";
+      projected.accessKind === "ORDER_GRANT";
     const order =
       restricted && previous
         ? {
@@ -397,32 +395,36 @@ export function syncDemoOrders(orders: Order[]) {
   }
 }
 const readScopes = ["ORDER_VIEW", "FINAL_PDF_PREVIEW", "DELIVERY_PROOF_VIEW"];
-function grantedSources(
-  orderId: string,
-  customer = db.customer,
-  access = db.access,
-) {
-  const sources: AccessLink[] = [];
-  if (access?.orderId === orderId) {
-    const link = validLink(access.sourceGrantId);
-    if (link) sources.push(link);
-  }
-  if (customer.authKind === "REGISTERED")
-    for (const imported of db.imports.values())
-      if (
-        imported.accountId === customer.account?.id &&
-        imported.orderId === orderId
-      ) {
-        const source = validLink(imported.sourceGrantId);
-        if (source)
-          sources.push({
-            ...source,
-            scopes: source.scopes.filter((scope) =>
-              imported.scopes.includes(scope),
-            ),
-          });
-      }
-  return sources;
+function currentGuestLink(orderId: string) {
+  return db.links.find(link => link.orderId === orderId && !link.revokedAt);
+}
+function guestAccessView(orderId: string) {
+  const root = currentGuestLink(orderId) || [...db.links].reverse().find(link => link.orderId === orderId);
+  const order = db.orders.get(orderId);
+  const status = order?.ownerAccountId || root?.revokedAt ? "CLOSED" : !root ? "NO_LINK"
+    : Date.parse(root.expiresAt) <= Date.now() ? "EXPIRED" : "ACTIVE";
+  return { status, version: db.guestVersions.get(orderId) ?? 1, openedAt: root?.createdAt ?? null,
+    expiresAt: root?.expiresAt ?? null, serverNow: date(), canOpen: status === "ACTIVE",
+    canClaimOnDevice: status === "ACTIVE" && order?.ownerPrincipalId === db.guestPrincipalId &&
+      db.customer.authKind === "REGISTERED" };
+}
+function closeGuestAccess(orderId: string) {
+  for (const link of db.links) if (link.orderId === orderId && !link.revokedAt) link.revokedAt = date();
+  db.guestVersions.set(orderId, (db.guestVersions.get(orderId) ?? 1) + 1);
+  if (db.access?.orderId === orderId) db.access = null;
+}
+async function createGuestLink(orderId: string, days = 14) {
+  const token = uid().replaceAll("-", "") + uid().replaceAll("-", "");
+  const grant: AccessLink = { id: uid(), orderId, version: 1, scopes: [...readScopes],
+    createdAt: date(), createdBy: "演示会话", expiresAt: new Date(Date.now() + days * 86400000).toISOString(), revokedAt: null };
+  db.links.push(grant);
+  db.tokens.set(await hash(token), { orderId, grantId: grant.id, token });
+  return token;
+}
+function grantedSources(orderId: string, _customer = db.customer, access = db.access) {
+  if (db.orders.get(orderId)?.ownerAccountId || access?.orderId !== orderId) return [];
+  const link = validLink(access.sourceGrantId);
+  return link ? [link] : [];
 }
 function customerOrderView(order: Order): Order {
   if (!order.settlement) return { ...order };
@@ -458,10 +460,26 @@ export function visibleDemoOrders(
   access: OrderAccess | null,
 ) {
   const all = [...db.orders.values()];
+  if (view === "admin") {
+    const canCustomer = db.staff?.role === "ADMIN" && !db.staff.mustChangePassword &&
+      (db.staff.capabilities || []).some(capability => ["*", "customer.manage"].includes(capability));
+    return all.map(order => {
+      const customer = canCustomer ? db.accounts.find(account => account.id === order.ownerAccountId) : null;
+      const placedWithAccount = !!order.checkoutAccountId;
+      return {
+        ...order,
+        accountOwned: !!order.ownerAccountId,
+        adminPickup: { pickupCode: order.pickupCode, placedWithAccount,
+          customerDetailId: placedWithAccount && canCustomer ? order.ownerAccountId ?? null : null },
+        customerSummary: customer ? { accountId: customer.id, email: customer.email,
+          displayName: customer.displayName, createdAt: customer.createdAt, verified: customer.verified } : null,
+      };
+    });
+  }
   if (view !== "customer") return all;
   return all.flatMap((order) => {
     const owned =
-      order.ownerPrincipalId === db.guestPrincipalId ||
+      (!order.ownerAccountId && order.ownerPrincipalId === db.guestPrincipalId && guestAccessView(order.id).status === "ACTIVE") ||
       (customer.authKind === "REGISTERED" &&
         !!order.ownerAccountId &&
         order.ownerAccountId === customer.account?.id);
@@ -470,27 +488,13 @@ export function visibleDemoOrders(
         {
           ...customerOrderView(order),
           accessKind:
-            order.ownerPrincipalId === db.guestPrincipalId
-              ? "GUEST_OWNER"
-              : "OWNER",
+            order.ownerAccountId ? "OWNER" : "GUEST_OWNER",
         } as Order,
       ];
     const sources = grantedSources(order.id, customer, access);
     const scopes = [...new Set(sources.flatMap((source) => source.scopes))];
     if (!scopes.includes("ORDER_VIEW")) return [];
-    const imported = [...db.imports.values()].some(
-      (g) =>
-        g.accountId === customer.account?.id &&
-        g.orderId === order.id &&
-        validLink(g.sourceGrantId),
-    );
-    return [
-      grantOrderView(
-        order,
-        scopes,
-        imported ? "IMPORTED_GRANT" : "ORDER_GRANT",
-      ),
-    ];
+    return [grantOrderView(order, scopes, "ORDER_GRANT")];
   });
 }
 export function validateDemoOrderAction(path: string, input: unknown) {
@@ -579,29 +583,17 @@ const hash = async (value: string) =>
   ).join("");
 function ownsOrder(order: Order) {
   return (
-    order.ownerPrincipalId === db.guestPrincipalId ||
+    (!order.ownerAccountId && order.ownerPrincipalId === db.guestPrincipalId && guestAccessView(order.id).status === "ACTIVE") ||
     (db.customer.authKind === "REGISTERED" &&
       !!order.ownerAccountId &&
       order.ownerAccountId === db.customer.account?.id)
   );
 }
-function protectDelegatedQuote(original: Order | undefined, quote: Quote) {
-  if (!original || ownsOrder(original)) return;
-  const reserved = couponFor(original);
-  if (
-    reserved &&
-    !(
-      quote.discounts[0]?.kind === "COUPON" &&
-      quote.discounts[0].couponGrantId === reserved.couponGrantId
-    )
-  )
-    fail(
-      "原预约优惠不再适用，请由订单持有人重新选择并确认；受托修订未激活",
-      "OWNER_REQUOTE_REQUIRED",
-      409,
-    );
-}
 function requirePrepPrincipal(prep: Record<string, unknown>) {
+  if (prep.replacesOrderId) {
+    const order = db.orders.get(String(prep.replacesOrderId));
+    if (!order || !ownsOrder(order)) fail("请由订单持有人编辑", "NOT_FOUND", 404);
+  }
   if (
     !prep.replacesOrderId &&
     prep.guestPrincipalId !== db.guestPrincipalId &&
@@ -766,7 +758,7 @@ export async function demoRequest(
       role: "CUSTOMER",
       authKind: "REGISTERED", recovered: false,
       account: db.account,
-      capabilities: ["ORDER_IMPORT", "COUPONS", "REFERRALS", "LINK_GUEST"],
+      capabilities: ["COUPONS", "REFERRALS"],
     };
     grantCampaigns();
     return db.customer;
@@ -790,7 +782,7 @@ export async function demoRequest(
       role: "CUSTOMER",
       authKind: "REGISTERED", recovered: false,
       account: db.account,
-      capabilities: ["ORDER_IMPORT", "COUPONS", "REFERRALS", "LINK_GUEST"],
+      capabilities: ["COUPONS", "REFERRALS"],
     };
     grantCampaigns();
     return db.customer;
@@ -882,7 +874,7 @@ export async function demoRequest(
       role: "CUSTOMER",
       authKind: "REGISTERED", recovered: false,
       account: next,
-      capabilities: ["ORDER_IMPORT", "COUPONS", "REFERRALS", "LINK_GUEST"],
+      capabilities: ["COUPONS", "REFERRALS"],
     };
     grantCampaigns();
     return db.customer;
@@ -900,63 +892,6 @@ export async function demoRequest(
       "TOKEN_EXPIRED",
       410,
     );
-  }
-  if (path === "/customer/account/link-guest") {
-    const current = requireAccount();
-    if (body.confirm !== true) fail("请明确确认关联");
-    for (const order of db.orders.values())
-      if (order.ownerPrincipalId === db.guestPrincipalId) {
-        order.ownerAccountId = current.id;
-        order.ownerPrincipalId = `account-${current.id}`;
-      }
-    for (const prep of db.preps.values())
-      if (
-        prep.guestPrincipalId === db.guestPrincipalId &&
-        !prep.replacesOrderId
-      ) {
-        prep.linkedAccountId = current.id;
-        prep.checkoutAccountId = current.id;
-        prep.version = Number(prep.version) + 1;
-        prep.quote = buildQuote(
-          prep.lines as Quote["lines"],
-          db.volume,
-          quoteCoupons(current.id),
-          { selectionMode: "AUTO" },
-          current.id,
-          undefined,
-          db.deliveryFeeCents,
-        );
-      }
-    db.guestPrincipalId = uid();
-    return {
-      rotationCompleted: true,
-      customerPrincipalId: `account-${current.id}`,
-    };
-  }
-  if (path === "/customer/account/import-order") {
-    requireAccount();
-    if (
-      !db.access ||
-      db.access.orderId !== body.orderId ||
-      !db.access.scopes.includes("ORDER_IMPORT")
-    )
-      fail("当前单订单授权不包含导入权限", "ORDER_IMPORT_SCOPE_DENIED", 403);
-    const source = db.links.find((l) => l.id === db.access!.sourceGrantId);
-    if (body.confirm !== true) fail("请明确确认单单导入");
-    if (!source || !validLink(source.id))
-      fail("来源授权已失效", "ORDER_GRANT_REVOKED", 403);
-    const a = requireAccount();
-    const key = `${a.id}:${body.orderId}:${source!.id}`;
-    const grant = db.imports.get(key) || {
-      id: uid(),
-      accountId: a.id,
-      orderId: body.orderId,
-      sourceGrantId: source!.id,
-      scopes: [...source!.scopes],
-      expiresAt: source!.expiresAt ?? null,
-    };
-    db.imports.set(key, grant);
-    return { accountOrderGrantId: grant.id, ...grant };
   }
   if (path === "/customer/account" && !write) return requireAccount();
   if (path === "/customer/account" && write) {
@@ -1043,6 +978,8 @@ export async function demoRequest(
     const original = body.replacesOrderId
       ? db.orders.get(body.replacesOrderId)
       : undefined;
+    if (original && !ownsOrder(original))
+      fail("请由订单持有人编辑", "NOT_FOUND", 404);
     if (original && original.status !== "PENDING_CONFIRMATION")
       fail("订单已经结算，不能改版", "ORDER_STATUS_CONFLICT", 409);
     const accountId = original
@@ -1059,19 +996,10 @@ export async function demoRequest(
       original?.id,
       db.deliveryFeeCents,
     );
-    protectDelegatedQuote(original, quote);
     const prep = {
       ...body,
       checkoutAccountId: accountId,
       guestPrincipalId: db.guestPrincipalId,
-      sourceGrantIds:
-        original && !ownsOrder(original)
-          ? grantedSources(original.id)
-              .filter((source) =>
-                source.scopes.includes("ORDER_REVISE_PENDING"),
-              )
-              .map((source) => source.id)
-          : undefined,
       id,
       version: 1,
       status: "READY",
@@ -1132,12 +1060,6 @@ export async function demoRequest(
         prep!.replacesOrderId as string | undefined,
         db.deliveryFeeCents,
       );
-      protectDelegatedQuote(
-        prep!.replacesOrderId
-          ? db.orders.get(String(prep!.replacesOrderId))
-          : undefined,
-        prep!.quote as Quote,
-      );
       return prep!.quote;
     }
     return prep;
@@ -1169,15 +1091,7 @@ export async function demoRequest(
         original.version !== prep!.expectedOrderVersion)
     )
       fail("原订单已变化", "VERSION_CONFLICT", 409);
-    if (
-      original &&
-      !ownsOrder(original) &&
-      !(prep!.sourceGrantIds as string[] | undefined)?.some((id) =>
-        validLink(id)?.scopes.includes("ORDER_REVISE_PENDING"),
-      )
-    )
-      fail("委托来源已失效或不允许修订", "ORDER_GRANT_REVOKED", 403);
-    protectDelegatedQuote(original, quote);
+    if (original && !ownsOrder(original)) fail("请由订单持有人编辑", "NOT_FOUND", 404);
     const chosen = quote.discounts[0];
     let coupon: Coupon | undefined;
     if (chosen?.kind === "COUPON") {
@@ -1215,29 +1129,8 @@ export async function demoRequest(
       coupon.version++;
     }
     let accessToken: string | undefined;
-    if (!original) {
-      accessToken = uid().replaceAll("-", "") + uid().replaceAll("-", "");
-      const grant: AccessLink = {
-        id: uid(),
-        orderId: body.orderId,
-        version: 1,
-        scopes: [
-          ...readScopes,
-          "ORDER_REVISE_PENDING",
-          "ORDER_CANCEL_PENDING",
-          "ORDER_CHANGE_LOCATION_PRE_DELIVERY",
-          "ORDER_IMPORT",
-        ],
-        createdAt: date(),
-        createdBy: "下单会话",
-        expiresAt: null,
-        revokedAt: null,
-      };
-      db.links.push(grant);
-      db.tokens.set(await hash(accessToken), {
-        orderId: body.orderId,
-        grantId: grant.id,
-      });
+    if (!original && !quote.checkoutAccountId) {
+      accessToken = await createGuestLink(body.orderId);
     }
     return {
       accessToken,
@@ -1255,61 +1148,79 @@ export async function demoRequest(
       !link ||
       link.orderId !== body.orderId ||
       link.revokedAt ||
+      db.orders.get(body.orderId)?.ownerAccountId ||
       (link.expiresAt && Date.parse(link.expiresAt) <= Date.now())
     )
-      fail("链接已失效，请联系打印员重新发送", "ORDER_LINK_EXPIRED", 410);
+      fail("链接已停止访问或已到期，请联系管理员", link?.revokedAt || db.orders.get(body.orderId)?.ownerAccountId ? "ORDER_GRANT_REVOKED" : "ORDER_GRANT_EXPIRED", 410);
     const order = db.orders.get(body.orderId);
     if (!order) fail("订单不存在", "NOT_FOUND", 404);
     db.access = {
       orderId: body.orderId,
       sourceGrantId: link!.id,
       scopes: link!.scopes,
-      allowedActions: order!.allowedActions,
+      allowedActions: [...readScopes],
       expiresAt: link!.expiresAt,
     };
     const serialized = ownsOrder(order!)
       ? ({
           ...customerOrderView(order!),
           accessKind:
-            order!.ownerPrincipalId === db.guestPrincipalId
-              ? "GUEST_OWNER"
-              : "OWNER",
+            order!.ownerAccountId ? "OWNER" : "GUEST_OWNER",
         } as Order)
       : grantOrderView(order!, link!.scopes, "ORDER_GRANT");
-    return { order: serialized, access: db.access };
+    return { order: serialized, access: db.access, serverNow: date() };
   }
-  if (seg[0] === "admin" && seg[1] === "orders" && seg[3] === "access-links") {
-    if (!write) return { items: db.links.filter((l) => l.orderId === seg[2]) };
-    if (seg[5] === "revoke") {
-      const link = db.links.find((l) => l.id === seg[4]);
-      if (link) link.revokedAt = date();
-      return { success: true };
+  const adminGuest = path.match(/^\/admin\/orders\/([^/]+)\/(guest-access(?:\/(open|close|reset))?|guest-owner)$/);
+  if (adminGuest) {
+    const orderId = adminGuest[1];
+    const order = db.orders.get(orderId) || fail("订单不存在", "NOT_FOUND", 404);
+    const capabilities = db.staff?.capabilities ?? [];
+    if (!db.staff || !["*", "order.access-link.manage"].some(cap => capabilities.includes(cap)))
+      fail("无权管理订单访问", "FORBIDDEN", 403);
+    if (order.ownerAccountId) fail("订单已关联账号", "ORDER_ALREADY_OWNED", 409);
+    if (!write && adminGuest[3] !== "open") return guestAccessView(orderId);
+    if (adminGuest[3] === "open") {
+      const link = currentGuestLink(orderId);
+      if (!link || !validLink(link.id)) fail("游客订单链接已到期", "ORDER_GRANT_EXPIRED", 410);
+      const credential = [...db.tokens.values()].find(value => value.grantId === link!.id);
+      if (!credential) fail("请重置链接", "GUEST_LINK_RESET_REQUIRED", 409);
+      return { orderId, accessToken: credential!.token };
     }
-    const token = uid().replaceAll("-", "") + uid().replaceAll("-", "");
-    const link: AccessLink = {
-      id: uid(),
-      orderId: seg[2],
-      version: 1,
-      scopes: [
-        "ORDER_VIEW",
-        "FINAL_PDF_PREVIEW",
-        "DELIVERY_PROOF_VIEW",
-        "ORDER_REVISE_PENDING",
-        "ORDER_CANCEL_PENDING",
-        "ORDER_CHANGE_LOCATION_PRE_DELIVERY",
-        "ORDER_IMPORT",
-      ],
-      createdAt: date(),
-      createdBy: "演示管理员",
-      expiresAt: body.expiresAt || null,
-      revokedAt: null,
-    };
-    db.links.push(link);
-    db.tokens.set(await hash(token), {
-      orderId: link.orderId,
-      grantId: link.id,
-    });
-    return { ...link, grant: link, accessToken: token };
+    if (body.expectedVersion !== (db.guestVersions.get(orderId) ?? 1)) fail("链接状态已变化", "VERSION_CONFLICT", 409);
+    if (typeof body.reason !== "string" || !body.reason.trim()) fail("请填写原因");
+    if (adminGuest[2] === "guest-owner") {
+      if (!["*", "customer.manage"].some(cap => capabilities.includes(cap))) fail("无权关联客户", "FORBIDDEN", 403);
+      const account = db.accounts.find(account => account.id === body.accountId);
+      if (!account?.verified || account.status !== "ACTIVE") fail("客户账号不可用", "ACCOUNT_UNAVAILABLE", 409);
+      order.ownerAccountId = account!.id;
+      order.accountOwned = true;
+    } else if (adminGuest[3] === "reset") {
+      const days = body.days === undefined ? 14 : body.days;
+      if (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > 14) fail("请选择 1–14 天");
+      closeGuestAccess(orderId);
+      await createGuestLink(orderId, days);
+      return guestAccessView(orderId);
+    }
+    closeGuestAccess(orderId);
+    return adminGuest[2] === "guest-owner" ? { orderId, ownerAccountId: order.ownerAccountId } : guestAccessView(orderId);
+  }
+  const guestOrder = path.match(/^\/customer\/orders\/([^/]+)\/(guest-access|claim)$/);
+  if (guestOrder) {
+    const orderId = guestOrder[1];
+    const order = db.orders.get(orderId) || fail("订单不存在", "NOT_FOUND", 404);
+    if (guestOrder[2] === "guest-access") {
+      if (order!.ownerPrincipalId !== db.guestPrincipalId && db.access?.orderId !== orderId)
+        fail("订单不存在或不可访问", "NOT_FOUND", 404);
+      return guestAccessView(orderId);
+    }
+    const account = requireAccount();
+    if (order!.ownerAccountId === account.id) return { orderId, ownerAccountId: account.id };
+    if (body.confirm !== true || order!.ownerAccountId || order!.ownerPrincipalId !== db.guestPrincipalId ||
+        guestAccessView(orderId).status !== "ACTIVE") fail("订单不存在或不可访问", "NOT_FOUND", 404);
+    order!.ownerAccountId = account.id;
+    order!.accountOwned = true;
+    closeGuestAccess(orderId);
+    return { orderId, ownerAccountId: account.id };
   }
   if (path === "/admin/config/volume-discounts") {
     if (!write) return db.volume;

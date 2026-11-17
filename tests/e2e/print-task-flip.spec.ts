@@ -136,7 +136,7 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
     ) {
       data = config;
     } else if (path === "/api/v1/admin/print-tasks") {
-      data = { tasks: queue, counts: {}, nextTaskId: inProgress.id };
+      data = { tasks: queue, counts: {}, nextTaskId: inProgress.id, identificationJobs: {"order-2":"PROCESSING"} };
     } else if (path.endsWith("/another-pending/attempts")) {
       companion.openAttemptId = "new-attempt";
       companion.status = "ATTEMPTED";
@@ -158,9 +158,13 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
   await expect(order).toHaveAttribute("aria-expanded", "false");
   await expect(order).toContainText("打印已完成");
   await expect(order).toContainText("4/4 项完成");
+  await expect(order.locator(".identification-progress")).toHaveText("识别页 0/2");
+  const progressLabels = await order.locator(".print-order-progress > span").allTextContents();
+  expect(progressLabels[0]).toBe("识别页 0/2");
   const second = page.getByRole("button", { name: /R9KPF/ });
   await expect(second).toContainText("已开印，待完成");
   await expect(second).toContainText("待结果确认");
+  await expect(second.locator(".identification-progress")).toHaveText("识别页 0/0");
   await expect(page.locator(".print-task-card")).toHaveCount(0);
   await order.click();
   const firstCard = page.locator(".print-task-card").first();

@@ -1,3 +1,4 @@
+import { GuestOrderBoundary } from "../customer/guest-order-access";
 import { formatDisplayTime } from "../lib/display-format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -480,7 +481,7 @@ export function AfterSalesPanel({
               {!currentOrder.settlement
                 ? "未结算订单请直接在订单费用中撤销，无需申请售后；如已实际转款但后台未确认，请联系管理员核对收款。"
                 : access
-                  ? "当前订单链接没有售后申请权限（默认只读）。请联系管理员补发授权，或使用拥有该订单的账号操作。"
+                  ? "专属链接仅供查看。请使用拥有该订单的账号操作，或联系管理员核验。"
                   : "当前订单状态或服务端 allowedActions 未开放售后申请；如已完成履约或已开印，请直接联系管理员核实商家责任。"}
             </Notice>
           )}
@@ -761,6 +762,14 @@ export function AfterSalesPanel({
 
 export function CustomerAfterSalesPage() {
   const { id } = useParams();
+  return (
+    <GuestOrderBoundary orderId={id || ""}>
+      <CustomerAfterSalesContent />
+    </GuestOrderBoundary>
+  );
+}
+function CustomerAfterSalesContent() {
+  const { id } = useParams();
   const { data, resources, refresh } = useStore();
   const order = data.orders.find((item) => item.id === id);
   const loading = resources.orders?.loading && !resources.orders?.hasData;
@@ -841,7 +850,9 @@ function AccountDeletionForm() {
         天内使用原账号密码登录即可恢复。期满后按数据保留规则处理。唯一超级管理员须先完成管理权限交接。
       </p>
       {DEMO ? (
-        <Notice type="warning">正式环境满足条件后，提交即进入 7 天恢复期。</Notice>
+        <Notice type="warning">
+          正式环境满足条件后，提交即进入 7 天恢复期。
+        </Notice>
       ) : (
         <>
           {action.uncertain ? (
@@ -850,7 +861,10 @@ function AccountDeletionForm() {
                 <span role="alert">
                   暂时无法确认注销结果。请刷新页面核实登录状态。若已退出，使用原账号登录即可恢复。
                 </span>
-                <Button variant="secondary" onClick={() => window.location.reload()}>
+                <Button
+                  variant="secondary"
+                  onClick={() => window.location.reload()}
+                >
                   刷新页面
                 </Button>
               </div>
@@ -858,7 +872,10 @@ function AccountDeletionForm() {
           ) : (
             <TaskFeedback state={action} label="正在提交注销申请" />
           )}
-          <form className="v1-form" onSubmit={(event) => void requestDeletion(event)}>
+          <form
+            className="v1-form"
+            onSubmit={(event) => void requestDeletion(event)}
+          >
             <Field label="注销原因（选填）">
               <textarea
                 rows={2}

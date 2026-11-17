@@ -7,8 +7,9 @@ from pydantic import Field, StrictBool, StrictInt, field_validator
 from sqlalchemy import and_, func, or_, select
 
 from .config import get_config, public_config
-from .core import (Actor, DTO, DomainError, Envelope, actor_dep, audit, authorize_order,
-                   grant_scopes, lock, ok, owns_principal, require_admin, require_customer, touch)
+from .core import (Actor, AdminOrderPickup, DTO, DomainError, Envelope, actor_dep, admin_order_pickup, audit, authorize_order,
+                   current_guest_grant, grant_scopes, lock, ok, owns_order, owns_principal,
+                   require_admin, require_customer, touch, unseal)
 from .db import get_db
 from .campuses import campus_is_open
 from .delivery_scope import ensure_slot_campus, location_campus_snapshot, order_campus_id
@@ -309,6 +310,10 @@ class OrderView(DTO):
     checkout_account_id:str|None=None
     checkout_auth_kind:str
     owner_account_id:str|None=None
+    account_owned:bool=False
+    admin_pickup:AdminOrderPickup|None=None
+    customer_summary:dict|None=None
+    identification_progress:dict|None=None
     owner_principal_id:str|None=None
     access_kind:str
     files:list[FileView]
@@ -429,7 +434,7 @@ def _is_timed_out_order(db, order):
 
 
 def _scope_actions(db,order,actor):
-    owner=owns_principal(db,actor,order.principal_id)
+    owner=owns_order(db,actor,order)
     scopes=grant_scopes(db,actor,order.id)
     if owner or actor.staff_role=='ADMIN':
         scopes.update(('ORDER_VIEW','FINAL_PDF_PREVIEW','DELIVERY_PROOF_VIEW','ORDER_REVISE_PENDING',
@@ -454,8 +459,8 @@ def _scope_actions(db,order,actor):
 def order_view(db,order,actor):
     authorize_order(db,actor,order)
     actions=_scope_actions(db,order,actor)
-    owner=owns_principal(db,actor,order.principal_id)
-    access_kind='OWNER' if owner and actor.account_id else 'GUEST_OWNER' if owner else 'IMPORTED_GRANT' if actor.account_id else 'ORDER_GRANT'
+    owner=owns_order(db,actor,order)
+    access_kind='OWNER' if owner and order.owner_account_id else 'GUEST_OWNER' if owner else 'ORDER_GRANT'
     files=[]
     for file in db.scalars(select(OrderFile).where(OrderFile.order_id==order.id,OrderFile.revision==order.content_revision).order_by(OrderFile.created_at,OrderFile.id)):
         source=db.get(Asset,file.asset_id)
@@ -505,7 +510,13 @@ def order_view(db,order,actor):
         blockers.append({'code':'REFUND_REVIEW_PENDING','message':'退款审核中，已暂停新生产'})
     packing=db.scalar(select(PackingTask).where(PackingTask.order_id==order.id))
     data=order.data or {}
-    principal=db.get(Principal,order.principal_id)
+    customer_summary = None
+    if actor.staff_role == 'ADMIN' and {'*', 'customer.manage'} & actor.capabilities and order.owner_account_id:
+        account = db.get(Account, order.owner_account_id)
+        if account:
+            customer_summary = {'accountId': account.id, 'email': account.email,
+                                'displayName': account.display_name, 'createdAt': account.created_at.isoformat(),
+                                'verified': bool(account.verified_at)}
     from .supplementary import supplementary_summary
     extra_summary=supplementary_summary(db,order)
     from .delivery_plan import arrangement_for_order
@@ -544,7 +555,9 @@ def order_view(db,order,actor):
     settlement=dict(data['settlement']) if data.get('settlement') else None
     if settlement and actor.staff_role!='ADMIN':
         settlement.pop('note',None)
+    from .order_identification import identification_progress
     return {'id':order.id,'pickupCode':order.pickup_code,'version':order.version,'contentRevision':order.content_revision,
+        'identificationProgress':identification_progress(db, order),
         'status':order.status,'nickname':order.nickname,'phone':order.phone,'locationId':order.location_id,
         'locationSnapshot':safe_location_snapshot,
         'slotId':order.confirmed_slot_id or order.requested_slot_id,'requestedSlotId':order.requested_slot_id,
@@ -554,7 +567,9 @@ def order_view(db,order,actor):
         'createdAt':order.created_at.isoformat(),'closeAt':order.close_at.isoformat(),
         'totalCents':order.total_cents,'refundedCents':order.refunded_cents,'currentQuoteId':order.quote_id,'quote':quote_view(quote),
         'checkoutAccountId':order.checkout_account_id,'checkoutAuthKind':data.get('checkoutAuthKind','REGISTERED' if order.checkout_account_id else 'ANONYMOUS'),
-        'ownerAccountId':principal.account_id if owner and principal else None,'ownerPrincipalId':order.principal_id if owner else None,
+        'ownerAccountId':order.owner_account_id if owner else None,'ownerPrincipalId':order.principal_id if owner else None,
+        'accountOwned':bool(order.owner_account_id), 'customerSummary':customer_summary,
+        'adminPickup':admin_order_pickup(order, actor) if actor.staff_role == 'ADMIN' else None,
         'accessKind':access_kind,'files':files,'packingStatus':order.packing_status,'packingVersion':packing.version if packing else None,
         'packingChecklistVersion':order.content_revision,'addressReview':order.address_review,
         'actualStartedAt':order.actual_started_at.isoformat() if order.actual_started_at else None,'refundLocked':order.refund_locked,
@@ -567,7 +582,7 @@ def order_view(db,order,actor):
 def _current_ready(db,actor,payload,order=None):
     prep=lock(db,Preparation,payload.preparation_id)
     if not owns_principal(db,actor,prep.principal_id):
-        if not order or prep.replaces_order_id!=order.id or not prep.source_grant_id:
+        if not order or prep.replaces_order_id!=order.id:
             raise DomainError('NOT_FOUND','准备单不存在或不可访问',404)
         authorize_order(db,actor,order,'ORDER_REVISE_PENDING')
     if prep.replaces_order_id and not order:
@@ -579,7 +594,7 @@ def _current_ready(db,actor,payload,order=None):
     if prep.source_grant_id:
         source_scopes=grant_scopes(db,Actor(grant_ids=[prep.source_grant_id]),order.id if order else '')
         if not order or 'ORDER_REVISE_PENDING' not in source_scopes:
-            raise DomainError('SOURCE_GRANT_REVOKED','原委托授权已撤销或过期，请重新取得授权',403)
+            raise DomainError('SOURCE_GRANT_REVOKED','旧订单编辑授权已失效，请由订单所有者重新准备',403)
     from .media import IDENTIFICATION_PURPOSE
     artifacts=list(db.scalars(select(Artifact).join(Asset, Artifact.asset_id == Asset.id).where(
         Artifact.preparation_id == prep.id, Asset.purpose != IDENTIFICATION_PURPOSE)))
@@ -603,9 +618,7 @@ def _current_ready(db,actor,payload,order=None):
     if order and quote.checkout_account_id!=order.checkout_account_id:
         raise DomainError('CHECKOUT_AUTH_CHANGED','修订既有订单须保持原结算身份',409)
     if order and quote.checkout_account_id and quote.checkout_account_id!=actor.account_id:
-        original_quote=db.get(Quote,order.quote_id)
-        if quote.selected_coupon_id!=original_quote.selected_coupon_id:
-            raise DomainError('OWNER_REQUOTE_REQUIRED','原优惠需由结算账号本人重新确认；委托编辑不能换用其他账号券或静默取消原券',409)
+        raise DomainError('CHECKOUT_AUTH_CHANGED','请重新登录原结算账号后修改订单',409)
     config=public_config(db)
     workflow=get_config(db,'workflow').data
     if not config.get('serviceEnabled') or workflow.get('pauses',{}).get('newOrders'):
@@ -700,7 +713,8 @@ def submit_order(db,actor,payload):
     code=''.join(secrets.choice(alphabet) for _ in range(workflow['shortCodeLength']))
     while db.scalar(select(Order.id).where(Order.pickup_code==code)):
         code=''.join(secrets.choice(alphabet) for _ in range(workflow['shortCodeLength']))
-    order=Order(principal_id=prep.principal_id,checkout_account_id=quote.checkout_account_id,pickup_code=code,
+    order=Order(principal_id=prep.principal_id,checkout_account_id=quote.checkout_account_id,
+        owner_account_id=quote.checkout_account_id,pickup_code=code,
         preparation_id=prep.id,quote_id=quote.id,total_cents=quote.total_cents,nickname=payload.contact.wechat_nickname.strip(),
         phone=payload.contact.phone,customer_note=payload.customer_note,location_id=location.id,requested_slot_id=slot.id,
         close_at=utcnow()+timedelta(minutes=workflow['unpaidTimeoutMinutes']),data={'quote':quote_view(quote),
@@ -711,6 +725,9 @@ def submit_order(db,actor,payload):
     from .growth import reserve_coupon
     reserve_coupon(db,order,quote)
     _activate(db,order,prep,quote,artifacts)
+    if not order.owner_account_id:
+        from .auth import issue_order_grant
+        issue_order_grant(db, order, actor)
     add_history(order,'订单已提交','等待管理员人工结算，所选为申请时段，确认前不保证名额')
     audit(db,actor,'ORDER_CREATED','ORDER',order.id)
     from .growth import notify_order_event
@@ -722,11 +739,18 @@ def _list_query(db,actor,admin=False):
     query=select(Order).where(Order.deleted_at.is_(None))
     if admin:
         return query
-    owner_ids=select(Principal.id).where(or_(Principal.id==actor.principal_id,
-        Principal.id==actor.guest_principal_id,Principal.account_id==actor.account_id if actor.account_id else False))
-    grants=select(AccessGrant.order_id).where(or_(AccessGrant.account_id==actor.account_id if actor.account_id else False,
-        AccessGrant.id.in_(actor.grant_ids)),AccessGrant.revoked_at.is_(None),AccessGrant.expires_at>utcnow())
-    return query.where(or_(Order.principal_id.in_(owner_ids),Order.id.in_(grants)))
+    guest_principals = {actor.principal_id, actor.guest_principal_id} - {None}
+    active_grants = select(AccessGrant.order_id).where(
+        AccessGrant.token_hash.is_not(None), AccessGrant.source_grant_id.is_(None),
+        AccessGrant.revoked_at.is_(None), AccessGrant.expires_at > utcnow())
+    linked_grants = select(AccessGrant.order_id).where(
+        AccessGrant.id.in_(actor.grant_ids), AccessGrant.token_hash.is_not(None),
+        AccessGrant.source_grant_id.is_(None), AccessGrant.revoked_at.is_(None),
+        AccessGrant.expires_at > utcnow())
+    return query.where(or_(
+        Order.owner_account_id == actor.account_id if actor.account_id else False,
+        and_(Order.owner_account_id.is_(None), Order.id.in_(active_grants),
+             or_(Order.principal_id.in_(guest_principals), Order.id.in_(linked_grants)))))
 
 
 def _order_list(db,actor,admin=False,cursor=None,limit=50,**filters):
@@ -760,8 +784,10 @@ def require_order_admin(actor):
 @router.post('/orders',response_model=Envelope[OrderResult])
 def create_order(body:OrderSubmit,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     order=submit_order(db,actor,body)
-    from .auth import issue_order_grant
-    _,token=issue_order_grant(db,order,actor)
+    token = None
+    if not order.owner_account_id:
+        grant = current_guest_grant(db, order.id)
+        token = unseal(grant.encrypted_token)
     return ok({'order':order_view(db,order,actor),'accessToken':token})
 
 
@@ -912,7 +938,7 @@ def reopen_order(order_id: str, body: ReopenOrderInput, db=Depends(get_db), acto
     require_admin(actor, 'payment.manage')
     candidate = db.get(Order, order_id)
     authorize_order(db, actor, candidate)
-    owner_account_id = db.scalar(select(Principal.account_id).where(Principal.id == candidate.principal_id))
+    owner_account_id = candidate.owner_account_id
     account_ids = {owner_account_id, candidate.checkout_account_id} - {None}
     if account_ids:
         # Account deletion locks the account before checking for active orders.
@@ -923,6 +949,10 @@ def reopen_order(order_id: str, body: ReopenOrderInput, db=Depends(get_db), acto
             raise DomainError('ORDER_REOPEN_UNAVAILABLE', '客户账号正在注销或已注销，无法恢复订单', 409)
     order = lock(db, Order, order_id, body.expected_version)
     authorize_order(db, actor, order)
+    if order.owner_account_id != owner_account_id:
+        # Ownership changes use a separate access version. Do not acquire a new
+        # account lock after the order lock; retry with the current lock order.
+        raise DomainError('ORDER_REOPEN_UNAVAILABLE', '订单归属已变化，请刷新后重新核对恢复条件', 409)
     if not _is_timed_out_order(db, order):
         raise DomainError('ORDER_REOPEN_UNAVAILABLE', '仅可恢复未结算且因超时自动关闭的订单', 409)
     if db.scalar(select(Payment.id).where(Payment.order_id == order.id).limit(1)) or db.scalar(

@@ -21,7 +21,16 @@ beforeEach(() => {
   db.records = [];
   db.access = null;
   db.links = [];
-  db.imports.clear();
+  db.guestVersions.clear();
+  db.tokens.clear();
+  db.staff = {
+    id: "admin",
+    role: "ADMIN",
+    name: "管理员",
+    username: "admin",
+    capabilities: ["*"],
+    mustChangePassword: false,
+  } as any;
   db.volume = structuredClone(defaultVolume);
   db.guestPrincipalId = "guest-test";
   db.customer = { role: "CUSTOMER", authKind: "ANONYMOUS", capabilities: [] };
@@ -53,29 +62,24 @@ describe("v1.3续作回归", () => {
       }),
     ).rejects.toThrow();
   });
-  it("游客轮换后旧报价失效，合法账号可重新核验准备单，旧游客不能继续使用", async () => {
+  it("旧会话批量关联入口已移除，游客报价可在原设备独立核验", async () => {
     const p = (await demoRequest("/preparations", {
       method: "POST",
       body: { lines },
     })) as any;
     await demoRequest("/__demo/customer", { method: "POST" });
-    const oldQuoteId = p.quote.id;
-    await demoRequest("/customer/account/link-guest", {
+    await expect(
+      demoRequest("/customer/account/link-guest", {
+        method: "POST",
+        body: { confirm: true },
+      }),
+    ).rejects.toThrow();
+    await demoRequest("/preparations/" + p.id + "/adopt-checkout", {
       method: "POST",
-      body: { confirm: true },
+      body: { expectedVersion: 1, confirm: true },
     });
-    await expect(
-      demoRequest(`/preparations/${p.id}/adopt-checkout`, {
-        method: "POST",
-        body: { expectedVersion: 1, confirm: true },
-      }),
-    ).rejects.toThrow();
-    await expect(
-      demoRequest("/__demo/reserve", {
-        method: "POST",
-        body: { preparationId: p.id, quoteId: oldQuoteId, orderId: "o" },
-      }),
-    ).rejects.toThrow();
+    expect(p.checkoutAccountId).toBe(db.customer.account?.id);
+    expect(db.guestPrincipalId).toBe("guest-test");
   });
   it("单单受托人不能因修订门槛变化静默丢掉预约券", async () => {
     const c = {
@@ -175,13 +179,19 @@ describe("v1.3续作回归", () => {
   });
   it("售后管理员模板使用统一品牌样式并预览真实售后字段", async () => {
     const list = (await demoRequest("/admin/mail/templates")) as any;
-    const template = list.items.find((item: any) => item.key === "ADMIN_AFTER_SALE_CREATED");
+    const template = list.items.find(
+      (item: any) => item.key === "ADMIN_AFTER_SALE_CREATED",
+    );
     expect(template).toBeDefined();
     expect(template.name).toBe("售后单通知（管理员）");
     expect(template.critical).toBe(false);
-    const preview = (await demoRequest(`/admin/mail/templates/${template.key}/preview`, {
-      method: "POST", body: {},
-    })) as any;
+    const preview = (await demoRequest(
+      `/admin/mail/templates/${template.key}/preview`,
+      {
+        method: "POST",
+        body: {},
+      },
+    )) as any;
     expect(preview.htmlBody).toContain("#c67c4e");
     expect(preview.htmlBody).toContain("#fffdfa");
     expect(preview.htmlBody).toContain("查看售后单");
@@ -191,11 +201,10 @@ describe("v1.3续作回归", () => {
   });
 });
 
-it("导入的只读范围不会变成所有权，也不暴露原件与未授权PDF", async () => {
+it("单链接仅允许只读预览，登录不转移归属，原始文件仍保留", async () => {
   const o = {
     id: "restricted",
     ownerPrincipalId: "other",
-    ownerAccountId: "other",
     allowedActions: ["ORDER_REVISE_PENDING", "ORDER_CANCEL_PENDING"],
     files: [
       {
@@ -207,27 +216,32 @@ it("导入的只读范围不会变成所有权，也不暴露原件与未授权P
     ],
   } as Order;
   db.orders.set(o.id, o);
-  const result = (await demoRequest("/admin/orders/restricted/access-links", {
+  await demoRequest("/admin/orders/restricted/guest-access/reset", {
     method: "POST",
-    body: { reason: "测试" },
-  })) as any;
-  db.links[0].scopes = ["ORDER_VIEW", "ORDER_IMPORT"];
+    body: { expectedVersion: 1, reason: "测试" },
+  });
+  const link = (await demoRequest(
+    "/admin/orders/restricted/guest-access/open",
+  )) as any;
   await demoRequest("/order-access/exchange", {
     method: "POST",
-    body: { orderId: o.id, accessToken: result.accessToken },
+    body: { orderId: o.id, accessToken: link.accessToken },
   });
   await demoRequest("/__demo/customer", { method: "POST" });
-  await demoRequest("/customer/account/import-order", {
-    method: "POST",
-    body: { orderId: o.id, confirm: true },
-  });
   const { visibleDemoOrders, syncDemoOrders } =
     await import("../src/growth/demo");
-  const [view] = visibleDemoOrders("customer", db.customer, null);
-  expect(view.accessKind).toBe("IMPORTED_GRANT");
+  const [view] = visibleDemoOrders("customer", db.customer, db.access);
+  expect(view.accessKind).toBe("ORDER_GRANT");
   expect(view.allowedActions).not.toContain("ORDER_REVISE_PENDING");
   expect(view.files[0].url).toBe("");
-  expect(view.files[0].pdfUrl).toBeUndefined();
+  expect(view.files[0].pdfUrl).toBe("private-final.pdf");
+  expect(o.ownerAccountId).toBeUndefined();
+  await expect(
+    demoRequest("/customer/account/import-order", {
+      method: "POST",
+      body: { orderId: o.id, confirm: true },
+    }),
+  ).rejects.toThrow();
   syncDemoOrders([view]);
   expect(db.orders.get(o.id)?.files[0].url).toBe("private-original.docx");
 });

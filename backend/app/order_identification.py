@@ -161,7 +161,7 @@ def _website_qr_frame(page, left, top, size, gap):
             shape.commit()
 
 
-def render_identification(path, pickup_code, files, a4_sheets, photos, website, *, qr_image=None):
+def render_identification(path, pickup_code, files, a4_sheets, photos, website, *, qr_image=None, campus_name='未记录校区'):
     regular = pymupdf.Font('china-s')
     bold = pymupdf.Font('hebo')
     pages = _paginate(_file_rows(files, regular))
@@ -196,8 +196,14 @@ def render_identification(path, pickup_code, files, a4_sheets, photos, website, 
                 y = FIRST_TABLE_TOP
                 legend_y = 322
                 _rule(page, 56, 945, 738, 945, width=1.35)
-                put('下次打印，扫码下单', 56, 1012, 25)
-                put('在线上传文件，预约宿舍配送。', 56, 1041, 15)
+                campus_text = '配送地点：' + ' '.join(campus_name.split())
+                campus_lines = _wrap(campus_text, regular, 15, 549)
+                # Extra-long campus names move the whole text block upward.
+                footer_shift = max(0, len(campus_lines) - 2) * 20
+                put('下次打印，扫码下单', 56, 1012 - footer_shift, 25)
+                put('在线上传文件，预约宿舍配送。', 56, 1041 - footer_shift, 15)
+                for offset, line in enumerate(campus_lines):
+                    put(line, 56, 1068 - footer_shift + offset * 20, 15)
                 if qr_image is None:
                     _website_qr(page, website)
                 else:
@@ -242,6 +248,20 @@ def queue_identification(db, order):
             'contentRevision': order.content_revision,
             'website': config['orderIdentificationWebsiteUrl'] or identification_default_website_url(),
         })
+
+
+def identification_progress(db, order):
+    task = db.scalar(select(PrintTask).where(
+        PrintTask.order_id == order.id, PrintTask.file_id.is_(None), PrintTask.active.is_(True)))
+    if task:
+        artifact = db.get(Artifact, task.artifact_id)
+        total = artifact.pages if artifact else 0
+        return {'enabled': True, 'completed': total if task.status == 'COMPLETED' else 0,
+                'total': total, 'status': task.status}
+    job = db.scalar(select(Job).where(Job.kind == JOB_KIND, Job.target_id == order.id))
+    if job:
+        return {'enabled': True, 'completed': 0, 'total': 0, 'status': job.status}
+    return None
 
 
 def _order_files(db, order):
@@ -314,10 +334,15 @@ def process_identification(db, job):
             raise DomainError('IDENTIFICATION_QR_UNAVAILABLE', '网站二维码文件不可用', 409)
 
     files, sheets, photos = _order_files(db, order)
+    from .delivery_scope import order_campus_id
+    from .models import Campus
+    snapshot = (order.data or {}).get('locationSnapshot') or {}
+    campus = db.get(Campus, order_campus_id(db, order))
+    campus_name = snapshot.get('campusName') or (campus.name if campus else None) or '未记录校区'
     with TemporaryDirectory(dir=_root() / 'tmp') as tmp:
         path = Path(tmp) / FILE_NAME
         pages = render_identification(path, order.pickup_code, files, sheets, photos,
-                                      job.data['website'], qr_image=qr_image)
+                                      job.data['website'], qr_image=qr_image, campus_name=campus_name)
         sha = pdf_engine.sha256_file(path)
         key = _artifact_key(job.id, sha)
         size = path.stat().st_size

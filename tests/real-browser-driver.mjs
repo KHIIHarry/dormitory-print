@@ -13,8 +13,7 @@ async function session(email){
  return {context,page};
 }
 async function finishLogin(page){
- const skip=page.getByRole('button',{name:'暂不关联',exact:true});
- await expect(skip).toBeVisible({timeout:20000});await skip.click();
+ await expect(page).toHaveURL(/\/u\/account$/,{timeout:20000});
  await page.goto(base+'/u/account');
  await expect(page.getByRole('heading',{name:'账号设置',exact:true})).toBeVisible({timeout:20000});
 }
@@ -63,7 +62,7 @@ try{
  await normal.page.locator('a[href="/courier/"]').click();
  await expect(normal.page).toHaveURL(/\/courier\/?$/);
  await expect(normal.page.getByRole('link',{name:'返回用户端',exact:true})).toBeVisible();
- await expect(normal.page.getByRole('heading',{name:'暂时没有配送任务',exact:true})).toBeVisible({timeout:20000});
+ await expect(normal.page.getByRole('heading',{name:'没有符合筛选条件的配送批次',exact:true})).toBeVisible({timeout:20000});
  mkdirSync('docs/qa/real-browser',{recursive:true});
  await normal.page.screenshot({path:'docs/qa/real-browser/unified-courier-desktop.png',fullPage:true});
  await normal.page.setViewportSize({width:390,height:844});

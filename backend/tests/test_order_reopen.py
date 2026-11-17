@@ -164,7 +164,7 @@ def test_reopen_does_not_reactivate_an_order_during_account_deletion(db, api, ad
     order = submit(db, world)
     expire(db, order)
     account = account_factory()
-    world.principal.account_id = account.id
+    order.owner_account_id = account.id
     account.status = 'DELETION_PENDING'
     db.commit()
     response = reopen(api, admin_client, order)
@@ -172,6 +172,45 @@ def test_reopen_does_not_reactivate_an_order_during_account_deletion(db, api, ad
     assert response.json()['error']['code'] == 'ORDER_REOPEN_UNAVAILABLE'
     db.refresh(order)
     assert order.status == 'CANCELLED'
+
+
+def test_reopen_rechecks_owner_bound_after_initial_account_snapshot(
+        db, api, admin_client, customer_client, app, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import commerce
+    from app.models import Account
+
+    order = submit(db, make_world(db))
+    expire(db, order)
+    original_lock = commerce.lock
+    interleaved = False
+
+    def bind_and_delete_before_order_lock(session, model, target_id, *args, **kwargs):
+        nonlocal interleaved
+        if model is Order and target_id == order.id and not interleaved:
+            interleaved = True
+            with TestClient(app) as other_admin:
+                other_admin.cookies.update(dict(admin_client.cookies))
+                linked = api(other_admin, f'/admin/orders/{order.id}/guest-owner', {
+                    'accountId': customer_client.account.id,
+                    'expectedVersion': order.guest_access_version,
+                    'reason': '核实后关联关闭的订单',
+                })
+                assert linked.status_code == 200, linked.text
+            deletion = api(customer_client, '/customer/account/deletion-request', {'reason': '已完成使用'})
+            assert deletion.status_code == 200, deletion.text
+            assert deletion.json()['data']['status'] == 'RECOVERY'
+        return original_lock(session, model, target_id, *args, **kwargs)
+
+    monkeypatch.setattr(commerce, 'lock', bind_and_delete_before_order_lock)
+    response = reopen(api, admin_client, order)
+    assert interleaved
+    assert response.status_code == 409, response.text
+    assert response.json()['error']['code'] == 'ORDER_REOPEN_UNAVAILABLE'
+    db.expire_all()
+    assert db.get(Order, order.id).status == 'CANCELLED'
+    assert db.get(Order, order.id).owner_account_id == customer_client.account.id
+    assert db.get(Account, customer_client.account.id).deleted_at is not None
 
 
 def test_expired_slot_can_be_changed_after_reopen_before_cash_is_allocated(db, api, admin_client):

@@ -1,3 +1,5 @@
+import { GuestOrderUnavailable } from "./guest-order-access";
+import { ownsAccountOrder } from "./guest-order-policy";
 import { inviteRegistrationUrl, inviteShareText } from "../lib/invite-share";
 import { ResourceSkeleton, RefreshStatus } from "../components/feedback";
 import { getIdentityGeneration } from "../growth/client";
@@ -54,6 +56,7 @@ import {
   couponTab,
   safeInviteeLabel,
   safeCustomerReturn,
+  safeOrderReturn,
   singleFlight,
 } from "./account/security";
 import "./account.css";
@@ -77,18 +80,32 @@ const messageOf = (error: unknown) =>
 const dateLabel = (value?: string | null) =>
   value ? new Date(value).toLocaleString("zh-CN") : "未设置期限";
 function useFragmentToken(enabled = true) {
-  // React may call state initializers twice. Reading is pure; URL clearing happens
-  // at commit before paint, so either initialization retains the same secret.
-  const state = useState(() =>
+  // Initialization is pure because StrictMode can initialize twice before commit.
+  const [token, setToken] = useState(() =>
     enabled ? readFragmentToken(window.location) : "",
   );
+  const [incomingVersion, setIncomingVersion] = useState(0);
+  const currentToken = useRef(token);
+  currentToken.current = token;
+  const route = useLocation();
   useLayoutEffect(() => {
-    if (enabled)
-      consumeFragment(window.location, (url) =>
+    if (!enabled) return;
+    const capture = (incoming = false) => {
+      const next = consumeFragment(window.location, (url) =>
         window.history.replaceState(window.history.state, "", url),
       );
-  }, [enabled]);
-  return state;
+      if (next && (incoming || next !== currentToken.current)) {
+        currentToken.current = next;
+        setToken(next);
+        setIncomingVersion((version) => version + 1);
+      }
+    };
+    capture();
+    const onHashChange = () => capture(true);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, [enabled, route.pathname, route.search, route.hash]);
+  return [token, setToken, incomingVersion] as const;
 }
 function useAction() {
   const [busy, setBusy] = useState(false),
@@ -203,54 +220,6 @@ function MailStatus({ response }: { response: MailResult }) {
     </Notice>
   );
 }
-function GuestLinkConfirm({ onDone }: { onDone: () => void }) {
-  const action = useAction();
-  const identity = useIdentity();
-  const { refresh } = useStore();
-  return (
-    <div className="account-stack">
-      <Notice>
-        是否将这台设备当前游客身份下的订单关联到账号？确认后旧游客会话会撤销，本浏览器将轮换为全新的游客身份。单独的订单链接授权保持独立。
-      </Notice>
-      <Feedback action={action} />
-      <div className="account-actions">
-        <Button
-          busy={action.busy}
-          busyTarget={action.control}
-          disabled={action.busy}
-          onClick={() =>
-            void action.run(async () => {
-              const result = await growthRequest<{
-                rotationCompleted: boolean;
-              }>("/customer/account/link-guest", {
-                method: "POST",
-                body: { confirm: true },
-              });
-              if (!result.rotationCompleted)
-                throw new Error("游客会话轮换未完成，请重新核验账号状态。");
-              identity.invalidate();
-              await identity.refreshCustomer();
-              await refresh();
-              onDone();
-            })
-          }
-        >
-          {action.busy ? "关联中…" : "确认关联本机游客订单"}
-        </Button>
-        <Button
-          variant="secondary"
-          busy={action.busy}
-          busyTarget={action.control}
-          disabled={action.busy}
-          onClick={onDone}
-        >
-          暂不关联
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 export function CustomerAuthForm({
   mode: initialMode,
   embedded = false,
@@ -265,6 +234,31 @@ export function CustomerAuthForm({
     action = useAction();
   const { toast } = useStore();
   const location = useLocation();
+  const requestedReturn =
+    new URLSearchParams(location.search).get("returnTo") ||
+    new URLSearchParams(location.search).get("next");
+  const [rememberedReturn] = useState(() => {
+    try {
+      return safeOrderReturn(
+        localStorage.getItem("dormprint:customer-order-return"),
+      );
+    } catch {
+      return null;
+    }
+  });
+  const authReturn = safeCustomerReturn(requestedReturn || rememberedReturn);
+  const authRoute = (path: string) =>
+    `${path}?${new URLSearchParams({ returnTo: authReturn })}`;
+  useEffect(() => {
+    const orderPath = safeOrderReturn(requestedReturn);
+    if (orderPath) {
+      try {
+        localStorage.setItem("dormprint:customer-order-return", orderPath);
+      } catch {
+        /* The current tab still carries its safe return route. */
+      }
+    }
+  }, [requestedReturn]);
   const deletionRecovery = (
     location.state as { deletionRecovery?: string } | null
   )?.deletionRecovery;
@@ -273,7 +267,7 @@ export function CustomerAuthForm({
     [password, setPassword] = useState(""),
     [confirm, setConfirm] = useState(""),
     [inviteCode, setInviteCode] = useState(
-      () => new URLSearchParams(window.location.search).get("invite") || "",
+      () => new URLSearchParams(location.search).get("invite") || "",
     ),
     [accepted, setAccepted] = useState(false);
   const [token, setToken] = useFragmentToken(
@@ -283,21 +277,18 @@ export function CustomerAuthForm({
     [challenge, setChallenge] = useState(pendingRegistration),
     [cooldown, setCooldown] = useState(0),
     [registered, setRegistered] = useState(false),
-    [completed, setCompleted] = useState(false),
-    [linkPrompt, setLinkPrompt] = useState(false);
-  const [deviceOptions, setDeviceOptions] = useState<
-    Array<{
-      id: string;
-      device: string;
-      ipAddress?: string | null;
-      lastSeenAt?: string;
-      current?: boolean;
-    }> | null
-  >(null);
+    [completed, setCompleted] = useState(false);
+  const [deviceOptions, setDeviceOptions] = useState<Array<{
+    id: string;
+    device: string;
+    ipAddress?: string | null;
+    lastSeenAt?: string;
+    current?: boolean;
+  }> | null>(null);
   const changingEmail =
     mode === "verify" &&
     ["emailchange", "email-change"].includes(
-      new URLSearchParams(window.location.search).get("mode") || "",
+      new URLSearchParams(location.search).get("mode") || "",
     );
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -305,16 +296,12 @@ export function CustomerAuthForm({
     return () => clearTimeout(timer);
   }, [cooldown]);
   const done = () => {
-    setLinkPrompt(false);
-    onSuccess
-      ? onSuccess()
-      : navigate(
-          safeCustomerReturn(
-            new URLSearchParams(window.location.search).get("returnTo") ||
-              new URLSearchParams(window.location.search).get("next"),
-          ),
-          { replace: true },
-        );
+    try {
+      localStorage.removeItem("dormprint:customer-order-return");
+    } catch {
+      /* Navigation also works with storage disabled. */
+    }
+    onSuccess ? onSuccess() : navigate(authReturn, { replace: true });
   };
   const receivedMail = (response: MailResult) => {
     setMail(response);
@@ -338,7 +325,7 @@ export function CustomerAuthForm({
       if (recovered) toast("账号已恢复，已取消本次注销。");
       setPassword("");
       if (embedded) onSuccess?.();
-      else setLinkPrompt(true);
+      else done();
     } catch (error) {
       if (error instanceof ApiError && error.code === "DEVICE_LIMIT_REACHED") {
         const details = error.details as
@@ -419,13 +406,11 @@ export function CustomerAuthForm({
       await identity.refreshCustomer();
       setCompleted(true);
       action.setSuccess(
-        changingEmail
-          ? "新邮箱已确认。"
-          : "邮箱已验证。你可以自主选择是否关联本机游客订单。",
+        changingEmail ? "新邮箱已确认。" : "邮箱已验证。可返回订单确认关联。",
       );
       if (!changingEmail) {
         if (embedded) onSuccess?.();
-        else setLinkPrompt(true);
+        else done();
       } else onSuccess?.();
     });
   };
@@ -436,319 +421,310 @@ export function CustomerAuthForm({
       {mode === "login" && deletionRecovery && (
         <Notice type="success">{deletionRecovery}</Notice>
       )}
-      {linkPrompt ? (
-        <>
-          <div className="account-success">
-            <CheckCircle2 size={26} />
-            <h2>账号已就绪</h2>
-          </div>
-          <GuestLinkConfirm onDone={done} />
-        </>
-      ) : (
-        <>
-          <Feedback action={action} />
-          {mail && <MailStatus response={mail} />}
-          {registered && (
-            <Notice>
-              请验证邮箱{challenge ? `（${challenge.emailMasked}）` : ""}
-              。验证前不会启用正式账号或发放账号权益。
-              {embedded ? (
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => setMode("verify")}
-                >
-                  前往验证页
-                </button>
-              ) : (
-                <Link to="/u/account/verify">前往验证页</Link>
-              )}
-            </Notice>
-          )}
-          {!completed && !registered && (
-            <form className="account-stack" onSubmit={submit}>
-              {["login", "register", "forgot"].includes(mode) && (
-                <Field label="邮箱">
-                  <input
-                    required
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
-                  />
-                </Field>
-              )}
-              {["login", "register", "reset"].includes(mode) && (
-                <PasswordInput
-                  value={password}
-                  onChange={setPassword}
-                  autoComplete={
-                    mode === "login" ? "current-password" : "new-password"
-                  }
-                  minLength={mode === "login" ? undefined : 8}
-                />
-              )}
-              {["register", "reset"].includes(mode) && (
-                <PasswordInput
-                  value={confirm}
-                  onChange={setConfirm}
-                  label="确认密码"
-                  autoComplete="new-password"
-                  minLength={8}
-                />
-              )}
-              {mode === "register" && (
-                <>
-                  <Field
-                    label="邀请码（可选）"
-                    hint="奖励资格与金额以当前活动规则为准。"
-                  >
-                    <input
-                      value={inviteCode}
-                      maxLength={64}
-                      onChange={(e) => setInviteCode(e.target.value)}
-                    />
-                  </Field>
-                  <label className="account-check">
-                    <input
-                      type="checkbox"
-                      checked={accepted}
-                      onChange={(e) => setAccepted(e.target.checked)}
-                      required
-                    />
-                    <span>
-                      我同意使用邮箱建立账号；邮箱用于验证、安全通知和我主动订阅的邮件。订单信息按授权范围展示。
-                      <Link to="/u/help">查看使用与隐私说明</Link>
-                    </span>
-                  </label>
-                </>
-              )}
-              {mode === "verify" && (
-                <Notice>
-                  {token
-                    ? changingEmail
-                      ? "确认后才会完成邮箱换绑；此前原邮箱继续有效。"
-                      : "点击下方按钮确认邮箱，页面打开本身不会使用验证凭据。"
-                    : "请从验证邮件中的链接打开本页；链接失效时可重新发送。"}
-                </Notice>
-              )}
-              {mode === "reset" && !token && (
-                <Notice type="warning">
-                  重置链接缺失或已使用，请重新申请找回邮件。
-                </Notice>
-              )}
-              {mode === "login" && deviceOptions ? (
-                <div className="account-device-picker">
-                  <strong>登录设备已满</strong>
-                  <p>
-                    此账号最多同时登录 2 台设备。选择一台设备下线，当前设备即可登录。
-                  </p>
-                  {deviceOptions.length ? (
-                    deviceOptions.map((session) => (
-                      <button
-                        key={session.id}
-                        type="button"
-                        className="account-device-option"
-                        disabled={action.busy}
-                        onClick={() => void action.run(() => login(session.id))}
-                      >
-                        <span>
-                          <b>{session.device}</b>
-                          <small>
-                            {session.current
-                              ? "当前设备"
-                              : session.lastSeenAt
-                                ? `最近使用 ${new Date(session.lastSeenAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
-                                : "登录设备"}
-                          </small>
-                          <small>登录 IP：{session.ipAddress || "未记录"}</small>
-                        </span>
-                        <em>下线并登录</em>
-                      </button>
-                    ))
-                  ) : (
-                    <p>设备列表暂不可用，请稍后重试。</p>
-                  )}
-                  <button
-                    type="button"
-                    className="text-button"
-                    disabled={action.busy}
-                    onClick={() => setDeviceOptions(null)}
-                  >
-                    返回重新输入
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  busy={action.busy}
-                  busyTarget={action.control}
-                  disabled={
-                    action.busy ||
-                    ((mode === "verify" || mode === "reset") && !token)
-                  }
-                >
-                  {action.busy
-                    ? "正在提交…"
-                    : {
-                        login: "登录",
-                        register: "注册并申请验证邮件",
-                        forgot: "申请重置邮件",
-                        verify: changingEmail ? "确认换绑新邮箱" : "确认验证邮箱",
-                        reset: "设置新密码",
-                      }[mode]}
-                  <ArrowRight size={16} />
-                </Button>
-              )}
-            </form>
-          )}
-          {verifyControls && (
-            <section className="account-stack account-verification">
-              <h3>没有收到验证邮件？</h3>
-              <p>先检查垃圾邮件。只有本次注册的受限挑战可以重发或更正地址。</p>
-              <Button
-                variant="secondary"
-                disabled={!challenge || action.busy || cooldown > 0}
-                onClick={() =>
-                  void action.run(async () => {
-                    if (!challenge) return;
-                    receivedMail(
-                      await growthRequest<MailResult>(
-                        "/customer/auth/resend-verification",
-                        {
-                          method: "POST",
-                          body: { registrationChallengeId: challenge.id },
-                        },
-                      ),
-                    );
-                  })
-                }
-              >
-                {cooldown ? `${cooldown} 秒后可重发` : "重新申请验证邮件"}
-              </Button>
-              {challenge ? (
-                <form
-                  className="account-stack"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void action.run(async () => {
-                      receivedMail(
-                        await growthRequest<MailResult>(
-                          "/customer/auth/change-pending-email",
-                          {
-                            method: "POST",
-                            body: {
-                              registrationChallengeId: challenge.id,
-                              newEmail: email.trim(),
-                            },
-                          },
-                        ),
-                      );
-                    });
-                  }}
-                >
-                  <Field label="更正待验证邮箱">
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </Field>
-                  <Button
-                    variant="secondary"
-                    busy={action.busy}
-                    busyTarget={action.control}
-                    disabled={action.busy}
-                  >
-                    更正邮箱并重新申请验证
-                  </Button>
-                </form>
-              ) : (
-                <Notice>
-                  本次注册挑战已不在内存中，请重新注册申请验证邮件。已验证账号请到账号设置更换邮箱。
-                </Notice>
-              )}
-            </section>
-          )}
-          <div className="account-auth-links">
-            {mode !== "login" &&
-              (embedded ? (
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => {
-                    setMode("login");
-                    setRegistered(false);
-                    setCompleted(false);
-                    setMail(null);
-                  }}
-                >
-                  返回登录
-                </button>
-              ) : (
-                <Link to="/u/account/login">返回登录</Link>
-              ))}
-            {mode === "login" &&
-              (embedded ? (
-                <>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => setMode("register")}
-                  >
-                    注册账号
-                  </button>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => setMode("forgot")}
-                  >
-                    忘记密码
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link to="/u/account/register">注册账号</Link>
-                  <Link to="/u/account/forgot">忘记密码</Link>
-                </>
-              ))}
-            {(mode === "reset" || mode === "verify") && !embedded && (
-              <Link
-                to={
-                  mode === "reset" ? "/u/account/forgot" : "/u/account/register"
-                }
-              >
-                重新申请
-              </Link>
-            )}
+      <>
+        <Feedback action={action} />
+        {mail && <MailStatus response={mail} />}
+        {registered && (
+          <Notice>
+            请验证邮箱{challenge ? `（${challenge.emailMasked}）` : ""}
+            。验证前不会启用正式账号或发放账号权益。
             {embedded ? (
-              <button type="button" className="text-button" onClick={onSuccess}>
-                继续游客打印
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => setMode("verify")}
+              >
+                前往验证页
               </button>
             ) : (
-              <Link to="/u/">继续游客打印</Link>
+              <Link to="/u/account/verify">前往验证页</Link>
             )}
-          </div>
-          {DEMO && mode === "login" && (
+          </Notice>
+        )}
+        {!completed && !registered && (
+          <form className="account-stack" onSubmit={submit}>
+            {["login", "register", "forgot"].includes(mode) && (
+              <Field label="邮箱">
+                <input
+                  required
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                />
+              </Field>
+            )}
+            {["login", "register", "reset"].includes(mode) && (
+              <PasswordInput
+                value={password}
+                onChange={setPassword}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                minLength={mode === "login" ? undefined : 8}
+              />
+            )}
+            {["register", "reset"].includes(mode) && (
+              <PasswordInput
+                value={confirm}
+                onChange={setConfirm}
+                label="确认密码"
+                autoComplete="new-password"
+                minLength={8}
+              />
+            )}
+            {mode === "register" && (
+              <>
+                <Field
+                  label="邀请码（可选）"
+                  hint="奖励资格与金额以当前活动规则为准。"
+                >
+                  <input
+                    value={inviteCode}
+                    maxLength={64}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                  />
+                </Field>
+                <label className="account-check">
+                  <input
+                    type="checkbox"
+                    checked={accepted}
+                    onChange={(e) => setAccepted(e.target.checked)}
+                    required
+                  />
+                  <span>
+                    我同意使用邮箱建立账号；邮箱用于验证、安全通知和我主动订阅的邮件。订单信息按授权范围展示。
+                    <Link to="/u/help">查看使用与隐私说明</Link>
+                  </span>
+                </label>
+              </>
+            )}
+            {mode === "verify" && (
+              <Notice>
+                {token
+                  ? changingEmail
+                    ? "确认后才会完成邮箱换绑；此前原邮箱继续有效。"
+                    : "点击下方按钮确认邮箱，页面打开本身不会使用验证凭据。"
+                  : "请从验证邮件中的链接打开本页；链接失效时可重新发送。"}
+              </Notice>
+            )}
+            {mode === "reset" && !token && (
+              <Notice type="warning">
+                重置链接缺失或已使用，请重新申请找回邮件。
+              </Notice>
+            )}
+            {mode === "login" && deviceOptions ? (
+              <div className="account-device-picker">
+                <strong>登录设备已满</strong>
+                <p>
+                  此账号最多同时登录 2
+                  台设备。选择一台设备下线，当前设备即可登录。
+                </p>
+                {deviceOptions.length ? (
+                  deviceOptions.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      className="account-device-option"
+                      disabled={action.busy}
+                      onClick={() => void action.run(() => login(session.id))}
+                    >
+                      <span>
+                        <b>{session.device}</b>
+                        <small>
+                          {session.current
+                            ? "当前设备"
+                            : session.lastSeenAt
+                              ? `最近使用 ${new Date(session.lastSeenAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                              : "登录设备"}
+                        </small>
+                        <small>登录 IP：{session.ipAddress || "未记录"}</small>
+                      </span>
+                      <em>下线并登录</em>
+                    </button>
+                  ))
+                ) : (
+                  <p>设备列表暂不可用，请稍后重试。</p>
+                )}
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={action.busy}
+                  onClick={() => setDeviceOptions(null)}
+                >
+                  返回重新输入
+                </button>
+              </div>
+            ) : (
+              <Button
+                busy={action.busy}
+                busyTarget={action.control}
+                disabled={
+                  action.busy ||
+                  ((mode === "verify" || mode === "reset") && !token)
+                }
+              >
+                {action.busy
+                  ? "正在提交…"
+                  : {
+                      login: "登录",
+                      register: "注册并申请验证邮件",
+                      forgot: "申请重置邮件",
+                      verify: changingEmail ? "确认换绑新邮箱" : "确认验证邮箱",
+                      reset: "设置新密码",
+                    }[mode]}
+                <ArrowRight size={16} />
+              </Button>
+            )}
+          </form>
+        )}
+        {verifyControls && (
+          <section className="account-stack account-verification">
+            <h3>没有收到验证邮件？</h3>
+            <p>先检查垃圾邮件。只有本次注册的受限挑战可以重发或更正地址。</p>
             <Button
               variant="secondary"
-              busy={action.busy}
-              busyTarget={action.control}
-              disabled={action.busy}
+              disabled={!challenge || action.busy || cooldown > 0}
               onClick={() =>
                 void action.run(async () => {
-                  await identity.demoCustomer();
-                  if (embedded) onSuccess?.();
-                  else setLinkPrompt(true);
+                  if (!challenge) return;
+                  receivedMail(
+                    await growthRequest<MailResult>(
+                      "/customer/auth/resend-verification",
+                      {
+                        method: "POST",
+                        body: { registrationChallengeId: challenge.id },
+                      },
+                    ),
+                  );
                 })
               }
             >
-              体验演示账号
+              {cooldown ? `${cooldown} 秒后可重发` : "重新申请验证邮件"}
             </Button>
+            {challenge ? (
+              <form
+                className="account-stack"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void action.run(async () => {
+                    receivedMail(
+                      await growthRequest<MailResult>(
+                        "/customer/auth/change-pending-email",
+                        {
+                          method: "POST",
+                          body: {
+                            registrationChallengeId: challenge.id,
+                            newEmail: email.trim(),
+                          },
+                        },
+                      ),
+                    );
+                  });
+                }}
+              >
+                <Field label="更正待验证邮箱">
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </Field>
+                <Button
+                  variant="secondary"
+                  busy={action.busy}
+                  busyTarget={action.control}
+                  disabled={action.busy}
+                >
+                  更正邮箱并重新申请验证
+                </Button>
+              </form>
+            ) : (
+              <Notice>
+                本次注册挑战已不在内存中，请重新注册申请验证邮件。已验证账号请到账号设置更换邮箱。
+              </Notice>
+            )}
+          </section>
+        )}
+        <div className="account-auth-links">
+          {mode !== "login" &&
+            (embedded ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setMode("login");
+                  setRegistered(false);
+                  setCompleted(false);
+                  setMail(null);
+                }}
+              >
+                返回登录
+              </button>
+            ) : (
+              <Link to={authRoute("/u/account/login")}>返回登录</Link>
+            ))}
+          {mode === "login" &&
+            (embedded ? (
+              <>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setMode("register")}
+                >
+                  注册账号
+                </button>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setMode("forgot")}
+                >
+                  忘记密码
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to={authRoute("/u/account/register")}>注册账号</Link>
+                <Link to={authRoute("/u/account/forgot")}>忘记密码</Link>
+              </>
+            ))}
+          {(mode === "reset" || mode === "verify") && !embedded && (
+            <Link
+              to={authRoute(
+                mode === "reset" ? "/u/account/forgot" : "/u/account/register",
+              )}
+            >
+              重新申请
+            </Link>
           )}
-        </>
-      )}
+          {embedded ? (
+            <button type="button" className="text-button" onClick={onSuccess}>
+              继续游客打印
+            </button>
+          ) : (
+            <Link to="/u/">继续游客打印</Link>
+          )}
+        </div>
+        {DEMO && mode === "login" && (
+          <Button
+            variant="secondary"
+            busy={action.busy}
+            busyTarget={action.control}
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(async () => {
+                await identity.demoCustomer();
+                if (embedded) onSuccess?.();
+                else done();
+              })
+            }
+          >
+            体验演示账号
+          </Button>
+        )}
+      </>
     </div>
   );
 }
@@ -845,6 +821,38 @@ function AccountGate({ children }: { children: ReactNode }) {
     </div>
   );
 }
+function useAccountResource<T>(path: string) {
+  const resource = useGrowthResource<T>(path);
+  const { refreshCustomer } = useIdentity();
+  const { pathname, search } = useLocation();
+  const navigate = useNavigate();
+  const retry = async () => {
+    const { failure, reload } = resource;
+    if (
+      failure?.status !== 401 &&
+      failure?.code !== "ACCOUNT_VERIFICATION_REQUIRED"
+    ) {
+      await reload();
+      return;
+    }
+
+    const session = await refreshCustomer().catch(() => undefined);
+    if (
+      !session ||
+      window.location.pathname !== pathname ||
+      window.location.search !== search
+    )
+      return;
+    if (session.authKind === "REGISTERED" && session.account?.verified) {
+      await reload();
+      return;
+    }
+
+    const query = new URLSearchParams({ returnTo: pathname + search });
+    navigate(`/u/account/login?${query}`, { replace: true });
+  };
+  return { ...resource, retry };
+}
 export function AccountPage() {
   return (
     <AccountGate>
@@ -856,14 +864,13 @@ function AccountContent() {
   const identity = useIdentity(),
     { toast } = useStore(),
     action = useAction();
-  const resource = useGrowthResource<CustomerAccount>("/customer/account");
+  const resource = useAccountResource<CustomerAccount>("/customer/account");
   const [name, setName] = useState(""),
     [currentPassword, setCurrentPassword] = useState(""),
     [newPassword, setNewPassword] = useState(""),
     [confirmPassword, setConfirmPassword] = useState(""),
     [newEmail, setNewEmail] = useState(""),
     [emailPassword, setEmailPassword] = useState(""),
-    [linking, setLinking] = useState(false),
     [mail, setMail] = useState<MailResult | null>(null);
   const [preferences, setPreferences] = useState<
     CustomerAccount["notificationPreferences"]
@@ -879,7 +886,7 @@ function AccountContent() {
   if (resource.loading) return <ResourceSkeleton variant="profile" />;
   if (resource.error && !resource.hasData)
     return (
-      <ErrorState message={messageOf(resource.error)} retry={resource.reload} />
+      <ErrorState message={messageOf(resource.error)} retry={resource.retry} />
     );
   if (!resource.data)
     return <ErrorState message="账号资料暂不可用。" retry={resource.reload} />;
@@ -980,21 +987,23 @@ function AccountContent() {
               });
             }}
           >
-            {(
-              [["referralReward", "邀请奖励到账通知"]] as const
-            ).map(([key, label]) => (
-              <label key={key} className="account-check">
-                <input
-                  type="checkbox"
-                  checked={preferences[key]}
-                  onChange={(e) =>
-                    setPreferences((p) => ({ ...p, [key]: e.target.checked }))
-                  }
-                />
-                {label}
-              </label>
-            ))}
-            <small>只有邀请奖励等运营邮件受此开关控制；付款成功、签收成功、账号安全与注销通知属于事务性邮件，会直接发送，不受开关影响。</small>
+            {([["referralReward", "邀请奖励到账通知"]] as const).map(
+              ([key, label]) => (
+                <label key={key} className="account-check">
+                  <input
+                    type="checkbox"
+                    checked={preferences[key]}
+                    onChange={(e) =>
+                      setPreferences((p) => ({ ...p, [key]: e.target.checked }))
+                    }
+                  />
+                  {label}
+                </label>
+              ),
+            )}
+            <small>
+              只有邀请奖励等运营邮件受此开关控制；付款成功、签收成功、账号安全与注销通知属于事务性邮件，会直接发送，不受开关影响。
+            </small>
             <Button
               busy={action.busy}
               busyTarget={action.control}
@@ -1106,28 +1115,18 @@ function AccountContent() {
       <Panel title="订单与身份">
         <div className="account-stack">
           <p>
-            登录不会自动认领游客历史。你可明确关联这台设备当前游客身份下的订单；已授权的单个订单请在订单详情中选择“添加这一单到账号”。
+            登录不会自动认领游客历史。可前往本机订单，在有效期内逐单确认关联。
           </p>
           <div className="account-actions">
-            <Button variant="secondary" onClick={() => setLinking(true)}>
-              关联本机游客订单
-            </Button>
+            <Link className="btn secondary" to="/u/orders">
+              前往本机订单
+            </Link>
             <Link className="btn secondary" to="/u/account/deletion">
               注销账号
             </Link>
           </div>
         </div>
       </Panel>
-      {linking && (
-        <Modal title="确认关联本机游客订单" onClose={() => setLinking(false)}>
-          <GuestLinkConfirm
-            onDone={() => {
-              setLinking(false);
-              toast("已更新订单关联选择");
-            }}
-          />
-        </Modal>
-      )}
     </div>
   );
 }
@@ -1143,7 +1142,7 @@ function SecurityContent() {
     action = useAction();
   const { refresh, toast } = useStore();
   const navigate = useNavigate();
-  const resource = useGrowthResource<{ items: SessionDevice[] }>(
+  const resource = useAccountResource<{ items: SessionDevice[] }>(
     "/customer/account/sessions",
   );
   const [selected, setSelected] = useState<SessionDevice | "others" | null>(
@@ -1190,7 +1189,7 @@ function SecurityContent() {
         ) : resource.error && !resource.hasData ? (
           <ErrorState
             message={messageOf(resource.error)}
-            retry={resource.reload}
+            retry={resource.retry}
           />
         ) : !resource.data?.items.length ? (
           <Empty title="暂无设备记录" text="服务器尚未提供可展示的登录设备。" />
@@ -1296,7 +1295,7 @@ export function RewardsPage() {
   );
 }
 function RewardsContent() {
-  const resource = useGrowthResource<{ items: Coupon[] }>("/customer/coupons");
+  const resource = useAccountResource<{ items: Coupon[] }>("/customer/coupons");
   const [tab, setTab] = useState("AVAILABLE");
   const tabs = [
     ["AVAILABLE", "可使用"],
@@ -1348,7 +1347,7 @@ function RewardsContent() {
       ) : resource.error && !resource.hasData ? (
         <ErrorState
           message={messageOf(resource.error)}
-          retry={resource.reload}
+          retry={resource.retry}
         />
       ) : !items.length ? (
         <Panel>
@@ -1430,13 +1429,13 @@ export function InvitePage() {
   );
 }
 function InviteContent() {
-  const referrals = useGrowthResource<{
+  const referrals = useAccountResource<{
     items: ReferralRecord[];
     total: number;
     qualified: number;
     granted: number;
   }>("/customer/referrals");
-  const code = useGrowthResource<{
+  const code = useAccountResource<{
     code: string;
     shareText: string;
     rules: string | string[];
@@ -1468,7 +1467,7 @@ function InviteContent() {
         {code.loading ? (
           <ResourceSkeleton variant="detail" />
         ) : code.error && !code.hasData ? (
-          <ErrorState message={messageOf(code.error)} retry={code.reload} />
+          <ErrorState message={messageOf(code.error)} retry={code.retry} />
         ) : code.data?.code ? (
           <div className="account-stack">
             <div className="account-invite-code">
@@ -1518,7 +1517,7 @@ function InviteContent() {
         ) : referrals.error && !referrals.hasData ? (
           <ErrorState
             message={messageOf(referrals.error)}
-            retry={referrals.reload}
+            retry={referrals.retry}
           />
         ) : (
           <>
@@ -1565,208 +1564,134 @@ function InviteContent() {
 export function OrderLinkPage() {
   const identity = useIdentity(),
     store = useStore(),
-    navigate = useNavigate(),
-    action = useAction();
-  const [token, setToken] = useFragmentToken(),
-    [orderId] = useState(
-      () => new URLSearchParams(window.location.search).get("orderId") || "",
-    ),
-    [order, setOrder] = useState<Order | null>(null),
-    [confirmImport, setConfirmImport] = useState(false);
-  const started = useRef(false),
-    generation = useRef(identity.generation);
-  generation.current = identity.generation;
-  const open = () =>
-    navigate(`/u/orders/${encodeURIComponent(orderId)}`, { replace: true });
+    navigate = useNavigate();
+  const [token, setToken, incomingVersion] = useFragmentToken();
+  const route = useLocation();
+  const orderId = new URLSearchParams(route.search).get("orderId") || "";
+  const [status, setStatus] = useState<"EXPIRED" | "CLOSED" | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(true);
+  const started = useRef<string | null>(null);
+  const sequence = useRef(0);
+  const incoming = useRef({ orderId, incomingVersion });
+  incoming.current = { orderId, incomingVersion };
   const exchange = async () => {
-    if (!orderId) throw new Error("链接缺少订单信息，请联系打印员重新发送。");
-    if (!token) {
-      if (identity.orderAccess?.orderId === orderId) {
-        open();
+    const attempt = ++sequence.current;
+    const isCurrent = () =>
+      attempt === sequence.current &&
+      incoming.current.orderId === orderId &&
+      incoming.current.incomingVersion === incomingVersion;
+    setStatus(null);
+    setBusy(true);
+    setError("");
+    try {
+      if (!orderId)
+        throw new Error("链接缺少订单信息，请联系管理员获取新链接。");
+      if (!token) {
+        navigate(`/u/orders/${encodeURIComponent(orderId)}`, { replace: true });
         return;
       }
-      throw new Error("链接缺少有效访问凭据，请联系打印员重新发送。");
+      const result = await exchangeOnce(`${orderId}:${token}`, () =>
+        growthRequest<{ order: Order; access: OrderAccess }>(
+          "/order-access/exchange",
+          { method: "POST", body: { orderId, accessToken: token } },
+        ),
+      );
+      if (!isCurrent()) return;
+      if (result.order.id !== orderId || result.access.orderId !== orderId)
+        throw new Error("订单授权与链接不符，请重新获取链接。");
+      setToken("");
+      identity.setOrderAccess(result.access);
+      store.setData((current) => ({
+        ...current,
+        orders: [
+          ...current.orders.filter((item) => item.id !== orderId),
+          result.order,
+        ],
+      }));
+      navigate(`/u/orders/${encodeURIComponent(orderId)}`, { replace: true });
+    } catch (failure) {
+      if (!isCurrent()) return;
+      if (identity.customer.authKind === "REGISTERED") {
+        try {
+          const owned = await growthRequest<Order>(
+            `/orders/${encodeURIComponent(orderId)}`,
+          );
+          if (!isCurrent()) return;
+          if (ownsAccountOrder(owned, identity.customer)) {
+            setToken("");
+            store.setData((current) => ({
+              ...current,
+              orders: [
+                ...current.orders.filter((order) => order.id !== orderId),
+                owned,
+              ],
+            }));
+            navigate(`/u/orders/${encodeURIComponent(orderId)}`, {
+              replace: true,
+            });
+            return;
+          }
+        } catch {
+          /* The original exchange determines the guest-link error. */
+        }
+      }
+      if (!isCurrent()) return;
+      const code = (failure as { code?: string }).code;
+      if (code === "ORDER_GRANT_EXPIRED" || code === "ORDER_GRANT_REVOKED") {
+        window.dispatchEvent(
+          new CustomEvent("dormprint:order-access-ended", {
+            detail: { orderId },
+          }),
+        );
+        if (identity.orderAccess?.orderId === orderId)
+          identity.setOrderAccess(null);
+      }
+      if (code === "ORDER_GRANT_EXPIRED") {
+        setStatus("EXPIRED");
+        setToken("");
+      } else if (code === "ORDER_GRANT_REVOKED") {
+        setStatus("CLOSED");
+        setToken("");
+      } else setError(messageOf(failure));
+    } finally {
+      if (isCurrent()) setBusy(false);
     }
-    const expectedGeneration = identity.generation;
-    const result = await exchangeOnce(token, () =>
-      growthRequest<{ order: Order; access: OrderAccess }>(
-        "/order-access/exchange",
-        { method: "POST", body: { orderId, accessToken: token } },
-      ),
-    );
-    if (generation.current !== expectedGeneration)
-      throw new Error("身份已变更，请重新打开订单链接。");
-    if (result.order.id !== orderId || result.access.orderId !== orderId)
-      throw new Error("订单授权与链接不符，请重新获取链接。");
-    setToken("");
-    identity.setOrderAccess(result.access);
-    setOrder(result.order);
-    store.setData((s) => ({
-      ...s,
-      orders: [...s.orders.filter((o) => o.id !== orderId), result.order],
-    }));
-    if (!(
-      identity.customer.authKind === "REGISTERED" &&
-      identity.customer.account?.verified &&
-      result.access.scopes.includes("ORDER_IMPORT")
-    ))
-      open();
   };
   useEffect(() => {
-    if (!started.current) {
-      started.current = true;
-      void action.run(exchange);
+    const key = `${orderId}:${incomingVersion}`;
+    if (identity.customerReady !== false && started.current !== key) {
+      started.current = key;
+      void exchange();
     }
-  }, []);
+  }, [identity.customerReady, orderId, incomingVersion]);
+  if (status) return <GuestOrderUnavailable status={status} />;
   return (
-    <div className="account-page account-auth-page">
-      <PageHeading
-        title="打开专属订单"
-        description="此链接仅授权这一单，请妥善保管访问凭据。"
-      />
+    <main className="account-page account-auth-page">
+      <PageHeading title="打开专属订单" />
       <Panel>
-        {action.busy && !order ? (
+        {busy ? (
           <ResourceSkeleton variant="profile" />
         ) : (
-          <>
-            <Feedback action={action} />
-            {order ? (
-              <div className="account-stack">
-                <div className="account-success">
-                  <ShieldCheck size={30} />
-                  <h2>这一单已授权访问</h2>
-                </div>
-                <p>
-                  你可直接查看订单，也可明确将这一单添加到已验证的账号。添加只保留源链接允许的权限和有效期，不关联其他游客订单。
-                </p>
-                <Button onClick={open}>
-                  查看这一单
-                  <ArrowRight size={16} />
-                </Button>
-                {identity.customer.account?.verified &&
-                  identity.orderAccess?.orderId === orderId &&
-                  identity.orderAccess.scopes.includes("ORDER_IMPORT") && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => setConfirmImport(true)}
-                    >
-                      添加这一单到账号
-                    </Button>
-                  )}
-              </div>
-            ) : (
-              <div className="account-stack">
-                <Notice type="warning">
-                  链接已失效、缺少凭据或暂时无法兑换时，请联系打印员重发专属链接。手机号、昵称和提取码不能用于查询私有订单。
-                </Notice>
-                {token && (
-                  <Button
-                    variant="secondary"
-                    busy={action.busy}
-                    busyTarget={action.control}
-                    disabled={action.busy}
-                    onClick={() => void action.run(exchange)}
-                  >
-                    重新兑换
-                  </Button>
-                )}
-                <Link to="/u/" className="btn secondary">
-                  回到打印首页
-                </Link>
-              </div>
+          <div className="account-stack">
+            <Notice type="error">{error}</Notice>
+            <Notice type="warning">
+              链接已失效、缺少凭据或暂时无法兑换时，请联系管理员获取新链接。
+            </Notice>
+            {token && (
+              <Button variant="secondary" onClick={() => void exchange()}>
+                重新兑换
+              </Button>
             )}
-          </>
+            <Link className="btn secondary" to="/u/help#contact-admin">
+              联系管理员
+            </Link>
+            <Link className="btn secondary" to="/u/">
+              返回首页
+            </Link>
+          </div>
         )}
       </Panel>
-      {confirmImport && (
-        <Modal title="确认添加这一单" onClose={() => setConfirmImport(false)}>
-          <div className="account-stack">
-            <Notice>
-              仅添加当前授权的订单，不转移订单所有权；源链接撤销或到期后，该派生授权随之失效。
-            </Notice>
-            <Feedback action={action} />
-            <Button
-              busy={action.busy}
-              busyTarget={action.control}
-              disabled={action.busy}
-              onClick={() =>
-                void action.run(async () => {
-                  if (
-                    !identity.customer.account?.verified ||
-                    identity.orderAccess?.orderId !== orderId ||
-                    !identity.orderAccess.scopes.includes("ORDER_IMPORT")
-                  )
-                    throw new Error("需要已验证账号和有效的单订单导入授权。");
-                  await growthRequest("/customer/account/import-order", {
-                    method: "POST",
-                    body: { orderId, confirm: true },
-                  });
-                  setConfirmImport(false);
-                  store.toast("这一单已添加到账号");
-                  open();
-                })
-              }
-            >
-              确认添加这一单
-            </Button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-/** Detail-page affordance: no automatic guest merge or order ownership change. */
-export function OrderImportButton({
-  orderId,
-  onSuccess,
-}: {
-  orderId: string;
-  onSuccess?: () => void;
-}) {
-  const identity = useIdentity(),
-    { toast } = useStore(),
-    action = useAction();
-  const [confirm, setConfirm] = useState(false);
-  if (
-    !identity.customer.account?.verified ||
-    identity.orderAccess?.orderId !== orderId ||
-    !identity.orderAccess.scopes.includes("ORDER_IMPORT")
-  )
-    return null;
-  return (
-    <>
-      <Button variant="secondary" onClick={() => setConfirm(true)}>
-        添加这一单到账号
-      </Button>
-      {confirm && (
-        <Modal title="确认添加这一单" onClose={() => setConfirm(false)}>
-          <div className="account-stack">
-            <Notice>
-              仅添加本订单的有限授权，不转移所有权，也不关联其他游客订单。源链接撤销或到期后，派生授权同步失效。
-            </Notice>
-            <Feedback action={action} />
-            <Button
-              busy={action.busy}
-              busyTarget={action.control}
-              disabled={action.busy}
-              onClick={() =>
-                void action.run(async () => {
-                  await growthRequest("/customer/account/import-order", {
-                    method: "POST",
-                    body: { orderId, confirm: true },
-                  });
-                  setConfirm(false);
-                  toast("这一单已添加到账号");
-                  onSuccess?.();
-                })
-              }
-            >
-              确认添加这一单
-            </Button>
-          </div>
-        </Modal>
-      )}
-    </>
+    </main>
   );
 }

@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 
-from app.core import DTO
+from app.core import AdminOrderPickup, DTO
 
 TASK_STATUSES = ('PENDING', 'ATTEMPTED', 'COMPLETED', 'EXCEPTION', 'VOIDED')
 OPEN_TASK_STATUSES = ('PENDING', 'ATTEMPTED', 'EXCEPTION')
@@ -460,6 +460,7 @@ class PrintTaskDTO(DTO):
     id: str
     order_id: str
     pickup_code: str = ''
+    admin_pickup: AdminOrderPickup | None = None
     file_id: str
     file_name: str = ''
     kind: str = 'DOCUMENT'
@@ -527,6 +528,7 @@ class BindingTaskDTO(DTO):
     id: str
     order_id: str
     pickup_code: str = ''
+    admin_pickup: AdminOrderPickup | None = None
     file_id: str
     file_name: str = ''
     binding_type: str = 'NONE'
@@ -571,6 +573,7 @@ class PackingTaskDTO(DTO):
     id: str
     order_id: str
     pickup_code: str = ''
+    admin_pickup: AdminOrderPickup | None = None
     status: str
     checklist_version: int = 0
     order_status: str = ''

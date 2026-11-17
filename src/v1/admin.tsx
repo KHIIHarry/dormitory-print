@@ -1,3 +1,4 @@
+import { OrderPickupCode, adminPickupOf } from "../admin/order-pickup-code";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -256,7 +257,7 @@ export function AdminAfterSalesPage() {
             <table className="v1-cases-table">
               <thead>
                 <tr>
-                  <th>订单 / 来源</th>
+                  <th className="order-pickup-heading">订单 / 来源</th>
                   <th>责任 / 方案</th>
                   <th>建议 / 批准</th>
                   <th>状态</th>
@@ -268,10 +269,7 @@ export function AdminAfterSalesPage() {
                 {items.map((item) => (
                   <tr key={item.id}>
                     <td data-label="订单 / 来源">
-                      <b>{item.orderCode || item.orderId}</b>
-                      <small>
-                        {sourceLabel(item.source)} · {item.customerLabel || "客户"}
-                      </small>
+                      <OrderPickupCode pickup={adminPickupOf({pickupCode:item.orderCode || item.orderId, adminPickup:item.adminPickup})} href={`${ADMIN}/orders/${encodeURIComponent(item.orderId)}`} subline={`${sourceLabel(item.source)} · ${item.customerLabel || "客户"}`} />
                     </td>
                     <td data-label="责任 / 方案">
                       {responsibilityLabel(item.responsibility)}
@@ -818,6 +816,7 @@ export function AdminAfterSaleDetail() {
         description={`${sourceLabel(item.source)} · ${responsibilityLabel(item.responsibility)} · ${solutionLabel(item.solution)}`}
         action={canDelete ? <AfterSaleDeleteButton item={item} onClick={() => setDeleting(true)} /> : undefined}
       />
+      <OrderPickupCode pickup={adminPickupOf({pickupCode:item.orderCode || item.orderId, adminPickup:item.adminPickup})} href={`${ADMIN}/orders/${encodeURIComponent(item.orderId)}`} />
       <AccessState access={access} />
       <ResourceState
         loading={false}

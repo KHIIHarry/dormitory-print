@@ -50,3 +50,8 @@ export function safeCustomerReturn(value: string | null) {
     ? value
     : "/u/account";
 }
+
+/** Email round-trips may remember an order route, with no query or fragment. */
+export function safeOrderReturn(value: string | null) {
+  return value && /^\/u\/orders\/[A-Za-z0-9_-]+$/.test(value) ? value : null;
+}

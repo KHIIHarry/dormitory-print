@@ -10,18 +10,6 @@ from .core import DTO
 
 STAFF_ROLES = ('ADMIN', 'COURIER')
 STAFF_STATUSES = ('PENDING_SETUP', 'ACTIVE', 'DISABLED')
-LINK_SCOPES = (
-    'ORDER_VIEW',
-    'FINAL_PDF_PREVIEW',
-    'DELIVERY_PROOF_VIEW',
-    'ORDER_REVISE_PENDING',
-    'ORDER_CANCEL_PENDING',
-    'ORDER_CHANGE_LOCATION_PRE_DELIVERY',
-    'ORDER_IMPORT',
-)
-READ_ONLY_SCOPES = ('ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW')
-
-
 def normalize_email(value: str) -> str:
     """Trim and normalize the domain only; never rewrite a local part (dot/tag)."""
     if not isinstance(value, str):
@@ -141,11 +129,6 @@ class ConfirmInput(DTO):
     confirm: Literal[True]
 
 
-class ImportOrderInput(DTO):
-    order_id: str = Field(min_length=1, max_length=64)
-    confirm: Literal[True]
-
-
 class SessionRevokeInput(DTO):
     session_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(default='', max_length=500)
@@ -243,26 +226,6 @@ class RevokeResult(DTO):
     revoked: bool
     revoked_count: int = 0
     current_revoked: bool = False
-
-
-class LinkGuestResult(DTO):
-    rotation_completed: bool
-    customer_principal_id: str
-    guest_principal_id: str
-    visible_scope: Literal['LINKED_ORDERS'] = 'LINKED_ORDERS'
-    id: str | None = None
-    status: str = 'LINKED'
-
-
-class ImportOrderResult(DTO):
-    account_order_grant_id: str
-    source_grant_id: str
-    scopes: list[str]
-    expires_at: datetime
-    owner_preserved: bool = True
-    id: str | None = None
-    order_id: str | None = None
-    status: str = 'IMPORTED'
 
 
 class StaffSessionView(DTO):
@@ -418,39 +381,59 @@ class StaffActionResult(DTO):
     revoked: bool | None = None
 
 
-class AccessLinkInput(DTO):
+class GuestAccessActionInput(DTO):
+    expected_version: int = Field(ge=1, strict=True)
     reason: str = Field(min_length=1, max_length=500)
-    expires_at: datetime | None = None
-    scopes: list[str] | None = None
-    # The delivery docs also write the list as `scope`; accept both spellings.
-    scope: list[str] | None = None
-    reissue: bool = False
-    revoke_previous: bool = False
+
+    @field_validator('reason')
+    @classmethod
+    def reason_required(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('请填写操作原因')
+        return value
 
 
-class AccessLinkView(DTO):
-    id: str
-    order_id: str
+class GuestAccessResetInput(GuestAccessActionInput):
+    days: int = Field(default=14, ge=1, le=14, strict=True)
+
+
+class GuestOwnerInput(GuestAccessActionInput):
+    account_id: str = Field(min_length=1, max_length=64)
+
+
+class GuestOrderClaimInput(DTO):
+    confirm: Literal[True]
+
+    @field_validator('confirm', mode='before')
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError('请明确确认关联此订单')
+        return value
+
+
+class GuestAccessView(DTO):
+    status: Literal['ACTIVE', 'EXPIRED', 'CLOSED', 'NO_LINK']
     version: int
-    scopes: list[str]
-    created_at: datetime
-    created_by: str
+    opened_at: datetime | None = None
     expires_at: datetime | None = None
-    revoked_at: datetime | None = None
-    last_access_at: datetime | None = None
+    server_now: datetime
+    can_open: bool = False
 
 
-class AccessLinkList(DTO):
-    items: list[AccessLinkView]
+class CustomerGuestAccessView(GuestAccessView):
+    can_claim_on_device: bool = False
 
 
-class AccessLinkIssued(DTO):
-    grant: AccessLinkView
+class GuestAccessOpenView(DTO):
+    order_id: str
     access_token: str
-    revoked_grant_ids: list[str] = Field(default_factory=list)
-    id: str | None = None
-    order_id: str | None = None
-    status: str = 'ISSUED'
+
+
+class OrderOwnerView(DTO):
+    order_id: str
+    owner_account_id: str
 
 
 class OrderAccessView(DTO):
@@ -464,6 +447,7 @@ class OrderAccessView(DTO):
 class OrderAccessExchange(DTO):
     order: dict[str, Any]
     access: OrderAccessView
+    server_now: datetime
     id: str | None = None
     order_id: str | None = None
     status: str = 'EXCHANGED'
@@ -483,16 +467,6 @@ class DeletionRequestResult(DTO):
     recovery_until: datetime | None = None
     can_recover: bool = False
     recovered: bool = False
-
-
-class GrantRevokeResult(DTO):
-    revoked: bool
-    grant_id: str
-    affected_grant_ids: list[str]
-    owner_preserved: bool = True
-    id: str | None = None
-    order_id: str | None = None
-    status: str = 'REVOKED'
 
 
 class LoginInput(DTO):

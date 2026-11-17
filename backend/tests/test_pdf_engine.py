@@ -908,3 +908,31 @@ def test_identification_pdf_paginates_complete_file_rows_and_repeats_pickup_code
         assert all(abs(page.rect.width - 595.28) < .1 and abs(page.rect.height - 841.89) < .1 for page in pdf)
         assert all(sum(f'文件 {index:03d}' in text for text in texts) == 1 for index in range(len(files)))
         assert '下次打印' in texts[0] and all('下次打印' not in text for text in texts[1:])
+
+
+def test_identification_pdf_places_delivery_campus_below_upload_copy(tmp_path):
+    from app.order_identification import IdentificationFile, render_identification, SCALE
+    target = tmp_path / 'campus-identification.pdf'
+    render_identification(target, 'ABCDE', [IdentificationFile('课堂资料.pdf', ('1',), 'NONE')],
+                          1, 0, 'https://print.example.test/u/', campus_name='崇明校区')
+    with pymupdf.open(target) as document:
+        page = document[0]
+        text = page.get_text()
+        assert '配送地点：崇明校区' in text
+        line = page.search_for('配送地点：崇明校区')[0]
+        upload = page.search_for('在线上传文件')[0]
+        assert abs(line.x0 - upload.x0) < .1
+        assert line.y0 > upload.y1 + 3 * SCALE
+        assert line.x1 < 605 * SCALE
+
+
+def test_identification_pdf_preserves_long_delivery_campus_inside_footer(tmp_path):
+    from app.order_identification import IdentificationFile, render_identification, SCALE
+    campus_name = '教学科研园区' * 20
+    target = tmp_path / 'long-campus-identification.pdf'
+    render_identification(target, 'ABCDE', [IdentificationFile('课堂资料.pdf', ('1',), 'NONE')],
+                          1, 0, 'https://print.example.test/u/', campus_name=campus_name)
+    with pymupdf.open(target) as document:
+        page = document[0]
+        footer = page.get_textbox(pymupdf.Rect(54 * SCALE, 947 * SCALE, 607 * SCALE, 1105 * SCALE))
+        assert '配送地点：' + campus_name in footer.replace('\n', '')

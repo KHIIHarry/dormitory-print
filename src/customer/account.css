@@ -98,6 +98,16 @@
   outline: 2px solid var(--primary, #94613c);
   outline-offset: 2px;
 }
+.account-auth-page .field input[type="email"],
+.account-auth-page .account-password input {
+  min-height: 44px;
+  font-size: 16px;
+}
+.account-auth-page .account-auth-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
 .account-check {
   display: flex;
   align-items: flex-start;

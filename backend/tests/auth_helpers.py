@@ -194,6 +194,7 @@ def make_order(db, principal_id: str, status: str = 'PENDING_CONFIRMATION', tota
     db.flush()
     order = Order(
         principal_id=principal_id,
+        owner_account_id=db.get(Principal, principal_id).account_id,
         pickup_code=uuid4().hex[:8].upper(),
         status=status,
         preparation_id=preparation.id,

@@ -22,10 +22,14 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import func, or_, select
 
 from .auth_schemas import (
-    AccessLinkInput,
-    AccessLinkIssued,
-    AccessLinkList,
-    AccessLinkView,
+    CustomerGuestAccessView,
+    GuestAccessActionInput,
+    GuestAccessOpenView,
+    GuestAccessResetInput,
+    GuestAccessView,
+    GuestOwnerInput,
+    GuestOrderClaimInput,
+    OrderOwnerView,
     ChangeEmailInput,
     ChangePasswordInput,
     ChangePendingEmailInput,
@@ -37,12 +41,8 @@ from .auth_schemas import (
     DeletionRequestResult,
     EmailInput,
     ExchangeInput,
-    GrantRevokeResult,
     GrantableAccountList,
     GrantableAccountView,
-    ImportOrderInput,
-    ImportOrderResult,
-    LinkGuestResult,
     MailResult,
     NotificationInput,
     NotificationPreferences,
@@ -73,6 +73,10 @@ from .auth_schemas import (
 )
 from .core import (
     Actor,
+    GUEST_LINK_SCOPES,
+    current_guest_grant,
+    seal,
+    unseal,
     DomainError,
     Envelope,
     actor_dep,
@@ -120,22 +124,8 @@ DELETION_PENDING = 'DELETION_PENDING'
 ORDER_SESSION_TTL = timedelta(days=30)
 SECURITY_TOKEN_TTL = timedelta(minutes=30)
 TEMPORARY_PASSWORD_TTL = timedelta(hours=24)
-ORDER_LINK_MAX_TTL = timedelta(days=30)
-
-LINK_SCOPES = (
-    'ORDER_VIEW',
-    'FINAL_PDF_PREVIEW',
-    'DELIVERY_PROOF_VIEW',
-    'ORDER_REVISE_PENDING',
-    'ORDER_CANCEL_PENDING',
-    'ORDER_CHANGE_LOCATION_PRE_DELIVERY',
-    'ORDER_IMPORT',
-)
-READ_ONLY_SCOPES = ('ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW')
-
 TERMINAL_ORDER_STATUSES = {'COMPLETED', 'DELIVERED', 'CANCELLED', 'CANCELED', 'CLOSED', 'REFUNDED'}
 TERMINAL_AFTER_SALE_STATUSES = {'COMPLETED', 'CLOSED', 'REJECTED', 'CANCELLED', 'CANCELED'}
-LOCATION_CHANGE_BLOCKED_STATUSES = TERMINAL_ORDER_STATUSES | {'DELIVERING', 'OUT_FOR_DELIVERY'}
 
 _hasher = PasswordHasher()
 _DUMMY_HASH: str | None = None
@@ -456,7 +446,8 @@ def _revoke_sessions_for_grants(db, grant_ids: set[str]) -> int:
         return 0
     count = 0
     for session in db.scalars(select(AuthSession).where(
-            AuthSession.grant_id.in_(grant_ids), AuthSession.revoked_at.is_(None))):
+            AuthSession.grant_id.in_(grant_ids), AuthSession.revoked_at.is_(None))
+            .order_by(AuthSession.id).with_for_update()):
         _revoke_session(session)
         count += 1
     return count
@@ -1354,93 +1345,6 @@ def customer_revoke_session(payload: SessionRevokeInput, response: Response, db=
     return ok(RevokeResult(revoked=True, revoked_count=1, current_revoked=current))
 
 
-@router.post('/customer/account/link-guest', response_model=Envelope[LinkGuestResult])
-def customer_link_guest(payload: ConfirmInput, request: Request, response: Response,
-                        db=Depends(get_db), actor=Depends(actor_dep)):
-    require_customer(actor, verified=True)
-    guest_session = _load_session(db, request, GUEST_COOKIE, 'GUEST')
-    if not _session_active(guest_session) or guest_session is None or not guest_session.principal_id:
-        raise DomainError('GUEST_SESSION_REQUIRED', '需要当前浏览器仍有效的游客会话才能显式关联', 409)
-    principal = db.scalar(select(Principal).where(Principal.id == guest_session.principal_id).with_for_update())
-    if principal is None:
-        raise DomainError('GUEST_SESSION_REQUIRED', '当前游客身份已失效', 409)
-    account = lock(db, Account, actor.account_id)
-    if principal.account_id is not None and principal.account_id != account.id:
-        raise DomainError('ACCOUNT_LINK_CONFLICT', '该游客身份已关联其他账号，不能重复认领', 409)
-    principal.account_id = account.id
-    touch(principal)
-    for session in db.scalars(select(AuthSession).where(
-            AuthSession.kind == 'GUEST', AuthSession.principal_id == principal.id,
-            AuthSession.revoked_at.is_(None))):
-        _revoke_session(session)
-    new_principal, _ = _create_guest_session(db, response, request)
-    audit(db, actor, 'CUSTOMER_GUEST_LINKED', 'principal', principal.id,
-          data={'guestPrincipalId': principal.id, 'newGuestPrincipalId': new_principal.id})
-    return ok(LinkGuestResult(
-        rotation_completed=True,
-        customer_principal_id=account.principal_id,
-        guest_principal_id=new_principal.id,
-        id=account.principal_id,
-    ))
-
-
-@router.post('/customer/account/import-order', response_model=Envelope[ImportOrderResult])
-def customer_import_order(payload: ImportOrderInput, request: Request, db=Depends(get_db),
-                          actor=Depends(actor_dep)):
-    require_customer(actor, verified=True)
-    order_session = _load_session(db, request, ORDER_ACCESS_COOKIE, 'ORDER_ACCESS')
-    grant = _valid_grant_session(db, order_session)
-    if grant is None or grant.order_id != payload.order_id:
-        raise DomainError('ORDER_GRANT_SCOPE_DENIED', '需要该订单当前有效的访问授权', 403)
-    grant = db.scalar(select(AccessGrant).where(AccessGrant.id == grant.id).with_for_update())
-    if not _grant_active(grant):
-        raise DomainError('ORDER_GRANT_REVOKED', '订单访问授权已撤销或过期', 410)
-    order = db.get(Order, payload.order_id)
-    if order is None or order.deleted_at is not None:
-        raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-    effective = grant_scopes(db, Actor(grant_ids=[grant.id]), order.id)
-    if 'ORDER_IMPORT' not in effective:
-        raise DomainError('ORDER_GRANT_SCOPE_DENIED', '当前链接未授予单单导入权限', 403)
-    advisory_lock(db, f'order-import:{actor.account_id}:{order.id}:{grant.id}')
-    existing = db.scalar(select(AccessGrant).where(
-        AccessGrant.order_id == order.id,
-        AccessGrant.account_id == actor.account_id,
-        AccessGrant.source_grant_id == grant.id,
-        AccessGrant.revoked_at.is_(None),
-        AccessGrant.expires_at > _now(),
-    ))
-    if existing is not None:
-        return ok(ImportOrderResult(
-            account_order_grant_id=existing.id,
-            source_grant_id=grant.id,
-            scopes=list(existing.scopes or []),
-            expires_at=existing.expires_at,
-            id=existing.id,
-            order_id=order.id,
-        ))
-    scopes = [scope for scope in (grant.scopes or []) if scope in effective]
-    derived = AccessGrant(
-        order_id=order.id,
-        account_id=actor.account_id,
-        source_grant_id=grant.id,
-        scopes=scopes,
-        expires_at=min(_aware(grant.expires_at), _now() + ORDER_LINK_MAX_TTL),
-        created_by=actor.id,
-    )
-    db.add(derived)
-    db.flush()
-    audit(db, actor, 'ORDER_IMPORTED_TO_ACCOUNT', 'order', order.id,
-          data={'sourceGrantId': grant.id, 'accountOrderGrantId': derived.id})
-    return ok(ImportOrderResult(
-        account_order_grant_id=derived.id,
-        source_grant_id=grant.id,
-        scopes=scopes,
-        expires_at=derived.expires_at,
-        id=derived.id,
-        order_id=order.id,
-    ))
-
-
 @router.post('/customer/account/deletion-request', response_model=Envelope[DeletionRequestResult])
 def customer_deletion_request(payload: DeletionRequestInput, response: Response,
                               db=Depends(get_db), actor=Depends(actor_dep)):
@@ -1477,54 +1381,16 @@ def customer_deletion_request(payload: DeletionRequestInput, response: Response,
 # ---------------------------------------------------------------------------
 
 
-def _validate_scopes(scopes: list[str] | None) -> list[str]:
-    values = list(scopes) if scopes is not None else list(READ_ONLY_SCOPES)
-    if not values:
-        raise DomainError('ORDER_GRANT_SCOPE_INVALID', '至少需要一个订单访问权限', 422)
-    unknown = sorted({value for value in values if value not in LINK_SCOPES})
-    if unknown:
-        raise DomainError('ORDER_GRANT_SCOPE_DENIED', '包含未知的订单访问权限', 422,
-                          {'unknownScopes': unknown})
-    return [scope for scope in LINK_SCOPES if scope in set(values)]
-
-
 def _grant_active(grant: AccessGrant | None) -> bool:
     return bool(grant and grant.revoked_at is None and _aware(grant.expires_at) > _now())
 
 
-def _link_view(grant: AccessGrant) -> AccessLinkView:
-    return AccessLinkView(
-        id=grant.id,
-        order_id=grant.order_id,
-        version=grant.version,
-        scopes=list(grant.scopes or []),
-        created_at=grant.created_at,
-        created_by=grant.created_by or '',
-        expires_at=grant.expires_at,
-        revoked_at=grant.revoked_at,
-        last_access_at=grant.last_used_at,
-    )
-
-
 def _order_access_view(grant: AccessGrant, scopes: list[str], order: Order) -> dict:
-    # The frontend compares allowedActions against the same scope constants
-    # (`canOrderAction`), so this list must contain scope names, not prose.
-    allowed = [scope for scope in scopes
-               if scope in ('ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW')]
-    if order.status == 'PENDING_CONFIRMATION':
-        if 'ORDER_REVISE_PENDING' in scopes:
-            allowed.append('ORDER_REVISE_PENDING')
-        if 'ORDER_CANCEL_PENDING' in scopes:
-            allowed.append('ORDER_CANCEL_PENDING')
-    if (order.status not in LOCATION_CHANGE_BLOCKED_STATUSES
-            and 'ORDER_CHANGE_LOCATION_PRE_DELIVERY' in scopes):
-        allowed.append('ORDER_CHANGE_LOCATION_PRE_DELIVERY')
-    if 'ORDER_IMPORT' in scopes:
-        allowed.append('ORDER_IMPORT')
+    allowed = [scope for scope in scopes if scope in GUEST_LINK_SCOPES]
     return {
         'orderId': order.id,
         'sourceGrantId': grant.id,
-        'scopes': scopes,
+        'scopes': allowed,
         'allowedActions': allowed,
         'expiresAt': grant.expires_at,
     }
@@ -1557,22 +1423,21 @@ def _order_view(db, order: Order, actor: Actor) -> dict:
     }
 
 
-def issue_order_grant(db, order: Order, actor, scopes: list[str] | None = None,
-                      expires_at: datetime | None = None) -> tuple[AccessGrant, str]:
-    """Issue a single-order link. The raw token is returned exactly once."""
-    validated = _validate_scopes(scopes)
+def issue_order_grant(db, order: Order, actor, *, days: int = 14) -> tuple[AccessGrant, str]:
+    """Create the order's single recoverable, read-only guest link."""
+    if order.owner_account_id is not None:
+        raise DomainError('ORDER_ALREADY_OWNED', '订单已关联账号，请刷新客户信息', 409)
+    if type(days) is not int or not 1 <= days <= 14:
+        raise DomainError('ORDER_LINK_EXPIRES_INVALID', '链接有效期应为 1 至 14 天', 422)
     now = _now()
-    expiry = _aware(expires_at) if expires_at is not None else now + ORDER_LINK_MAX_TTL
-    if expiry <= now:
-        raise DomainError('ORDER_LINK_EXPIRES_INVALID', '链接到期时间必须晚于当前时间', 422)
-    if expiry > now + ORDER_LINK_MAX_TTL:
-        raise DomainError('ORDER_LINK_EXPIRES_INVALID', '订单链接有效期不能超过 30 天', 422)
     raw = secrets.token_urlsafe(32)
     grant = AccessGrant(
         order_id=order.id,
         token_hash=token_hash(raw),
-        scopes=validated,
-        expires_at=expiry,
+        encrypted_token=seal(raw),
+        scopes=sorted(GUEST_LINK_SCOPES),
+        created_at=now,
+        expires_at=now + timedelta(days=days),
         created_by=actor.id if isinstance(actor, Actor) else str(actor),
     )
     db.add(grant)
@@ -1582,7 +1447,8 @@ def issue_order_grant(db, order: Order, actor, scopes: list[str] | None = None,
 
 def _revoke_grant_tree(db, order_id: str, root_ids: list[str]) -> list[str]:
     rows = list(db.scalars(select(AccessGrant).where(
-        AccessGrant.order_id == order_id).with_for_update()))
+        AccessGrant.order_id == order_id).order_by(AccessGrant.id).with_for_update()
+        .execution_options(populate_existing=True)))
     children: dict[str | None, list[AccessGrant]] = {}
     for row in rows:
         children.setdefault(row.source_grant_id, []).append(row)
@@ -1610,96 +1476,209 @@ def _require_link_admin(actor: Actor) -> None:
     require_admin(actor, 'order.access-link.manage')
 
 
-@router.get('/admin/orders/{order_id}/access-links', response_model=Envelope[AccessLinkList])
-def admin_access_links(order_id: str, db=Depends(get_db), actor=Depends(actor_dep)):
-    _require_link_admin(actor)
-    order = db.get(Order, order_id)
+def _guest_order(db, order_id: str, *, for_update: bool = False) -> Order:
+    order = lock(db, Order, order_id) if for_update else db.get(Order, order_id)
     if order is None or order.deleted_at is not None:
         raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-    rows = db.scalars(select(AccessGrant).where(
-        AccessGrant.order_id == order.id, AccessGrant.token_hash.is_not(None)
-    ).order_by(AccessGrant.created_at.desc()))
-    return ok(AccessLinkList(items=[_link_view(row) for row in rows]))
+    return order
 
 
-@router.post('/admin/orders/{order_id}/access-links', response_model=Envelope[AccessLinkIssued])
-def admin_issue_access_link(order_id: str, payload: AccessLinkInput, db=Depends(get_db),
-                            actor=Depends(actor_dep)):
-    _require_link_admin(actor)
-    order = lock(db, Order, order_id)
-    if order.deleted_at is not None:
-        raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-    revoked: list[str] = []
-    reissue = payload.reissue or payload.revoke_previous
-    if reissue:
-        active_roots = list(db.scalars(select(AccessGrant).where(
+def _require_guest_order(order: Order, expected_version: int | None = None) -> None:
+    if order.owner_account_id is not None:
+        raise DomainError('ORDER_ALREADY_OWNED', '订单已关联账号，请刷新客户信息', 409)
+    if expected_version is not None and order.guest_access_version != expected_version:
+        raise DomainError('VERSION_CONFLICT', '链接状态已变化，请刷新后重试', 409,
+                          {'currentVersion': order.guest_access_version})
+
+
+def _guest_access_view(db, order: Order) -> GuestAccessView:
+    grant = current_guest_grant(db, order.id)
+    if grant is not None and order.owner_account_id is None:
+        status = 'ACTIVE' if _grant_active(grant) else 'EXPIRED'
+    else:
+        grant = db.scalar(select(AccessGrant).where(
             AccessGrant.order_id == order.id, AccessGrant.token_hash.is_not(None),
-            AccessGrant.revoked_at.is_(None), AccessGrant.expires_at > _now())))
-        revoked = _revoke_grant_tree(db, order.id, [row.id for row in active_roots])
-    requested_scopes = payload.scopes if payload.scopes is not None else payload.scope
-    grant, raw = issue_order_grant(db, order, actor, requested_scopes, payload.expires_at)
-    audit(db, actor, 'ORDER_ACCESS_LINK_REISSUED' if reissue else 'ORDER_ACCESS_LINK_ISSUED',
-          'order', order.id, reason=payload.reason,
-          data={'grantId': grant.id, 'scopes': grant.scopes, 'revokedGrantIds': revoked})
-    return ok(AccessLinkIssued(grant=_link_view(grant), access_token=raw,
-                               revoked_grant_ids=revoked, id=grant.id, order_id=order.id))
+            AccessGrant.source_grant_id.is_(None)
+        ).order_by(AccessGrant.created_at.desc(), AccessGrant.id.desc()))
+        status = 'CLOSED' if grant is not None else 'NO_LINK'
+    return GuestAccessView(
+        status=status, version=order.guest_access_version,
+        opened_at=grant.created_at if grant else None,
+        expires_at=grant.expires_at if grant else None, server_now=_now(),
+        can_open=bool(status == 'ACTIVE' and grant.encrypted_token),
+    )
 
 
-@router.post('/admin/orders/{order_id}/access-links/reissue',
-             response_model=Envelope[AccessLinkIssued])
-def admin_reissue_access_link(order_id: str, payload: AccessLinkInput, db=Depends(get_db),
-                              actor=Depends(actor_dep)):
-    """Explicit lost-credential reissue: revoke the order's prior links first."""
-    payload.reissue = True
-    return admin_issue_access_link(order_id, payload, db, actor)
+def _original_guest_session(db, request: Request, order: Order) -> AuthSession | None:
+    session = _load_session(db, request, GUEST_COOKIE, 'GUEST')
+    if session is not None and session.principal_id == order.principal_id:
+        return session
+    return None
 
 
-@router.post('/admin/orders/{order_id}/access-links/{grant_id}/revoke',
-             response_model=Envelope[GrantRevokeResult])
-def admin_revoke_access_link(order_id: str, grant_id: str, payload: ReasonInput,
+def _can_claim_on_device(db, request: Request, order: Order, actor: Actor) -> bool:
+    session = _original_guest_session(db, request, order)
+    return bool(actor.account_id and order.owner_account_id is None
+                and _session_active(session) and _grant_active(current_guest_grant(db, order.id)))
+
+
+def _close_guest_access(db, order: Order) -> list[str]:
+    roots = list(db.scalars(select(AccessGrant.id).where(
+        AccessGrant.order_id == order.id, AccessGrant.source_grant_id.is_(None))))
+    affected = _revoke_grant_tree(db, order.id, roots)
+    order.guest_access_version += 1
+    db.flush()
+    return affected
+
+
+@router.get('/admin/orders/{order_id}/guest-access', response_model=Envelope[GuestAccessView])
+def admin_guest_access(order_id: str, db=Depends(get_db), actor=Depends(actor_dep)):
+    _require_link_admin(actor)
+    order = _guest_order(db, order_id)
+    _require_guest_order(order)
+    return ok(_guest_access_view(db, order))
+
+
+@router.get('/admin/orders/{order_id}/guest-access/open', response_model=Envelope[GuestAccessOpenView])
+def admin_open_guest_access(order_id: str, db=Depends(get_db), actor=Depends(actor_dep)):
+    _require_link_admin(actor)
+    order = _guest_order(db, order_id, for_update=True)
+    _require_guest_order(order)
+    grant = current_guest_grant(db, order.id)
+    if grant is None:
+        raise DomainError('ORDER_GRANT_REVOKED', '订单已停止游客访问', 410)
+    if not _grant_active(grant):
+        raise DomainError('ORDER_GRANT_EXPIRED', '订单游客链接已到期', 410)
+    if not grant.encrypted_token:
+        raise DomainError('GUEST_LINK_RESET_REQUIRED', '重置后可从后台打开', 409)
+    try:
+        raw = unseal(grant.encrypted_token)
+    except Exception:
+        raise DomainError('GUEST_LINK_RESET_REQUIRED', '重置后可从后台打开', 409)
+    if not isinstance(raw, str) or token_hash(raw) != grant.token_hash:
+        raise DomainError('GUEST_LINK_RESET_REQUIRED', '重置后可从后台打开', 409)
+    audit(db, actor, 'ORDER_GUEST_ACCESS_OPENED', 'order', order.id, data={'grantId': grant.id})
+    return ok(GuestAccessOpenView(order_id=order.id, access_token=raw))
+
+
+@router.post('/admin/orders/{order_id}/guest-access/close', response_model=Envelope[GuestAccessView])
+def admin_close_guest_access(order_id: str, payload: GuestAccessActionInput,
                              db=Depends(get_db), actor=Depends(actor_dep)):
     _require_link_admin(actor)
-    order = lock(db, Order, order_id)
-    if order.deleted_at is not None:
+    order = _guest_order(db, order_id, for_update=True)
+    _require_guest_order(order, payload.expected_version)
+    affected = _close_guest_access(db, order)
+    audit(db, actor, 'ORDER_GUEST_ACCESS_CLOSED', 'order', order.id,
+          reason=payload.reason, data={'revokedGrantIds': affected})
+    return ok(_guest_access_view(db, order))
+
+
+@router.post('/admin/orders/{order_id}/guest-access/reset', response_model=Envelope[GuestAccessView])
+def admin_reset_guest_access(order_id: str, payload: GuestAccessResetInput,
+                             db=Depends(get_db), actor=Depends(actor_dep)):
+    _require_link_admin(actor)
+    order = _guest_order(db, order_id, for_update=True)
+    _require_guest_order(order, payload.expected_version)
+    affected = _close_guest_access(db, order)
+    grant, _ = issue_order_grant(db, order, actor, days=payload.days)
+    audit(db, actor, 'ORDER_GUEST_ACCESS_RESET', 'order', order.id, reason=payload.reason,
+          data={'grantId': grant.id, 'revokedGrantIds': affected, 'days': payload.days})
+    return ok(_guest_access_view(db, order))
+
+
+@router.get('/customer/orders/{order_id}/guest-access', response_model=Envelope[CustomerGuestAccessView])
+def customer_guest_access(order_id: str, request: Request, db=Depends(get_db), actor=Depends(actor_dep)):
+    order = _guest_order(db, order_id)
+    original = _original_guest_session(db, request, order)
+    session = _load_session(db, request, ORDER_ACCESS_COOKIE, 'ORDER_ACCESS')
+    grant = db.get(AccessGrant, session.grant_id) if session and session.grant_id else None
+    if original is None and (grant is None or grant.order_id != order.id):
         raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
-    grant = lock(db, AccessGrant, grant_id, payload.expected_version)
-    if grant.order_id != order.id or grant.token_hash is None:
-        raise DomainError('NOT_FOUND', '授权不存在或不可访问', 404)
-    affected = _revoke_grant_tree(db, order.id, [grant.id])
-    if grant.id not in affected:
-        affected.append(grant.id)
-    audit(db, actor, 'ORDER_ACCESS_LINK_REVOKED', 'order', order.id, reason=payload.reason,
-          data={'grantId': grant.id, 'affectedGrantIds': affected})
-    return ok(GrantRevokeResult(revoked=True, grant_id=grant.id,
-                                affected_grant_ids=affected, owner_preserved=True,
-                                id=grant.id, order_id=order.id))
+    view = _guest_access_view(db, order)
+    view.can_open = False
+    # A superseded session represents a closed entry even while the new entry is active.
+    if original is None and (not _session_active(session) or not _grant_active(grant)
+                             or order.owner_account_id is not None):
+        view.status = 'EXPIRED' if (grant.revoked_at is None and order.owner_account_id is None
+                                    and _aware(grant.expires_at) <= _now()) else 'CLOSED'
+        view.opened_at = grant.created_at
+        view.expires_at = grant.expires_at
+    return ok(CustomerGuestAccessView(**view.model_dump(),
+                                      can_claim_on_device=_can_claim_on_device(db, request, order, actor)))
+
+
+def _lock_binding_accounts(db, actor: Actor, account_id: str) -> Account:
+    account_ids = sorted({account_id, actor.account_id} - {None})
+    accounts = list(db.scalars(select(Account).where(Account.id.in_(account_ids))
+        .order_by(Account.id).with_for_update().execution_options(populate_existing=True)))
+    target = next((row for row in accounts if row.id == account_id), None)
+    if not _account_active(target):
+        raise DomainError('ACCOUNT_UNAVAILABLE', '目标账号需要已验证且可用', 409)
+    current = _valid_account_session(db, db.get(AuthSession, actor.account_session_id))
+    if current is None:
+        raise DomainError('ACCOUNT_VERIFICATION_REQUIRED', '请登录已验证账号', 403)
+    return target
+
+
+def _bind_guest_owner(db, order: Order, account: Account, actor: Actor, reason: str) -> dict:
+    order.owner_account_id = account.id
+    affected = _close_guest_access(db, order)
+    audit(db, actor, 'ORDER_GUEST_OWNER_BOUND', 'order', order.id, reason=reason,
+          data={'accountId': account.id, 'revokedGrantIds': affected})
+    return ok(OrderOwnerView(order_id=order.id, owner_account_id=account.id))
+
+
+@router.post('/customer/orders/{order_id}/claim', response_model=Envelope[OrderOwnerView])
+def customer_claim_order(order_id: str, payload: GuestOrderClaimInput, request: Request,
+                         db=Depends(get_db), actor=Depends(actor_dep)):
+    require_customer(actor, verified=True)
+    account = _lock_binding_accounts(db, actor, actor.account_id)
+    order = _guest_order(db, order_id, for_update=True)
+    if order.owner_account_id == account.id:
+        return ok(OrderOwnerView(order_id=order.id, owner_account_id=account.id))
+    if not _can_claim_on_device(db, request, order, actor):
+        raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
+    return _bind_guest_owner(db, order, account, actor, '原设备确认关联订单')
+
+
+@router.post('/admin/orders/{order_id}/guest-owner', response_model=Envelope[OrderOwnerView])
+def admin_bind_guest_owner(order_id: str, payload: GuestOwnerInput,
+                           db=Depends(get_db), actor=Depends(actor_dep)):
+    _require_link_admin(actor)
+    require_admin(actor, 'customer.manage')
+    account = _lock_binding_accounts(db, actor, payload.account_id)
+    order = _guest_order(db, order_id, for_update=True)
+    _require_guest_order(order, payload.expected_version)
+    return _bind_guest_owner(db, order, account, actor, payload.reason)
 
 
 @router.post('/order-access/exchange', response_model=Envelope[OrderAccessExchange])
 def order_access_exchange(payload: ExchangeInput, request: Request, response: Response,
                           db=Depends(get_db)):
-    grant = db.scalar(select(AccessGrant).where(
-        AccessGrant.token_hash == token_hash(payload.access_token)).with_for_update())
-    if grant is None or grant.token_hash is None:
+    digest = token_hash(payload.access_token)
+    candidate = db.scalar(select(AccessGrant).where(AccessGrant.token_hash == digest))
+    if candidate is None or candidate.order_id != payload.order_id:
         raise DomainError('ORDER_GRANT_INVALID', '订单访问凭据无效', 401)
-    if grant.order_id != payload.order_id:
+    order = _guest_order(db, payload.order_id, for_update=True)
+    grant = lock(db, AccessGrant, candidate.id)
+    if grant.token_hash != digest or grant.source_grant_id is not None:
         raise DomainError('ORDER_GRANT_INVALID', '订单访问凭据无效', 401)
-    if grant.revoked_at is not None:
-        raise DomainError('ORDER_GRANT_REVOKED', '订单访问授权已撤销，请联系管理员重新签发', 410)
+    if order.owner_account_id is not None or grant.revoked_at is not None:
+        raise DomainError('ORDER_GRANT_REVOKED', '订单已停止游客访问', 410)
     if _aware(grant.expires_at) <= _now():
-        raise DomainError('ORDER_GRANT_EXPIRED', '订单访问授权已过期，请联系管理员重新签发', 410)
-    order = db.get(Order, grant.order_id)
-    if order is None or order.deleted_at is not None:
-        raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
+        raise DomainError('ORDER_GRANT_EXPIRED', '订单游客链接已到期', 410)
+    current = current_guest_grant(db, order.id)
+    if current is None or current.id != grant.id:
+        raise DomainError('ORDER_GRANT_REVOKED', '订单已停止游客访问', 410)
     effective = grant_scopes(db, Actor(grant_ids=[grant.id]), order.id)
     if not effective:
-        raise DomainError('ORDER_GRANT_REVOKED', '订单访问授权链已失效', 410)
+        raise DomainError('ORDER_GRANT_REVOKED', '订单已停止游客访问', 410)
     grant.last_used_at = _now()
     _issue_order_session(db, response, request, grant)
-    access = _order_access_view(grant, [scope for scope in (grant.scopes or []) if scope in effective], order)
+    access = _order_access_view(grant, sorted(effective & GUEST_LINK_SCOPES), order)
     view = _order_view(db, order, Actor(grant_ids=[grant.id]))
     return ok(OrderAccessExchange(order=view, access=OrderAccessView(**access),
-                                  id=order.id, order_id=order.id))
+                                  server_now=_now(), id=order.id, order_id=order.id))
 
 
 # ---------------------------------------------------------------------------

@@ -403,7 +403,7 @@ def test_idempotency_key_replays_once_for_fee_receipt_and_dispute(
 # Customer visibility, dispute authorization and admin capabilities
 # ---------------------------------------------------------------------------
 
-def test_customer_list_is_order_view_but_disputes_need_owner_or_after_sales_grant(
+def test_order_account_grants_cannot_derive_customer_read_or_dispute_permissions(
         admin_client, api, db, customer_client, account_factory, client_factory):
     order = _order(db, customer_client.account, status='DELIVERED')
     charge = _created(api, admin_client, order)
@@ -426,24 +426,11 @@ def test_customer_list_is_order_view_but_disputes_need_owner_or_after_sales_gran
     db.commit()
     readonly_client = _customer_client(client_factory, db, readonly)
     assert api(readonly_client, f"/orders/{order.id}/supplementary-charges",
-               method='GET').status_code == 200
+               method='GET').status_code == 404
     denied = api(readonly_client, f"/orders/{order.id}/supplementary-charges/{charge['id']}/disputes", {
-        'reason': '只读链接不能发起', 'expectedVersion': charge['version'],
+        'reason': '已失效的旧授权', 'expectedVersion': charge['version'],
     })
-    assert denied.status_code == 403
-    assert denied.json()['error']['code'] == 'FORBIDDEN'
-
-    after_sales = account_factory()
-    db.add(AccessGrant(order_id=order.id, account_id=after_sales.id,
-                       scopes=['ORDER_VIEW', 'ORDER_AFTER_SALES'],
-                       expires_at=utcnow() + timedelta(days=1), created_by='staff'))
-    db.commit()
-    after_client = _customer_client(client_factory, db, after_sales)
-    allowed = api(after_client, f"/orders/{order.id}/supplementary-charges/{charge['id']}/disputes", {
-        'reason': '授权售后可提交', 'expectedVersion': charge['version'],
-    })
-    assert allowed.status_code == 200, allowed.text
-    assert allowed.json()['data']['status'] == 'OPEN'
+    assert denied.status_code == 404
 
 
 def test_admin_financial_access_requires_payment_manage_not_courier(

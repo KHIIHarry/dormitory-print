@@ -1,3 +1,4 @@
+import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { formatDisplayTime } from "../lib/display-format";
 import { slotBlockLabel } from "../v1/customer";
 import { useEffect, useRef, useState } from "react";
@@ -1084,7 +1085,7 @@ export function BatchDetail() {
           <table>
             <thead>
               <tr>
-                <th>提取码</th>
+                <th className="order-pickup-heading">提取码</th>
                 <th>同学 / 电话</th>
                 <th>目标楼栋</th>
                 <th>申请 / 确认时段</th>
@@ -1098,9 +1099,7 @@ export function BatchDetail() {
               {orders.map((o) => (
                 <tr key={o.id}>
                   <td>
-                    <Link className="table-code" to={`${ADMIN}/orders/${o.id}`}>
-                      {o.pickupCode}
-                    </Link>
+                    <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
                   </td>
                   <td>
                     {o.nickname}
@@ -1349,7 +1348,7 @@ export function BatchDetail() {
                           )
                         }
                       />
-                      <b>{o.pickupCode}</b>
+                      <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
                       <span>
                         {o.nickname} ·{" "}
                         {
@@ -2304,7 +2303,7 @@ function SlotChangeList({
                   return (
                     <tr key={order.id}>
                       <td>
-                        <b>{order.pickupCode || order.id.slice(0, 8)}</b>
+                        <OrderPickupCode pickup={adminPickupOf(order)} href={`${ADMIN}/orders/${order.id}`} />
                       </td>
                       <td>
                         {slotBlockLabel(order.arrangement?.effective || slot) ||

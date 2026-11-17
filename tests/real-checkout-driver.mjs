@@ -34,9 +34,6 @@ try {
   await page.getByLabel('邮箱', { exact: true }).fill(email);
   await page.getByLabel('密码', { exact: true }).fill('Testing-only-Password-42!');
   await page.getByRole('button', { name: '登录', exact: true }).click();
-  const skip = page.getByRole('button', { name: '暂不关联', exact: true });
-  await expect(skip).toBeVisible({ timeout: 20000 });
-  await skip.click();
   await expect(page).toHaveURL(/\/u\/account\/?$/);
   await expect(page.getByRole('heading', { name: '账号设置', exact: true })).toBeVisible({ timeout: 20000 });
 
@@ -94,6 +91,9 @@ try {
   expect(order.totalCents).toBeGreaterThan(0);
   expect(order.cashReceivedCents ?? 0).toBe(0);
   expect(order.checkoutAccountId).toBeTruthy();
+  expect(order.ownerAccountId).toBe(order.checkoutAccountId);
+  expect(order.accessKind).toBe('OWNER');
+  expect(orderBody.data.accessToken).toBeNull();
   await expect(page).toHaveURL(/\/u\/orders\/[^/]+\/contact$/, { timeout: 30000 });
   await expect(page.getByRole('heading', { name: '订单提交成功！', exact: true })).toBeVisible({ timeout: 30000 });
   await page.screenshot({ path: 'docs/qa/live-checkout/checkout-success.png', fullPage: true });

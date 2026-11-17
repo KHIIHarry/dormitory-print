@@ -25,9 +25,13 @@ type Identity = {
   customerReady: boolean;
   setStaff: (staff: StaffSession | null) => void;
   setOrderAccess: (access: OrderAccess | null) => void;
-  refreshCustomer: () => Promise<void>;
+  refreshCustomer: () => Promise<CustomerSession | undefined>;
   refreshStaff: () => Promise<void>;
-  loginCustomer: (email: string, password: string, replaceSessionId?: string) => Promise<boolean>;
+  loginCustomer: (
+    email: string,
+    password: string,
+    replaceSessionId?: string,
+  ) => Promise<boolean>;
   logoutCustomer: () => Promise<void>;
   clearCustomer: () => void;
   demoCustomer: () => Promise<void>;
@@ -73,6 +77,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
           invalidate();
         customerRef.current = result;
         setCustomer(result);
+        return result;
       }
     } catch (e) {
       if (
@@ -83,6 +88,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
         customerRef.current = anonymous;
         setCustomer(anonymous);
         void refreshStaff();
+        return anonymous;
       } else if (!DEMO) throw e;
     } finally {
       setCustomerReady(true);
@@ -174,7 +180,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
         customerReady,
         setStaff,
         setOrderAccess: (access) => {
-          if (access?.sourceGrantId !== orderAccess?.sourceGrantId)
+          if (access && access.sourceGrantId !== orderAccess?.sourceGrantId)
             invalidate();
           setOrderAccess(access);
         },

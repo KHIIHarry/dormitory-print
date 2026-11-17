@@ -255,6 +255,8 @@ def test_manual_batch_publish_cannot_bypass_member_slot_sealing(db, api, client,
     batch.slot_id = batch.group_id = None
     batch.data = {}
     batch.courier_id = staff_factory(role='COURIER').id
+    for assignment in db.scalars(select(DeliveryAssignment).where(DeliveryAssignment.batch_id == batch.id)):
+        assignment.courier_id = batch.courier_id
     db.commit()
     result = api(client, f'/admin/batches/{batch.id}/publish', {'expectedVersion': batch.version})
     assert result.status_code == 409, result.text
@@ -267,6 +269,8 @@ def test_publish_checks_requested_slot_for_legacy_paid_member(db, api, client, a
     batch.slot_id = batch.group_id = None
     batch.data = {}
     batch.courier_id = staff_factory(role='COURIER').id
+    for assignment in db.scalars(select(DeliveryAssignment).where(DeliveryAssignment.batch_id == batch.id)):
+        assignment.courier_id = batch.courier_id
     order.confirmed_slot_id = None
     db.commit()
     result = api(client, f'/admin/batches/{batch.id}/publish', {'expectedVersion': batch.version})

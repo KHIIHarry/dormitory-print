@@ -6,7 +6,7 @@ from pydantic import Field, StrictInt, model_validator
 from sqlalchemy import func, select
 
 from .commerce import add_history, quote_view
-from .core import Actor, DTO, DomainError, Envelope, actor_dep, audit, authorize_order, lock, ok, require_admin, touch
+from .core import Actor, AdminOrderPickup, DTO, DomainError, Envelope, actor_dep, admin_order_pickup, audit, authorize_order, lock, ok, require_admin, touch
 from .db import get_db
 from .models import (AfterSale, BindingTask, BusinessException, DeliveryAssignment, DeliveryBatch, DeliveryProof,
     DeliverySlot, Order, PackingTask, PrintAttempt, PrintTask, Quote, Refund, utcnow)
@@ -79,6 +79,16 @@ class CaseView(DTO):
     created_at:str
 
 
+class AdminCaseView(CaseView):
+    admin_pickup:AdminOrderPickup|None=None
+    order_code:str|None=None
+
+
+class AdminCaseList(DTO):
+    items:list[AdminCaseView]
+    next_cursor:str|None=None
+
+
 class CaseList(DTO):
     items:list[CaseView]
     next_cursor:str|None=None
@@ -90,14 +100,20 @@ class RefundPreview(DTO):
     affected_items:list[AffectedItem]
 
 
-def case_view(case,admin=False):
+def case_view(case,admin=False, *, db=None, actor=None, order=None):
     data=dict(case.data or {})
     if not admin:
         data={k:v for k,v in data.items() if k in ('affectedItems','reviewReason','reviewedAt','refundRecordedAt','refundAmountCents','customerChoiceAt','completedAt','reprintTaskIds')}
-    return {'id':case.id,'orderId':case.order_id,'version':case.version,'status':case.status,
+    result={'id':case.id,'orderId':case.order_id,'version':case.version,'status':case.status,
         'source':case.source,'responsibility':case.responsibility,'solution':case.solution,'reason':case.reason,
         'suggestedCents':case.suggested_cents,'approvedCents':case.approved_cents,
         'adjustmentBasis':case.adjustment_basis,'data':data,'createdAt':case.created_at.isoformat()}
+    if admin and db is not None and actor is not None:
+        order=order or db.get(Order,case.order_id)
+        if order is not None:
+            result['adminPickup']=admin_order_pickup(order,actor)
+            result['orderCode']=order.pickup_code
+    return result
 
 
 def calculate_refund(quote,affected_items):
@@ -169,10 +185,10 @@ def customer_create(order_id:str,body:CaseInput,db=Depends(get_db),actor:Actor=D
     return ok(case_view(create_case(db,actor,order,body)))
 
 
-@router.post('/admin/orders/{order_id}/after-sales',response_model=Envelope[CaseView])
+@router.post('/admin/orders/{order_id}/after-sales',response_model=Envelope[AdminCaseView])
 def admin_create(order_id:str,body:CaseInput,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'payment.manage');order=lock(db,Order,order_id,body.expected_version)
-    return ok(case_view(create_case(db,actor,order,body,True),True))
+    return ok(case_view(create_case(db,actor,order,body,True),True,db=db,actor=actor,order=order))
 
 
 @router.get('/orders/{order_id}/after-sales',response_model=Envelope[CaseList])
@@ -182,12 +198,14 @@ def customer_list(order_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)
         AfterSale.order_id==order.id,AfterSale.deleted_at.is_(None)).order_by(AfterSale.created_at.desc()))],'nextCursor':None})
 
 
-@router.get('/admin/after-sales',response_model=Envelope[CaseList])
+@router.get('/admin/after-sales',response_model=Envelope[AdminCaseList])
 def admin_list(status:str|None=None,limit:int=Query(default=50,ge=1,le=100),db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'payment.manage')
     query=select(AfterSale).where(AfterSale.deleted_at.is_(None))
     if status:query=query.where(AfterSale.status==status)
-    return ok({'items':[case_view(row,True) for row in db.scalars(query.order_by(AfterSale.created_at.desc()).limit(limit))],'nextCursor':None})
+    cases=list(db.scalars(query.order_by(AfterSale.created_at.desc()).limit(limit)))
+    orders={order.id:order for order in db.scalars(select(Order).where(Order.id.in_({case.order_id for case in cases})))}
+    return ok({'items':[case_view(row,True,db=db,actor=actor,order=orders.get(row.order_id)) for row in cases],'nextCursor':None})
 
 
 @router.get('/after-sales/{case_id}',response_model=Envelope[CaseView])
@@ -198,14 +216,14 @@ def get_case(case_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     return ok(case_view(case,False))
 
 
-@router.get('/admin/after-sales/{case_id}',response_model=Envelope[CaseView])
+@router.get('/admin/after-sales/{case_id}',response_model=Envelope[AdminCaseView])
 def admin_get_case(case_id:str,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor)
     if '*' not in actor.capabilities and not actor.capabilities.intersection({'payment.manage','production.manage'}):
         raise DomainError('FORBIDDEN','账号未获售后查看权限',403)
     case=db.get(AfterSale,case_id)
     _require_live_case(case)
-    return ok(case_view(case,True))
+    return ok(case_view(case,True,db=db,actor=actor))
 
 
 @router.post('/orders/{order_id}/after-sales/{case_id}/choice',response_model=Envelope[CaseView])
@@ -313,10 +331,10 @@ def review_case(db,actor,case,body):
     return case
 
 
-@router.post('/admin/after-sales/{case_id}/review',response_model=Envelope[CaseView])
+@router.post('/admin/after-sales/{case_id}/review',response_model=Envelope[AdminCaseView])
 def review(case_id:str,body:ReviewInput,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'payment.manage');case,order=_lock_case_order(db,case_id,body.expected_version)
-    return ok(case_view(review_case(db,actor,case,body),True))
+    return ok(case_view(review_case(db,actor,case,body),True,db=db,actor=actor))
 
 
 def record_refund(db,actor,case,body):
@@ -364,13 +382,13 @@ def record_refund(db,actor,case,body):
     return case
 
 
-@router.post('/admin/after-sales/{case_id}/record-refund',response_model=Envelope[CaseView])
+@router.post('/admin/after-sales/{case_id}/record-refund',response_model=Envelope[AdminCaseView])
 def record(case_id:str,body:RefundInput,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'payment.manage');case,order=_lock_case_order(db,case_id,body.expected_version)
-    return ok(case_view(record_refund(db,actor,case,body),True))
+    return ok(case_view(record_refund(db,actor,case,body),True,db=db,actor=actor))
 
 
-@router.post('/admin/after-sales/{case_id}/reprint-ready',response_model=Envelope[CaseView])
+@router.post('/admin/after-sales/{case_id}/reprint-ready',response_model=Envelope[AdminCaseView])
 def reprint_ready(case_id:str,body:CaseAction,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'production.manage');case,order=_lock_case_order(db,case_id,body.expected_version)
     if case.status!='REPRINTING' or order.packing_status!='PACKED':
@@ -381,10 +399,10 @@ def reprint_ready(case_id:str,body:CaseAction,db=Depends(get_db),actor:Actor=Dep
         if exception.data.get('afterSaleId')==case.id:exception.status='RESOLVED';touch(exception)
     case.status='REPRINT_READY';touch(case)
     audit(db,actor,'REPRINT_READY','AFTER_SALE',case.id,body.reason)
-    return ok(case_view(case,True))
+    return ok(case_view(case,True,db=db,actor=actor))
 
 
-@router.post('/admin/after-sales/{case_id}/complete',response_model=Envelope[CaseView])
+@router.post('/admin/after-sales/{case_id}/complete',response_model=Envelope[AdminCaseView])
 def complete_case(case_id:str,body:CaseAction,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
     require_admin(actor,'production.manage');case,order=_lock_case_order(db,case_id,body.expected_version)
     proof=db.scalar(select(DeliveryProof).where(DeliveryProof.order_id==order.id,DeliveryProof.created_at>=case.created_at).order_by(DeliveryProof.created_at.desc()).limit(1))
@@ -392,7 +410,7 @@ def complete_case(case_id:str,body:CaseAction,db=Depends(get_db),actor:Actor=Dep
         raise DomainError('REDELIVERY_REQUIRED','免费重做尚未完成重新交付',409)
     case.status='COMPLETED';case.data={**case.data,'completedAt':utcnow().isoformat()};touch(case)
     audit(db,actor,'AFTER_SALE_COMPLETED','AFTER_SALE',case.id,body.reason)
-    return ok(case_view(case,True))
+    return ok(case_view(case,True,db=db,actor=actor))
 
 
 @router.post('/orders/{order_id}/after-sales/{case_id}/withdraw',response_model=Envelope[CaseView])

@@ -1,6 +1,6 @@
 import { DEMO } from "../lib/api";
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Expand, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Expand, FileText } from "lucide-react";
 import type { PrintFile } from "../lib/types";
 import { Modal } from "./ui";
 import { TaskStatus } from "./feedback";
@@ -247,6 +247,15 @@ function PreviewContent({
       <div className="preview-pager">
         <button
           className="icon-btn"
+          aria-label="第一页"
+          title="第一页"
+          disabled={invalidated || page <= 1 || rendering}
+          onClick={() => setPage(1)}
+        >
+          <ChevronsLeft size={18} />
+        </button>
+        <button
+          className="icon-btn"
           aria-label="上一页"
           disabled={invalidated || page <= 1 || rendering}
           onClick={() => setPage((p) => p - 1)}
@@ -265,6 +274,15 @@ function PreviewContent({
           onClick={() => setPage((p) => p + 1)}
         >
           <ChevronRight size={16} />
+        </button>
+        <button
+          className="icon-btn"
+          aria-label="最后一页"
+          title="最后一页"
+          disabled={invalidated || page >= (sample ? file.pages : pages) || rendering}
+          onClick={() => setPage(sample ? file.pages : pages)}
+        >
+          <ChevronsRight size={18} />
         </button>
       </div>
       {zoom && (

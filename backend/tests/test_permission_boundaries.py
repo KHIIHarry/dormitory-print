@@ -139,6 +139,16 @@ def customer_session(client_factory, db, account):
     return client
 
 
+def order_access_session(client_factory, db, account, grant):
+    client = customer_session(client_factory, db, account)
+    raw = secrets.token_urlsafe(32)
+    db.add(AuthSession(kind='ORDER_ACCESS', token_hash=token_hash(raw),
+                       grant_id=grant.id, expires_at=grant.expires_at))
+    db.commit()
+    client.cookies.set('dormprint_order_access_session', raw)
+    return client
+
+
 def storage_root() -> Path:
     from app.settings import get_settings
 
@@ -416,12 +426,14 @@ def test_order_links_scope_final_preview_but_never_originals(
     api, client_factory, db, account_factory
 ):
     """ORDER_VIEW is an order link, not permission to download print masters."""
-    owner = account_factory()
+    owner = Principal()
+    db.add(owner)
+    db.flush()
     viewer = account_factory()
-    order = make_order(db, owner.principal_id, status='DELIVERING')
-    source = make_asset(db, 'PRINT_SOURCE', principal_id=owner.principal_id,
+    order = make_order(db, owner.id, status='DELIVERING')
+    source = make_asset(db, 'PRINT_SOURCE', principal_id=owner.id,
                         name='source.pdf')
-    final = make_asset(db, 'PRINT_FINAL', principal_id=owner.principal_id,
+    final = make_asset(db, 'PRINT_FINAL', principal_id=owner.id,
                        name='final.pdf', payload=b'%PDF-1.7 final')
     db.add_all([
         OrderFile(order_id=order.id, revision=1, client_file_id='source-file',
@@ -429,11 +441,11 @@ def test_order_links_scope_final_preview_but_never_originals(
         OrderFile(order_id=order.id, revision=1, client_file_id='final-file',
                   asset_id=final.id, kind='FINAL_PDF'),
     ])
-    grant = AccessGrant(order_id=order.id, account_id=viewer.id,
+    grant = AccessGrant(order_id=order.id, token_hash=token_hash(secrets.token_urlsafe(32)),
                         scopes=['ORDER_VIEW'], expires_at=utcnow() + timedelta(days=1))
     db.add(grant)
     db.commit()
-    viewer_client = customer_session(client_factory, db, viewer)
+    viewer_client = order_access_session(client_factory, db, viewer, grant)
 
     # A read-only order link must not expose the source or the final master.
     assert api(viewer_client, f'/assets/{source.id}', method='GET').status_code == 404
@@ -455,11 +467,13 @@ def test_order_links_scope_final_preview_but_never_originals(
 def test_delivery_proof_view_only_reaches_the_associated_proof(
     api, client_factory, db, account_factory, staff_factory
 ):
-    owner = account_factory()
+    owner = Principal()
+    db.add(owner)
+    db.flush()
     viewer = account_factory()
     courier = staff_factory(role='COURIER', capabilities=[])
-    first = make_order(db, owner.principal_id, status='DELIVERING')
-    second = make_order(db, owner.principal_id, status='DELIVERING')
+    first = make_order(db, owner.id, status='DELIVERING')
+    second = make_order(db, owner.id, status='DELIVERING')
     batch = DeliveryBatch(name='proof-scope', courier_id=courier.id,
                           starts_at=utcnow() + timedelta(hours=1),
                           ends_at=utcnow() + timedelta(hours=3), status='DELIVERING')
@@ -483,12 +497,12 @@ def test_delivery_proof_view_only_reaches_the_associated_proof(
         DeliveryProof(order_id=second.id, assignment_id=assignment_b.id,
                       photo_asset_id=photo_b.id, active=True),
     ])
-    grant = AccessGrant(order_id=first.id, account_id=viewer.id,
+    grant = AccessGrant(order_id=first.id, token_hash=token_hash(secrets.token_urlsafe(32)),
                         scopes=['ORDER_VIEW', 'DELIVERY_PROOF_VIEW'],
                         expires_at=utcnow() + timedelta(days=1))
     db.add(grant)
     db.commit()
-    viewer_client = customer_session(client_factory, db, viewer)
+    viewer_client = order_access_session(client_factory, db, viewer, grant)
 
     assert api(viewer_client, f'/assets/{photo_a.id}', method='GET').status_code == 200
     # Holding a proof grant for one order must not leak another order's photo.

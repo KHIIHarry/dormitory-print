@@ -1,3 +1,5 @@
+import "./production.css";
+import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { taskStatus, aggregatePrintStatus } from "../lib/print-state";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -189,9 +191,7 @@ function DemoPrintCenter() {
         ).map(({ o, f }) => (
           <Panel key={f.id} className="print-task-card">
             <div className="print-task-top">
-              <Link className="table-code" to={`${ADMIN}/orders/${o.id}`}>
-                {o.pickupCode}
-              </Link>
+              <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
               <span>
                 {o.nickname} ·{" "}
                 {data.buildings.find((b) => b.id === o.locationId)?.name}
@@ -408,6 +408,7 @@ function DemoPrintTask() {
         description={file.name}
         action={<Badge status={status || "PENDING"} />}
       />
+      <OrderPickupCode pickup={adminPickupOf(order)} href={`${ADMIN}/orders/${order.id}`} />
       <div className="print-view-layout">
         <Panel>
           <div className="panel-heading">
@@ -633,9 +634,7 @@ function DemoBindingCenter() {
         {items.map(({ o, f }) => (
           <Panel key={f.id}>
             <div className="print-task-top">
-              <Link className="table-code" to={`${ADMIN}/orders/${o.id}`}>
-                {o.pickupCode}
-              </Link>
+              <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
               <span>{o.nickname}</span>
               <CampusTag
                 campus={campusOfOrder(data.campuses, data.buildings, o)}
@@ -769,7 +768,7 @@ function DemoPackingCenter() {
               <div className="packing-code">
                 <div>
                   <small>提取码</small>
-                  <strong>{o.pickupCode}</strong>
+                  <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
                 </div>
                 <Badge
                   status={
@@ -1049,6 +1048,14 @@ function ServerPrintCenter() {
       const job = sorted.some((task) => task.kind === "IDENTIFICATION")
         ? undefined
         : pendingJobs?.[id];
+      const identificationTasks = sorted.filter((task) => task.kind === "IDENTIFICATION");
+      const identificationPages = identificationTasks.reduce((sum, task) => sum + task.pages, 0);
+      const identificationProgress = (identificationTasks.length > 0 || job) ? {
+        enabled: true,
+        completed: identificationTasks.reduce((sum, task) => sum + (task.status === "COMPLETED" ? task.pages : 0), 0),
+        total: identificationPages,
+        status: identificationTasks[0]?.status || job || "QUEUED",
+      } : order?.identificationProgress ?? null;
       const documentTasks = sorted.filter(
         (task) => task.kind !== "IDENTIFICATION",
       );
@@ -1073,6 +1080,7 @@ function ServerPrintCenter() {
         historical: id === historicalOrderId,
         tasks: sorted,
         documentTasks,
+        identificationProgress,
         code: sorted[0].pickupCode,
         campus: taskCampus,
         locked: sorted[0].refundLocked,
@@ -1177,7 +1185,7 @@ function ServerPrintCenter() {
         )}
       </div>
       <Panel className="filter-panel">
-        <div className="filter-row">
+        <div className="filter-row print-queue-filters">
           <div className="search-input grow">
             <Search size={17} />
             <input
@@ -1192,6 +1200,7 @@ function ServerPrintCenter() {
             value={campus}
             onChange={setCampus}
           />
+          <Field label="订单打印状态">
           <select
             aria-label="订单打印状态"
             value={status}
@@ -1205,6 +1214,8 @@ function ServerPrintCenter() {
             ))}
             <option value="EXCEPTION">打印异常</option>
           </select>
+          </Field>
+          <Field label="文件类型">
           <select
             aria-label="文件类型"
             value={kind}
@@ -1215,6 +1226,7 @@ function ServerPrintCenter() {
             <option value="PHOTO">照片</option>
             <option value="IDENTIFICATION">订单识别页</option>
           </select>
+          </Field>
         </div>
       </Panel>
       <Notice>
@@ -1243,8 +1255,10 @@ function ServerPrintCenter() {
           )!;
           return (
             <Panel key={order.id} className="print-order-card">
+              <OrderPickupCode pickup={adminPickupOf(order.tasks[0])} href={`${ADMIN}/orders/${order.id}`} />
               <button
                 type="button"
+                aria-label={`${order.code} ${expanded ? "收起" : "展开"}打印任务`}
                 className="print-order-toggle"
                 aria-expanded={expanded}
                 onClick={() => {
@@ -1263,10 +1277,14 @@ function ServerPrintCenter() {
                     className="print-order-chevron"
                     aria-hidden="true"
                   />
-                  <strong>{order.code}</strong>
                   <CampusTag campus={order.campus} />
                 </span>
                 <span className="print-order-progress">
+                  {order.identificationProgress?.enabled && (
+                    <span className="soft-tag identification-progress" title={`订单识别页面进度 ${order.identificationProgress.completed}/${order.identificationProgress.total}`}>
+                      识别页 {order.identificationProgress.completed}/{order.identificationProgress.total}
+                    </span>
+                  )}
                   <span
                     className={`badge ${order.historical ? "gray" : color}`}
                   >
@@ -1597,6 +1615,7 @@ function ServerPrintTask() {
           action={<Badge status={task.status} />}
         />
       </div>
+      <OrderPickupCode pickup={adminPickupOf(task)} href={`${ADMIN}/orders/${task.orderId}`} />
       {refundLocked && (
         <Notice type="error">
           退款审核期间暂停新的打印和补打。已有尝试仍可核实开印和打印结果。
@@ -1985,9 +2004,7 @@ function ServerBindingCenter() {
             return (
           <Panel key={task.id}>
             <div className="print-task-top">
-              <Link className="table-code" to={`${ADMIN}/orders/${task.orderId}`}>
-                {task.pickupCode}
-              </Link>
+              <OrderPickupCode pickup={adminPickupOf(task)} href={`${ADMIN}/orders/${task.orderId}`} />
               <strong className="production-file-name">
                 {task.fileName?.trim() || "文件名未记录"}
               </strong>
@@ -2110,7 +2127,7 @@ function ServerPackingCenter() {
               <div className="packing-code">
                 <div>
                   <small>提取码</small>
-                  <strong>{task.pickupCode}</strong>
+                  <OrderPickupCode pickup={adminPickupOf(task)} href={`${ADMIN}/orders/${task.orderId}`} />
                 </div>
                 <Badge status={task.status === "PACKED" ? "PACKED" : blocked ? "BLOCKED" : "READY"} />
               </div>

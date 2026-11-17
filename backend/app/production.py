@@ -18,6 +18,7 @@ from app.core import (
     DomainError,
     Envelope,
     actor_dep,
+    admin_order_pickup,
     audit,
     lock,
     ok,
@@ -921,7 +922,7 @@ def _checklist_dto(db, state: dict) -> ProductionChecklistDTO:
 
 
 def _task_dto(
-    db, task: PrintTask, order: Order, file: OrderFile | None, file_name: str, *, with_attempts: bool = False,
+    db, task: PrintTask, order: Order, file: OrderFile | None, file_name: str, *, with_attempts: bool = False, actor: Actor | None = None,
 ) -> PrintTaskDTO:
     artifact = db.get(Artifact, task.artifact_id)
     artifact_settings = _artifact_settings(artifact)
@@ -949,6 +950,7 @@ def _task_dto(
         id=task.id,
         order_id=task.order_id,
         pickup_code=order.pickup_code if order else '',
+        admin_pickup=admin_order_pickup(order, actor) if actor and order else None,
         file_id=task.file_id or '',
         file_name=file_name,
         kind='IDENTIFICATION' if task.file_id is None else file.kind if file else 'DOCUMENT',
@@ -987,8 +989,8 @@ def _task_dto(
     )
 
 
-def _binding_dto(db, task: BindingTask) -> BindingTaskDTO:
-    order = db.get(Order, task.order_id)
+def _binding_dto(db, task: BindingTask, actor: Actor | None = None, order: Order | None = None) -> BindingTaskDTO:
+    order = order or db.get(Order, task.order_id)
     file = db.get(OrderFile, task.file_id)
     tasks = [
         row
@@ -1004,6 +1006,7 @@ def _binding_dto(db, task: BindingTask) -> BindingTaskDTO:
         id=task.id,
         order_id=task.order_id,
         pickup_code=order.pickup_code if order else '',
+        admin_pickup=admin_order_pickup(order, actor) if actor and order else None,
         file_id=task.file_id,
         file_name=_original_file_names(db, [file])[file.id] if file else '',
         binding_type=file.binding_type if file else 'NONE',
@@ -1014,12 +1017,13 @@ def _binding_dto(db, task: BindingTask) -> BindingTaskDTO:
     )
 
 
-def _packing_dto(db, order: Order, packing: PackingTask) -> PackingTaskDTO:
+def _packing_dto(db, order: Order, packing: PackingTask, actor: Actor | None = None) -> PackingTaskDTO:
     state = _state(db, order)
     return PackingTaskDTO(
         id=packing.id,
         order_id=order.id,
         pickup_code=order.pickup_code,
+        admin_pickup=admin_order_pickup(order, actor) if actor else None,
         status=packing.status,
         checklist_version=order.content_revision,
         order_status=order.status,
@@ -1074,7 +1078,7 @@ def list_print_tasks(
     actor: Actor = Depends(actor_dep),
 ):
     require_admin(actor, 'production.manage')
-    query = select(PrintTask).order_by(PrintTask.created_at, PrintTask.id)
+    query = select(PrintTask, Order).join(Order, Order.id == PrintTask.order_id).order_by(PrintTask.created_at, PrintTask.id)
     if order_id:
         query = query.where(PrintTask.order_id == order_id)
     if not include_inactive:
@@ -1082,9 +1086,8 @@ def list_print_tasks(
     rows = []
     files = {}
     counts = {name: 0 for name in ('PENDING', 'ATTEMPTED', 'COMPLETED', 'EXCEPTION')}
-    for task in db.scalars(query):
-        order = db.get(Order, task.order_id)
-        if order is None or order.deleted_at:
+    for task, order in db.execute(query):
+        if order.deleted_at:
             continue
         if order.status == 'CANCELLED':
             continue
@@ -1106,7 +1109,7 @@ def list_print_tasks(
     rows.sort(key=lambda row: (order_positions[row[1].id], row[0].file_id is not None))
     names = _original_file_names(db, list(files.values()))
     tasks = [
-        _task_dto(db, task, order, files.get(task.file_id), names.get(task.file_id, ''))
+        _task_dto(db, task, order, files.get(task.file_id), names.get(task.file_id, ''), actor=actor)
         for task, order in rows
     ]
     next_task = next(
@@ -1156,7 +1159,7 @@ def get_print_task(
     order = _order_of_task(db, task)
     file = db.get(OrderFile, task.file_id) if task.file_id else None
     name = _original_file_names(db, [file])[file.id] if file else ''
-    return ok(_task_dto(db, task, order, file, name, with_attempts=True))
+    return ok(_task_dto(db, task, order, file, name, with_attempts=True, actor=actor))
 
 
 @router.post('/admin/orders/{order_id}/start-production', response_model=Envelope[ProductionStartDTO])
@@ -1585,20 +1588,19 @@ def list_binding_tasks(
     actor: Actor = Depends(actor_dep),
 ):
     require_admin(actor, 'production.manage')
-    query = select(BindingTask).order_by(BindingTask.created_at, BindingTask.id)
+    query = select(BindingTask, Order).join(Order, Order.id == BindingTask.order_id).order_by(BindingTask.created_at, BindingTask.id)
     if order_id:
         query = query.where(BindingTask.order_id == order_id)
     tasks = []
-    for task in db.scalars(query):
-        order = db.get(Order, task.order_id)
-        if order is None or order.deleted_at:
+    for task, order in db.execute(query):
+        if order.deleted_at:
             continue
         file = db.get(OrderFile, task.file_id)
         if not _file_is_current(file, order) or file.binding_type == 'NONE':
             continue
         if order.status in ('CANCELLED',) + POST_DELIVERY_STATUSES:
             continue
-        tasks.append(_binding_dto(db, task))
+        tasks.append(_binding_dto(db, task, actor, order))
     return ok(BindingQueueDTO(tasks=tasks))
 
 
@@ -1680,7 +1682,7 @@ def complete_binding(
         '',
         {'orderId': order.id, 'fileId': file.id, 'fileRevision': order.content_revision},
     )
-    return ok(_binding_dto(db, task))
+    return ok(_binding_dto(db, task, actor))
 
 
 @router.get('/admin/packing-tasks', response_model=Envelope[PackingQueueDTO])
@@ -1690,17 +1692,16 @@ def list_packing_tasks(
     actor: Actor = Depends(actor_dep),
 ):
     require_admin(actor, 'production.manage')
-    query = select(PackingTask).order_by(PackingTask.created_at, PackingTask.id)
+    query = select(PackingTask, Order).join(Order, Order.id == PackingTask.order_id).order_by(PackingTask.created_at, PackingTask.id)
     if order_id:
         query = query.where(PackingTask.order_id == order_id)
     tasks = []
-    for packing in db.scalars(query):
-        order = db.get(Order, packing.order_id)
-        if order is None or order.deleted_at:
+    for packing, order in db.execute(query):
+        if order.deleted_at:
             continue
         if order.status not in PRODUCTION_STATUSES:
             continue
-        tasks.append(_packing_dto(db, order, packing))
+        tasks.append(_packing_dto(db, order, packing, actor))
     return ok(PackingQueueDTO(tasks=tasks))
 
 

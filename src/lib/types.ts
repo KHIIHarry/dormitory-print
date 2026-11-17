@@ -76,7 +76,16 @@ export type Proof = {
   placementNote: string;
   deliveredAt: string;
 };
+export type AdminOrderPickup = {
+  pickupCode: string;
+  placedWithAccount: boolean;
+  customerDetailId: string | null;
+};
 export type Order = {
+  accountOwned?: boolean;
+  identificationProgress?: { enabled: boolean; completed: number; total: number; status: string } | null;
+  adminPickup?: AdminOrderPickup | null;
+  customerSummary?: {accountId: string; email: string; displayName: string; createdAt: string; verified: boolean} | null;
   unmatchedReceipts?: import("../v1/admin-api").ReceiptView[];
   deliveryNotices?: {
     id: string;
@@ -154,7 +163,7 @@ export type Order = {
     approvedAt?: string;
   } | null;
   history: { title: string; time: string; description: string }[];
-  accessKind?: "OWNER" | "GUEST_OWNER" | "ORDER_GRANT" | "IMPORTED_GRANT";
+  accessKind?: "OWNER" | "GUEST_OWNER" | "ORDER_GRANT";
   allowedActions: string[];
 };
 export type Building = {

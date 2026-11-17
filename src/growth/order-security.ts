@@ -5,6 +5,11 @@ export function canOrderAction(
   access: OrderAccess | null,
 ) {
   if (!order.allowedActions?.includes(action)) return false;
+  if (
+    access &&
+    !["ORDER_VIEW", "FINAL_PDF_PREVIEW", "DELIVERY_PROOF_VIEW"].includes(action)
+  )
+    return false;
   if (action === "ORDER_REVISE_PENDING" || action === "ORDER_CANCEL_PENDING") {
     if (order.status !== "PENDING_CONFIRMATION") return false;
   }
@@ -42,7 +47,6 @@ export function effectiveOrderAccess(
   if (
     order.accessKind === "OWNER" ||
     order.accessKind === "GUEST_OWNER" ||
-    order.accessKind === "IMPORTED_GRANT" ||
     (customer.authKind === "REGISTERED" &&
       !!order.ownerAccountId &&
       order.ownerAccountId === customer.account?.id)

@@ -1,3 +1,4 @@
+import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { formatDisplayTime } from "../lib/display-format";
 import { useGrowthResource } from "../growth/client";
 import {
@@ -304,7 +305,7 @@ export function Dashboard() {
               <table>
                 <thead>
                   <tr>
-                    <th>提取码 / 订单</th>
+                    <th className="order-pickup-heading">提取码 / 订单</th>
                     <th>同学</th>
                     <th>打印资料</th>
                     <th>目标楼栋</th>
@@ -317,13 +318,7 @@ export function Dashboard() {
                   {data.orders.slice(0, 5).map((o) => (
                     <tr key={o.id}>
                       <td>
-                        <Link
-                          className="table-code"
-                          to={`${ADMIN}/orders/${o.id}`}
-                        >
-                          {o.pickupCode}
-                        </Link>
-                        <small>{formatDisplayTime(o.createdAt)}</small>
+                        <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} subline={formatDisplayTime(o.createdAt)} />
                       </td>
                       <td>
                         {o.nickname}

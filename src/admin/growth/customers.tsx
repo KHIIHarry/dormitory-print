@@ -1,3 +1,4 @@
+import { OrderPickupCode, adminPickupOf } from "../order-pickup-code";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Filter } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
@@ -308,7 +309,7 @@ export function CustomerDetailPage() {
                 <table>
                   <thead>
                     <tr>
-                      <th>提取码</th>
+                      <th className="order-pickup-heading">提取码</th>
                       <th>订单状态</th>
                       <th>金额</th>
                       <th>操作</th>
@@ -317,7 +318,7 @@ export function CustomerDetailPage() {
                   <tbody>
                     {customer.orders.map((o) => (
                       <tr key={o.id}>
-                        <td>{o.pickupCode}</td>
+                        <td><OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${encodeURIComponent(o.id)}`} /></td>
                         <td>{o.status}</td>
                         <td>{yuan(o.totalCents)}</td>
                         <td>

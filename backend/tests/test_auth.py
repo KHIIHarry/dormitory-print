@@ -422,116 +422,38 @@ def test_password_reset_consumes_token_and_revokes_sessions(client, db):
 
 
 # ---------------------------------------------------------------------------
-# Explicit guest linkage and single-order import
+# Per-order guest ownership and retired account-wide entry points
 # ---------------------------------------------------------------------------
 
 
-def test_link_guest_is_explicit_rotates_guest_and_keeps_order_owner(client, db):
+def test_guest_claim_is_explicit_and_preserves_guest_identity(client, db):
+    from app.auth import issue_order_grant
+    from app.core import Actor
     guest_client = new_client(client.app)
-    db.expire_all()
-    guest_session = latest_session(db, 'GUEST')
-    assert guest_session is not None
-    guest_principal = guest_session.principal_id
+    guest_principal = latest_session(db, 'GUEST').principal_id
     order = make_order(db, guest_principal)
+    issue_order_grant(db, order, Actor(principal_id=guest_principal))
     account = make_account(db)
     db.commit()
-
     assert login_customer(guest_client, account.email).status_code == 200
-    old_guest_cookie = guest_client.cookies.get('dormprint_guest_session')
-    assert old_guest_cookie
-    linked = api(guest_client, '/customer/account/link-guest', {'confirm': True})
-    assert linked.status_code == 200, linked.text
-    data = linked.json()['data']
-    assert data['rotationCompleted'] is True
-    assert data['customerPrincipalId'] == account.principal_id
-
+    cookie = guest_client.cookies.get('dormprint_guest_session')
+    assert api(guest_client, f'/customer/orders/{order.id}/claim', {'confirm': False}).status_code == 422
+    claimed = api(guest_client, f'/customer/orders/{order.id}/claim', {'confirm': True})
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()['data']['ownerAccountId'] == account.id
     db.expire_all()
-    assert db.get(Principal, guest_principal).account_id == account.id
+    assert db.get(Principal, guest_principal).account_id is None
     assert db.get(Order, order.id).principal_id == guest_principal
-    assert db.get(Account, account.id).status == 'ACTIVE'
-    assert guest_client.cookies.get('dormprint_guest_session') != old_guest_cookie
-
-    stale = new_client(client.app)
-    stale.cookies.set('dormprint_guest_session', old_guest_cookie)
-    stale_me = api(stale, '/customer/auth/me', method='GET')
-    assert stale_me.json()['data']['authKind'] == 'ANONYMOUS'
+    assert db.get(Order, order.id).owner_account_id == account.id
+    assert guest_client.cookies.get('dormprint_guest_session') == cookie
 
 
-def test_import_order_derives_limited_grant_and_reissue_revokes_derived_only(client, db):
-    owner_client = new_client(client.app)
-    db.expire_all()
-    owner_principal = latest_session(db, 'GUEST').principal_id
-    order = make_order(db, owner_principal)
-    admin = make_admin(db)
+def test_account_wide_link_and_temporary_import_routes_are_removed(client, db):
     account = make_account(db)
     db.commit()
-
-    admin_client = new_client(client.app)
-    assert login_staff(admin_client, admin.username).status_code == 200
-    issued = api(admin_client, f'/admin/orders/{order.id}/access-links', {'reason': '人工核验后发送'})
-    assert issued.status_code == 200, issued.text
-    issued_data = issued.json()['data']
-    assert set(issued_data['grant']['scopes']) == {'ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW'}
-    first_token = issued_data['accessToken']
-    first_grant_id = issued_data['grant']['id']
-    assert 'accessToken' not in api(admin_client, f'/admin/orders/{order.id}/access-links', method='GET').text
-
-    exchanged_client = new_client(client.app)
-    exchanged = api(exchanged_client, '/order-access/exchange', {'orderId': order.id, 'accessToken': first_token})
-    assert exchanged.status_code == 200, exchanged.text
-    assert exchanged.json()['data']['access']['orderId'] == order.id
-    assert set(exchanged.json()['data']['access']['scopes']) == {
-        'ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW'}
-    assert login_customer(exchanged_client, account.email).status_code == 200
-
-    too_limited = api(exchanged_client, '/customer/account/import-order', {'orderId': order.id, 'confirm': True})
-    assert too_limited.status_code == 403
-    assert too_limited.json()['error']['code'] == 'ORDER_GRANT_SCOPE_DENIED'
-
-    reissued = api(admin_client, f'/admin/orders/{order.id}/access-links', {
-        'reason': '凭据丢失补发',
-        'reissue': True,
-        'scopes': ['ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW', 'ORDER_IMPORT'],
-    })
-    assert reissued.status_code == 200, reissued.text
-    reissued_data = reissued.json()['data']
-    assert first_grant_id in reissued_data['revokedGrantIds']
-    second_token = reissued_data['accessToken']
-    second_grant_id = reissued_data['grant']['id']
-
-    stale = api(new_client(client.app), '/order-access/exchange', {'orderId': order.id, 'accessToken': first_token})
-    assert stale.status_code == 410
-    assert stale.json()['error']['code'] == 'ORDER_GRANT_REVOKED'
-
-    import_client = new_client(client.app)
-    assert api(import_client, '/order-access/exchange',
-               {'orderId': order.id, 'accessToken': second_token}).status_code == 200
-    assert login_customer(import_client, account.email).status_code == 200
-    imported = api(import_client, '/customer/account/import-order', {'orderId': order.id, 'confirm': True})
-    assert imported.status_code == 200, imported.text
-    imported_data = imported.json()['data']
-    assert imported_data['sourceGrantId'] == second_grant_id
-    assert set(imported_data['scopes']) == set(reissued_data['grant']['scopes'])
-    assert imported_data['expiresAt'] == reissued_data['grant']['expiresAt']
-
-    db.expire_all()
-    derived = db.get(AccessGrant, imported_data['accountOrderGrantId'])
-    source = db.get(AccessGrant, second_grant_id)
-    assert derived.account_id == account.id
-    assert derived.source_grant_id == source.id
-    assert derived.expires_at <= source.expires_at
-    assert set(derived.scopes).issubset(set(source.scopes))
-    assert db.get(Order, order.id).principal_id == owner_principal
-
-    third = api(admin_client, f'/admin/orders/{order.id}/access-links', {
-        'reason': '再次补发', 'reissue': True,
-        'scopes': ['ORDER_VIEW', 'ORDER_IMPORT'],
-    })
-    assert third.status_code == 200, third.text
-    db.expire_all()
-    assert db.get(AccessGrant, second_grant_id).revoked_at is not None
-    assert db.get(AccessGrant, derived.id).revoked_at is not None
-    assert db.get(Order, order.id).principal_id == owner_principal
+    assert login_customer(client, account.email).status_code == 200
+    assert api(client, '/customer/account/link-guest', {'confirm': True}).status_code == 404
+    assert api(client, '/customer/account/import-order', {'orderId': 'missing', 'confirm': True}).status_code == 404
 
 
 def test_order_access_exchange_rejects_tampered_or_expired_grants(client, db):
@@ -543,8 +465,10 @@ def test_order_access_exchange_rejects_tampered_or_expired_grants(client, db):
     db.commit()
     admin_client = new_client(client.app)
     assert login_staff(admin_client, admin.username).status_code == 200
-    issued = api(admin_client, f'/admin/orders/{order.id}/access-links', {'reason': '测试'})
-    token = issued.json()['data']['accessToken']
+    issued = api(admin_client, f'/admin/orders/{order.id}/guest-access/reset', {
+        'expectedVersion': 1, 'reason': '测试'})
+    assert issued.status_code == 200, issued.text
+    token = api(admin_client, f'/admin/orders/{order.id}/guest-access/open', method='GET').json()['data']['accessToken']
     other_order = make_order(db, principal)
     db.commit()
     mismatch = api(new_client(client.app), '/order-access/exchange',

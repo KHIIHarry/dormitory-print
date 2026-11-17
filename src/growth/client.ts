@@ -47,13 +47,13 @@ export function useGrowthResource<T>(path: string | null) {
     generation: number;
     data: T | null;
     pending: boolean;
-    error: string;
+    failure: { message: string; status?: number; code?: string } | null;
   }>({
     path,
     generation: identityGeneration,
     data: null,
     pending: !!path,
-    error: "",
+    failure: null,
   });
   const [generation, setGeneration] = useState(identityGeneration);
   const sequence = useRef(0),
@@ -70,7 +70,7 @@ export function useGrowthResource<T>(path: string | null) {
         generation: identityGeneration,
         data: null,
         pending: !!current.current.path,
-        error: "",
+        failure: null,
       });
       setGeneration(identityGeneration);
     };
@@ -94,7 +94,7 @@ export function useGrowthResource<T>(path: string | null) {
         generation: owner.generation,
         data: null,
         pending: false,
-        error: "",
+        failure: null,
       });
       return;
     }
@@ -106,7 +106,7 @@ export function useGrowthResource<T>(path: string | null) {
           ? old.data
           : null,
       pending: true,
-      error: "",
+      failure: null,
     }));
     try {
       const response = await growthRequest<T>(path, {
@@ -118,16 +118,21 @@ export function useGrowthResource<T>(path: string | null) {
           generation: owner.generation,
           data: response,
           pending: false,
-          error: "",
+          failure: null,
         });
     } catch (error) {
       if (!owns()) return;
-      const item = error as { status?: number; message?: string };
+      const status = error instanceof ApiError ? error.status : undefined;
       setSnapshot((old) => ({
         ...old,
-        data: item.status === 401 || item.status === 403 ? null : old.data,
+        data: status === 401 || status === 403 ? null : old.data,
         pending: false,
-        error: item.message || "暂时无法读取当前内容",
+        failure: {
+          message:
+            (error instanceof Error && error.message) || "暂时无法读取当前内容",
+          status,
+          code: error instanceof ApiError ? error.code : undefined,
+        },
       }));
     }
   };
@@ -162,13 +167,15 @@ export function useGrowthResource<T>(path: string | null) {
   const data = valid ? snapshot.data : null,
     hasData = data !== null;
   const pending = !!path && (!valid || snapshot.pending);
+  const failure = valid ? snapshot.failure : null;
   return {
     data,
     loading: pending && !hasData,
     refreshing: pending && hasData,
     hasData,
     stale: !valid,
-    error: valid ? snapshot.error : "",
+    error: failure?.message ?? "",
+    failure,
     reload,
   };
 }

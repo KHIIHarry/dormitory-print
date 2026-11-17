@@ -1,0 +1,107 @@
+.guest-unavailable {
+  width: min(calc(100% - 48px), 504px);
+  min-width: 0;
+  margin: clamp(48px, 8vw, 96px) auto 64px;
+}
+.guest-status-card {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  padding: 40px 30px 32px;
+  background: #fff;
+  border: 1px solid #eae7e4;
+  border-radius: 18px;
+}
+.guest-status-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 16px;
+  background: #f9f2ed;
+  color: #9a5e39;
+  border-radius: 50%;
+}
+.guest-status-card h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+.guest-status-card p {
+  max-width: 320px;
+  margin: 10px 0 22px;
+  color: #716760;
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: normal;
+}
+.guest-status-actions {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.guest-status-actions .btn {
+  min-height: 44px;
+  min-width: 0;
+}
+.guest-status-actions .btn:not(.secondary) {
+  background: #9e532e;
+}
+.content-page.guest-access-section {
+  min-height: 0;
+  padding-top: 24px;
+  padding-bottom: 0;
+}
+.guest-access-banner {
+  min-width: 0;
+  margin: 0;
+  padding: 20px;
+  border: 1px solid #e3e3e3;
+  border-radius: 16px;
+  background: #f9f2ed;
+  overflow-wrap: anywhere;
+}
+.guest-access-banner p {
+  margin: 8px 0 12px;
+}
+.guest-access-banner .btn {
+  white-space: normal;
+  min-height: 44px;
+  max-width: 100%;
+}
+#contact-admin {
+  scroll-margin-top: 100px;
+  outline-offset: 4px;
+}
+@media (max-width: 767px) {
+  .guest-unavailable {
+    width: auto;
+    margin: 36px max(16px, env(safe-area-inset-right)) 32px
+      max(16px, env(safe-area-inset-left));
+  }
+  .guest-status-card {
+    padding: 30px 20px 24px;
+  }
+  .guest-status-icon {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 14px;
+  }
+  .guest-status-card h1 {
+    font-size: 23px;
+  }
+  .guest-status-card p {
+    margin-block: 8px 18px;
+  }
+  .guest-status-actions {
+    max-width: 320px;
+  }
+  .guest-status-actions .btn {
+    flex: 1 1 106px;
+    padding-inline: 8px;
+  }
+}

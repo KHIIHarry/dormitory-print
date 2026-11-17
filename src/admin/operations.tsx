@@ -1,3 +1,4 @@
+import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { mapPublishError, mapPublishHotspots } from "./map-publish";
 import { formatDisplayTime } from "../lib/display-format";
 import { AuditPage } from "./audit";
@@ -1560,13 +1561,7 @@ export function Exceptions() {
                       (row as Record<string, any>).createdAt || row.time,
                     )}{" "}
                     ·{" "}
-                    <Link
-                      className="text-link"
-                      to={`${ADMIN}/orders/${row.orderId}`}
-                    >
-                      {data.orders.find((order) => order.id === row.orderId)
-                        ?.pickupCode || "关联订单"}
-                    </Link>
+                    <OrderPickupCode pickup={adminPickupOf(data.orders.find((order) => order.id === row.orderId) || {pickupCode:"关联订单"})} href={`${ADMIN}/orders/${row.orderId}`} />
                   </p>
                 </div>
                 <Badge status={row.status} />

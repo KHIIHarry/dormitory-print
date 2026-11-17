@@ -46,6 +46,7 @@ from .core import (
     lock,
     ok,
     owns_principal,
+    owns_order,
     require_admin,
     require_staff,
     touch,
@@ -571,40 +572,8 @@ def _verified_account_id(db, actor: Actor) -> str | None:
     return account.id
 
 
-def _source_grant_for(db, actor: Actor, order: Order, scope: str) -> str | None:
-    """Find the concrete active grant that authorizes this order action."""
-    candidates: list[str] = []
-    for grant_id in actor.grant_ids or []:
-        if grant_id not in candidates:
-            candidates.append(grant_id)
-    if actor.account_id:
-        for grant_id in db.scalars(
-            select(AccessGrant.id).where(
-                AccessGrant.order_id == order.id,
-                AccessGrant.account_id == actor.account_id,
-                AccessGrant.revoked_at.is_(None),
-                AccessGrant.expires_at > utcnow(),
-            )
-        ):
-            if grant_id not in candidates:
-                candidates.append(grant_id)
-    for grant_id in candidates:
-        if scope in grant_scopes(db, Actor(grant_ids=[grant_id]), order.id):
-            return grant_id
-    return None
-
-
 def _source_grant_valid(db, preparation: Preparation) -> bool:
-    if not preparation.source_grant_id:
-        return True
-    if not preparation.replaces_order_id:
-        return False
-    order = db.get(Order, preparation.replaces_order_id)
-    if order is None or order.deleted_at is not None:
-        return False
-    return 'ORDER_REVISE_PENDING' in grant_scopes(
-        db, Actor(grant_ids=[preparation.source_grant_id]), order.id
-    )
+    return preparation.source_grant_id is None
 
 
 def _assert_source_grant(db, preparation: Preparation) -> None:
@@ -616,49 +585,25 @@ def _assert_source_grant(db, preparation: Preparation) -> None:
         )
 
 
+def _preparation_owner(db, actor, preparation):
+    order = db.get(Order, preparation.replaces_order_id) if preparation.replaces_order_id else db.scalar(
+        select(Order).where(Order.preparation_id == preparation.id))
+    if order is not None:
+        return owns_order(db, actor, order) and not preparation.source_grant_id
+    return owns_principal(db, actor, preparation.principal_id) and not preparation.source_grant_id
+
+
 def _can_read_preparation_assets(db, actor: Actor, preparation: Preparation) -> bool:
-    if _is_expired(preparation.expires_at):
-        return False
-    if owns_principal(db, actor, preparation.principal_id):
-        return True
-    if preparation.source_grant_id and preparation.replaces_order_id:
-        order = db.get(Order, preparation.replaces_order_id)
-        if order is None or order.deleted_at is not None:
-            return False
-        return (
-            'ORDER_REVISE_PENDING' in grant_scopes(db, actor, order.id)
-            and _source_grant_valid(db, preparation)
-        )
-    return False
+    return not _is_expired(preparation.expires_at) and _preparation_owner(db, actor, preparation)
 
 
 def _readable_preparations(db, actor: Actor):
-    seen: set[str] = set()
-    if actor.principal_id:
-        for preparation in db.scalars(
-            select(Preparation).where(Preparation.principal_id == actor.principal_id)
-        ):
-            if preparation.id not in seen:
-                seen.add(preparation.id)
-                yield preparation
-    grant_ids = set(actor.grant_ids or [])
-    if actor.account_id:
-        grant_ids.update(
-            db.scalars(
-                select(AccessGrant.id).where(
-                    AccessGrant.account_id == actor.account_id,
-                    AccessGrant.revoked_at.is_(None),
-                    AccessGrant.expires_at > utcnow(),
-                )
-            )
-        )
-    if grant_ids:
-        for preparation in db.scalars(
-            select(Preparation).where(Preparation.source_grant_id.in_(grant_ids))
-        ):
-            if preparation.id not in seen:
-                seen.add(preparation.id)
-                yield preparation
+    owners = _owner_ids(db, actor)
+    if not owners:
+        return
+    for preparation in db.scalars(select(Preparation).where(Preparation.principal_id.in_(owners))):
+        if _preparation_owner(db, actor, preparation):
+            yield preparation
 
 
 def _asset_via_owned_preparation(db, actor: Actor, asset: Asset) -> bool:
@@ -795,6 +740,27 @@ def _asset_order_scope(db, actor: Actor, asset: Asset, scope: str) -> bool:
     return False
 
 
+def _asset_linked_orders(db, asset):
+    source_ids = {asset.id, (asset.data or {}).get('normalizedFrom')} - {None}
+    file_orders = select(OrderFile.order_id).where(OrderFile.asset_id.in_(source_ids))
+    artifact_orders = select(PrintTask.order_id).join(Artifact, PrintTask.artifact_id == Artifact.id).where(
+        Artifact.asset_id.in_(source_ids))
+    orders = list(db.scalars(select(Order).where(or_(Order.id.in_(file_orders), Order.id.in_(artifact_orders)))))
+    preparation_ids = select(Artifact.preparation_id).where(Artifact.asset_id.in_(source_ids))
+    for order in db.scalars(select(Order).where(Order.preparation_id.in_(preparation_ids))):
+        if all(row.id != order.id for row in orders):
+            orders.append(order)
+    replacement_orders = select(Preparation.replaces_order_id).where(
+        Preparation.id.in_(preparation_ids), Preparation.replaces_order_id.is_not(None))
+    for order in db.scalars(select(Order).where(Order.id.in_(replacement_orders))):
+        if all(row.id != order.id for row in orders):
+            orders.append(order)
+    for proof_order in _asset_proof_orders(db, asset.id):
+        if all(order.id != proof_order.id for order in orders):
+            orders.append(proof_order)
+    return orders
+
+
 def _asset_for_read(db, actor: Actor, asset_id: str) -> Asset:
     asset_id = _resolve_asset_identifier(db, asset_id)
     asset = db.get(Asset, asset_id)
@@ -804,6 +770,18 @@ def _asset_for_read(db, actor: Actor, asset_id: str) -> Asset:
         return asset
     if asset.purpose == IDENTIFICATION_PURPOSE:
         if _require_admin_purpose(actor, asset.purpose):
+            return asset
+        raise DomainError('NOT_FOUND', '文件不存在或不可访问', 404)
+    linked_orders = _asset_linked_orders(db, asset)
+    if linked_orders:
+        customer = _customer_scope_actor(actor)
+        if any(owns_order(db, customer, order) for order in linked_orders):
+            return asset
+        scope = 'FINAL_PDF_PREVIEW' if asset.purpose in FINAL_PURPOSES else (
+            'DELIVERY_PROOF_VIEW' if asset.purpose == 'DELIVERY_PROOF' else None)
+        if scope and any(scope in grant_scopes(db, customer, order.id) for order in linked_orders):
+            return asset
+        if _courier_assignment(db, actor, asset) or _require_admin_purpose(actor, asset.purpose):
             return asset
         raise DomainError('NOT_FOUND', '文件不存在或不可访问', 404)
     # Print masters are never reachable through an ORDER_VIEW order link. The
@@ -846,6 +824,13 @@ def _asset_for_write(db, actor: Actor, asset_id: str) -> Asset:
     asset = db.get(Asset, asset_id)
     if asset is None or asset.deleted_at is not None:
         raise DomainError('NOT_FOUND', '文件不存在或不可访问', 404)
+    orders = _asset_linked_orders(db, asset)
+    if orders:
+        if any(owns_order(db, _customer_scope_actor(actor), order) for order in orders):
+            return asset
+        if _require_admin_purpose(actor, asset.purpose):
+            return asset
+        raise DomainError('NOT_FOUND', '文件不存在或不可访问', 404)
     if asset.principal_id and owns_principal(db, actor, asset.principal_id):
         return asset
     if _require_admin_purpose(actor, asset.purpose):
@@ -857,17 +842,8 @@ def _preparation_for(db, actor: Actor, preparation_id: str) -> Preparation:
     preparation = db.get(Preparation, preparation_id)
     if preparation is None:
         raise DomainError('NOT_FOUND', '准备任务不存在或不可访问', 404)
-    if owns_principal(db, actor, preparation.principal_id):
+    if _preparation_owner(db, actor, preparation):
         return preparation
-    if preparation.source_grant_id and preparation.replaces_order_id:
-        order = db.get(Order, preparation.replaces_order_id)
-        if (
-            order is not None
-            and order.deleted_at is None
-            and 'ORDER_REVISE_PENDING' in grant_scopes(db, actor, order.id)
-            and _source_grant_valid(db, preparation)
-        ):
-            return preparation
     if actor.staff_id and actor.staff_role == 'ADMIN':
         # Preparations are customer-owned private drafts.  An ADMIN only sees
         # them through the production scope, never through staff identity.
@@ -880,6 +856,8 @@ def _upload_session_for(db, actor: Actor, session_id: str) -> UploadSession:
     session = db.get(UploadSession, session_id)
     if session is None:
         raise DomainError('NOT_FOUND', '上传会话不存在或不可访问', 404)
+    if session.asset_id:
+        _asset_for_read(db, actor, session.asset_id)
     if session.principal_id and owns_principal(db, actor, session.principal_id):
         return session
     if actor.staff_id and actor.staff_role == 'ADMIN':
@@ -1458,7 +1436,16 @@ def list_assets(
         # normalized/final derivatives are not drafts and must not be listed.
         statement = statement.where(Asset.purpose == 'PRINT_SOURCE')
     rows = list(db.scalars(statement.order_by(Asset.created_at.desc()).limit(50)))
-    return ok({'items': [_asset_view(row) for row in rows], 'total': len(rows)})
+    visible = []
+    for row in rows:
+        try:
+            _asset_for_read(db, actor, row.id)
+        except DomainError as error:
+            if error.status == 404:
+                continue
+            raise
+        visible.append(_asset_view(row))
+    return ok({'items': visible, 'total': len(visible)})
 
 
 @router.get('/assets/{asset_id}', response_model=Envelope[AssetView])
@@ -1913,7 +1900,9 @@ def _resolve_asset_for_preparation(db, actor: Actor, asset_id: str) -> Asset:
     asset = db.get(Asset, asset_id)
     if asset is None or asset.deleted_at is not None:
         raise DomainError('ASSET_NOT_FOUND', '文件不存在或不可访问', 404)
-    if not owns_principal(db, actor, asset.principal_id):
+    orders = _asset_linked_orders(db, asset)
+    if not (any(owns_order(db, actor, order) for order in orders) if orders else
+            owns_principal(db, actor, asset.principal_id)):
         raise DomainError('ASSET_NOT_FOUND', '文件不存在或不可访问', 404)
     if asset.purpose != 'PRINT_SOURCE':
         raise DomainError('ASSET_NOT_PRINTABLE', '该文件不能用于打印准备', 422)
@@ -2087,20 +2076,7 @@ def create_preparation(
             replaces_data.get('checkoutAuthKind')
             or ('REGISTERED' if checkout_account_id else 'ANONYMOUS')
         )
-        # A revision always belongs to the original order owner; a delegated
-        # editor acts through the recorded source grant, never as the owner.
         principal = replaces_order.principal_id
-        if not owns_principal(db, actor, replaces_order.principal_id):
-            # Single-order delegation: record the concrete source grant and
-            # re-check it during generation and order activation. Staff cookies
-            # are stripped on this surface, so the grant is the only authority.
-            source_grant_id = _source_grant_for(db, actor, replaces_order, 'ORDER_REVISE_PENDING')
-            if not source_grant_id:
-                raise DomainError(
-                    'ORDER_GRANT_SCOPE_DENIED',
-                    '当前链接未授予待确认订单编辑权限',
-                    403,
-                )
     elif body.expected_order_version is not None:
         raise DomainError('ORDER_VERSION_WITHOUT_ORDER', '未提供要修改的订单', 422)
     photo_config = _config(db, 'photo')
@@ -2193,25 +2169,13 @@ def create_preparation(
 @router.get('/preparations', response_model=Envelope[PreparationList])
 def list_preparations(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     owners = _owner_ids(db, actor)
-    grant_ids = set(actor.grant_ids or [])
-    if actor.account_id:
-        grant_ids.update(
-            db.scalars(
-                select(AccessGrant.id).where(
-                    AccessGrant.account_id == actor.account_id,
-                    AccessGrant.revoked_at.is_(None),
-                    AccessGrant.expires_at > utcnow(),
-                )
-            )
-        )
-    if not owners and not grant_ids:
-        raise DomainError('AUTH_REQUIRED', '请先建立客户会话或打开订单链接', 401)
+    if not owners:
+        raise DomainError('AUTH_REQUIRED', '请先建立客户会话', 401)
     statement = select(Preparation)
-    conditions = []
-    if owners:
-        conditions.append(Preparation.principal_id.in_(owners))
-    if grant_ids:
-        conditions.append(Preparation.source_grant_id.in_(grant_ids))
+    conditions = [Preparation.principal_id.in_(owners)]
+    if actor.account_id:
+        account_orders = select(Order.id).where(Order.owner_account_id == actor.account_id)
+        conditions.append(Preparation.replaces_order_id.in_(account_orders))
     rows = list(
         db.scalars(
             statement.where(or_(*conditions))
@@ -2223,7 +2187,7 @@ def list_preparations(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     for row in rows:
         if _is_expired(row.expires_at):
             continue
-        if not owns_principal(db, actor, row.principal_id) and not _source_grant_valid(db, row):
+        if not _preparation_owner(db, actor, row):
             continue
         items.append(preparation_view(db, row))
     return ok({'items': items, 'total': len(items)})

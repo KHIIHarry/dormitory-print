@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from .account_lifecycle import verification_deadline
 from .config import get_config, section_data
 from .core import (
-    Actor, DomainError, Envelope, actor_dep, advisory_lock, audit, lock, ok,
+    Actor, DomainError, Envelope, actor_dep, admin_order_pickup, advisory_lock, audit, lock, ok,
     require_admin, require_customer, touch,
 )
 from .db import get_db
@@ -1434,9 +1434,9 @@ def _account_status(account: Account) -> str:
     return 'ACTIVE'
 
 
-def _customer_view(db, account: Account) -> CustomerRecord:
+def _customer_view(db, account: Account, actor: Actor | None = None) -> CustomerRecord:
     orders = db.scalars(select(Order).where(
-        Order.checkout_account_id == account.id,
+        Order.owner_account_id == account.id,
         Order.deleted_at.is_(None)).order_by(Order.created_at.desc())).all()
     coupons = db.scalar(select(func.count()).select_from(Coupon).where(
         Coupon.account_id == account.id)) or 0
@@ -1466,6 +1466,7 @@ def _customer_view(db, account: Account) -> CustomerRecord:
         inviteCode=account.invite_code, referralCount=int(referrals),
         allowedActions=actions,
         orders=[{'id': order.id, 'pickupCode': order.pickup_code,
+                 'adminPickup': admin_order_pickup(order, actor) if actor and actor.staff_role == 'ADMIN' and not actor.restricted else None,
                  'totalCents': order.total_cents, 'status': order.status}
                 for order in orders[:100]],
     )
@@ -1980,7 +1981,7 @@ def list_customers(
             continue
         if end and account.created_at > end + timedelta(days=1):
             continue
-        view = _customer_view(db, account)
+        view = _customer_view(db, account, actor)
         if minOrders is not None and view.order_count < minOrders:
             continue
         if minCoupons is not None and view.coupon_count < minCoupons:
@@ -1995,7 +1996,7 @@ def get_customer(id: str, db=Depends(get_db), actor: Actor = Depends(actor_dep))
     account = db.get(Account, id)
     if not account:
         raise DomainError('NOT_FOUND', '客户不存在', 404)
-    return ok(_customer_view(db, account))
+    return ok(_customer_view(db, account, actor))
 
 
 @router.post('/admin/customers/{id}/suspend', response_model=Envelope[dict])

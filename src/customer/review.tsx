@@ -946,7 +946,7 @@ function ReviewContent() {
         );
         return;
       }
-      if (issuedToken) {
+      if (issuedToken && !order.ownerAccountId && order.accessKind !== "OWNER") {
         const link = new URL("/u/order-link", window.location.origin);
         link.searchParams.set("orderId", order.id);
         link.hash = new URLSearchParams({ token: issuedToken }).toString();

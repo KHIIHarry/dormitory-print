@@ -26,7 +26,6 @@ const ALIASES = {
   CustomerSession: "CustomerSessionView",
   StaffSession: "StaffSessionView",
   OrderAccess: "OrderAccessView",
-  AccessLink: "AccessLinkView",
   MailConfig: "MailConfigDTO",
   MailTemplate: "MailTemplateDTO",
   Campaign: "CampaignDTO",

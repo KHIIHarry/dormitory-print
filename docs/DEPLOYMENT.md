@@ -260,16 +260,13 @@ API 和 `business-worker` 接入 `egress` 网络，因此 API 的真实 SMTP 连
 
 ## 10. 日常操作
 
+游客订单与账号归属升级有同步停写和数据库回填要求，升级须执行 [2026-11-18 升级说明](incremental/2026-11-18-guest-order-access.md) 中的停写、备份、构建新镜像、迁移、同步启动顺序。下面仅列日常查看与停止命令，不是升级发布步骤。
+
 ```bash
 # 状态与日志
 docker compose -f deploy/compose.yaml --env-file deploy/.env ps
 docker compose -f deploy/compose.yaml --env-file deploy/.env logs -f api file-worker business-worker
 docker compose -f deploy/compose.yaml --env-file deploy/.env logs -f backup
-
-# 升级代码后：先备份并验证恢复点，再迁移，再滚动重启
-docker compose -f deploy/compose.yaml --env-file deploy/.env run --rm backup /opt/dormprint/backup.sh --mode daily
-docker compose -f deploy/compose.yaml --env-file deploy/.env run --rm migrate
-docker compose -f deploy/compose.yaml --env-file deploy/.env up -d --build
 
 # 停止但保留数据卷
 docker compose -f deploy/compose.yaml --env-file deploy/.env down

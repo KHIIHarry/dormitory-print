@@ -17,7 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm.attributes import flag_modified
 
 from .db import get_db
-from .models import AccessGrant, AuditLog, IdempotencyRecord, Job, Principal, utcnow
+from .models import AccessGrant, AuditLog, IdempotencyRecord, Job, Order, Principal, utcnow
 from .settings import get_settings
 
 request_id_var = ContextVar('request_id', default='')
@@ -108,30 +108,46 @@ def owns_principal(db, actor, principal_id):
     return bool(actor.account_id and db.scalar(select(Principal.id).where(Principal.id == principal_id, Principal.account_id == actor.account_id)))
 
 
+GUEST_LINK_SCOPES = frozenset(('ORDER_VIEW', 'FINAL_PDF_PREVIEW', 'DELIVERY_PROOF_VIEW'))
+
+
+class AdminOrderPickup(DTO):
+    pickup_code: str
+    placed_with_account: bool
+    customer_detail_id: str | None = None
+
+
+def admin_order_pickup(order, actor):
+    placed_with_account = bool(order.checkout_account_id)
+    can_view = actor.staff_role == 'ADMIN' and not actor.restricted and bool(
+        {'*', 'customer.manage'} & actor.capabilities)
+    return {'pickupCode': order.pickup_code, 'placedWithAccount': placed_with_account,
+            'customerDetailId': order.owner_account_id if placed_with_account and can_view else None}
+
+
+def current_guest_grant(db, order_id):
+    return db.scalar(select(AccessGrant).where(
+        AccessGrant.order_id == order_id, AccessGrant.token_hash.is_not(None),
+        AccessGrant.source_grant_id.is_(None), AccessGrant.revoked_at.is_(None)))
+
+
+def owns_order(db, actor, order):
+    if order.owner_account_id:
+        return bool(actor.account_id and actor.account_id == order.owner_account_id)
+    if order.principal_id not in (actor.principal_id, actor.guest_principal_id):
+        return False
+    grant = current_guest_grant(db, order.id)
+    return bool(grant and grant.expires_at > utcnow())
+
+
 def grant_scopes(db, actor, order_id):
-    result = set()
-    candidates = list(db.scalars(select(AccessGrant).where(AccessGrant.order_id == order_id)))
-    by_id = {grant.id: grant for grant in candidates}
-    for grant in candidates:
-        if not ((actor.account_id and grant.account_id == actor.account_id) or grant.id in actor.grant_ids):
-            continue
-        chain, seen, scopes = grant, set(), set(grant.scopes)
-        valid = True
-        while chain:
-            if chain.id in seen or chain.revoked_at or chain.expires_at <= utcnow():
-                valid = False
-                break
-            seen.add(chain.id)
-            scopes.intersection_update(chain.scopes)
-            if not chain.source_grant_id:
-                break
-            chain = by_id.get(chain.source_grant_id)
-            if chain is None:
-                valid = False
-                break
-        if valid:
-            result.update(scopes)
-    return result
+    order = db.get(Order, order_id)
+    if not order or order.deleted_at or order.owner_account_id:
+        return set()
+    grant = current_guest_grant(db, order_id)
+    if not grant or grant.id not in actor.grant_ids or grant.expires_at <= utcnow():
+        return set()
+    return set(grant.scopes) & GUEST_LINK_SCOPES
 
 
 def authorize_order(db, actor, order, scope='ORDER_VIEW'):
@@ -139,7 +155,7 @@ def authorize_order(db, actor, order, scope='ORDER_VIEW'):
         raise DomainError('NOT_FOUND', '订单不存在或不可访问', 404)
     if actor.staff_role == 'ADMIN' and not actor.restricted:
         return
-    if owns_principal(db, actor, order.principal_id):
+    if owns_order(db, actor, order):
         return
     if scope in grant_scopes(db, actor, order.id):
         return
@@ -246,13 +262,24 @@ def lookup_idempotency(db, scope, route, key, payload_hash, wait=True):
         if record.request_hash != payload_hash:
             raise DomainError('IDEMPOTENCY_CONFLICT', '同一操作标识不能用于不同请求', 409)
         if record.expires_at <= utcnow() or not record.encrypted_response:
-            raise DomainError('IDEMPOTENCY_EXPIRED', '该操作重放窗口已结束，请先核实结果', 409, record.result_ref)
+            raise DomainError('IDEMPOTENCY_EXPIRED', '该操作重放窗口已结束，请先核实结果', 409,
+                              public_result_reference(record.result_ref))
     return record
 
 
 def save_idempotency(db, scope, route, key, payload_hash, status_code, response_data, result_ref=None):
+    reference = dict(result_ref or {})
+    body = response_data.get('body', {}).get('data')
+    if not reference.get('orderId') and isinstance(body, dict) and isinstance(body.get('pickupCode'), str):
+        reference['_orderId'] = body.get('id')
+    order_id = reference.get('orderId') or reference.get('_orderId')
+    if order_id:
+        order = db.get(Order, order_id)
+        if order:
+            reference['guestAccessVersion'] = order.guest_access_version
+            reference['ownerAccountId'] = order.owner_account_id
     record = IdempotencyRecord(actor_key=scope, route=route, key=key, request_hash=payload_hash,
-        status_code=status_code, encrypted_response=seal(response_data), result_ref=result_ref or {},
+        status_code=status_code, encrypted_response=seal(response_data), result_ref=reference,
         expires_at=utcnow() + timedelta(hours=get_settings().idempotency_hours))
     db.add(record)
     return record
@@ -284,6 +311,73 @@ def _result_reference(body):
         if isinstance(order.get('status'), str):
             reference['status'] = order['status']
     return reference
+
+
+def public_result_reference(reference):
+    return {key: value for key, value in reference.items()
+            if key in ('id', 'orderId', 'assetId', 'preparationId', 'status', 'exportJobId')}
+
+
+def validate_order_replay(db, actor, request, payload, record, cached):
+    """Revalidate current object rights before replaying a private response."""
+    path = request.url.path.removeprefix('/api/v1')
+    if '/access-links' in path or path in ('/customer/account/link-guest', '/customer/account/import-order'):
+        raise DomainError('NOT_FOUND', '接口不存在', 404)
+    if path.startswith('/admin/') or path.startswith('/courier/'):
+        return
+    from .models import AfterSale, AuthSession
+    value = cached.get('body', {}).get('data')
+    data = value if isinstance(value, dict) else {}
+    order_id = record.result_ref.get('orderId') or record.result_ref.get('_orderId')
+    if not order_id and path.startswith(('/orders/', '/customer/orders/')):
+        parts = path.strip('/').split('/')
+        order_id = parts[2] if parts[0] == 'customer' else parts[1]
+    if not order_id and path.startswith('/after-sales/'):
+        case = db.get(AfterSale, path.split('/')[2])
+        order_id = case.order_id if case else None
+    if path == '/order-access/exchange':
+        order_id = payload.get('orderId')
+        order = lock(db, Order, order_id)
+        grant = db.scalar(select(AccessGrant).where(AccessGrant.token_hash == token_hash(payload.get('accessToken', '')))
+                          .with_for_update().execution_options(populate_existing=True))
+        if not grant or grant.order_id != order_id:
+            raise DomainError('ORDER_GRANT_INVALID', '订单访问凭据无效', 401)
+        if not order or order.deleted_at or grant.revoked_at or order.owner_account_id:
+            raise DomainError('ORDER_GRANT_REVOKED', '订单链接已停止访问', 410)
+        if grant.expires_at <= utcnow():
+            raise DomainError('ORDER_GRANT_EXPIRED', '游客订单链接已到期', 410)
+        from .auth import ORDER_ACCESS_COOKIE
+        cookie_prefix = ORDER_ACCESS_COOKIE + '='
+        for name, header in cached.get('headers', []):
+            if name.lower() == 'set-cookie' and cookie_prefix in header:
+                raw = header.split(cookie_prefix, 1)[1].split(';', 1)[0].strip('"')
+                session = db.scalar(select(AuthSession).where(AuthSession.token_hash == token_hash(raw))
+                                    .with_for_update().execution_options(populate_existing=True))
+                if not session or session.revoked_at or session.expires_at <= utcnow():
+                    raise DomainError('ORDER_GRANT_REVOKED', '订单链接已停止访问', 410)
+        return
+    if order_id:
+        order = lock(db, Order, order_id)
+        customer = replace(actor, staff_id=None, staff_role=None, capabilities=set(), restricted=False)
+        authorize_order(db, customer, order)
+        previous_version = record.result_ref.get('guestAccessVersion')
+        if previous_version is not None and previous_version != order.guest_access_version:
+            raise DomainError('AUTH_CONTEXT_CHANGED', '订单访问方式已变化，请刷新后核对', 409)
+        if data.get('accessToken'):
+            grant = current_guest_grant(db, order_id)
+            if not grant or grant.token_hash != token_hash(data['accessToken']) or order.owner_account_id:
+                raise DomainError('ORDER_GRANT_REVOKED', '订单链接已停止访问', 410)
+        return
+    preparation_id = record.result_ref.get('preparationId')
+    if not preparation_id and path.startswith('/preparations/'):
+        preparation_id = path.split('/')[2]
+    if preparation_id:
+        from .media import _preparation_for
+        _preparation_for(db, actor, preparation_id)
+    asset_id = record.result_ref.get('assetId')
+    if asset_id:
+        from .media import _asset_for_read
+        _asset_for_read(db, actor, asset_id)
 
 
 def enqueue_job(db, kind, target_id, business_key, data=None):

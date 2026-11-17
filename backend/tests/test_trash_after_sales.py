@@ -44,6 +44,9 @@ def test_terminal_case_trash_hides_reads_and_restores_original_facts(
         db, api, client, app, act_as, staff_factory, status):
     admin = act_as(staff_factory())
     order, case, refund = make_case(db, admin, status)
+    from app.auth import issue_order_grant
+    issue_order_grant(db, order, Actor(principal_id=order.principal_id))
+    db.commit()
     before_version = case.version
     result = trash(api, client, case)
     assert result.status_code == 200, result.text

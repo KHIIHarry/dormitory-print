@@ -87,3 +87,16 @@ describe("customer security boundaries", () => {
     expect(safeCustomerReturn("/admin/orders")).toBe("/u/account");
   });
 });
+
+it("email continuation stores only a direct customer order path", async () => {
+  const { safeOrderReturn } = await import("../src/customer/account/security");
+  expect(safeOrderReturn("/u/orders/ORD-1")).toBe("/u/orders/ORD-1");
+  for (const value of [
+    "/u/order-link?orderId=ORD-1#token=secret",
+    "/u/orders/ORD-1?token=secret",
+    "/u/orders/ORD-1#token=secret",
+    "https://example.com/u/orders/ORD-1",
+    "/u/account",
+  ])
+    expect(safeOrderReturn(value)).toBeNull();
+});

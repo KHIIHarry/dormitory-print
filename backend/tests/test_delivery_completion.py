@@ -22,7 +22,9 @@ def test_delivered_status_alone_does_not_fabricate_timeline_events(db):
     from app.commerce import history
     from app.core import Actor
 
+    from app.auth import issue_order_grant
     order = make_ready_order(db, status='DELIVERED')
+    issue_order_grant(db, order, Actor(principal_id=order.principal_id))
     result = history(order.id, db=db, actor=Actor(principal_id=order.principal_id))
     assert result['data'] == []
 
@@ -33,6 +35,7 @@ def complete_delivery(db, api, admin_client, client_factory, staff_factory,
     courier = make_courier(staff_factory)
     order = seed_quote(db, make_ready_order(db))
     order.principal_id = account.principal_id
+    order.owner_account_id = account.id
     order.checkout_account_id = account.id
     order.data = {**order.data, 'history': [{
         'title': '线下收款已人工确认', 'time': order.created_at.isoformat(),

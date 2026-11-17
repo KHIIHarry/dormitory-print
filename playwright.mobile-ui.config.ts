@@ -2,6 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "tests/e2e",
   testMatch: [
+    "preview-pagination.spec.ts",
+    "guest-order-access.spec.ts",
+    "guest-order-access-admin.spec.ts",
     "delivery-campus-admin.spec.ts",
     "slot-date-filter.spec.ts",
     "native-month.spec.ts",

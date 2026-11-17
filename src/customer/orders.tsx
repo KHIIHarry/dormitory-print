@@ -1,10 +1,13 @@
 import { formatDisplayTime } from "../lib/display-format";
-import { orderLocationSnapshot, selectableBuildingsForCampus } from "../lib/campus";
+import {
+  orderLocationSnapshot,
+  selectableBuildingsForCampus,
+} from "../lib/campus";
 import { CustomerSupplementaryPanel } from "../v1/supplementary";
 import { useIdentity } from "../growth/identity";
 import { canOrderAction, effectiveOrderAccess } from "../growth/order-security";
 import { CustomerSavedLink } from "../growth/order-links";
-import { OrderImportButton } from "./account";
+import { GuestOrderBoundary } from "./guest-order-access";
 import { DocPreview } from "../components/doc-preview";
 import type { PrintFile } from "../lib/types";
 import { useEffect, useState } from "react";
@@ -102,8 +105,8 @@ export function OrderList() {
         title="我的订单"
         description={
           customer.authKind === "REGISTERED"
-            ? "显示归属账号、明确关联及通过链接导入的授权订单。"
-            : "显示本机游客会话的订单；换设备可使用私下保存的专属链接。"
+            ? "显示当前账号和本机有效访问期内的订单。"
+            : "显示有效访问期内的本机游客订单。关联账号后可长期查看订单记录。"
         }
         action={
           <LinkButton to="/u/new">
@@ -171,7 +174,8 @@ export function OrderList() {
               <div className="order-meta">
                 <span>
                   <MapPin size={14} />
-                  {data.buildings.find((b) => b.id === o.locationId)?.name || orderLocationSnapshot(o)?.name}
+                  {data.buildings.find((b) => b.id === o.locationId)?.name ||
+                    orderLocationSnapshot(o)?.name}
                 </span>
                 <span>
                   <Clock size={14} />
@@ -213,6 +217,14 @@ export function OrderList() {
   );
 }
 export function Contact() {
+  const { id } = useParams();
+  return (
+    <GuestOrderBoundary orderId={id || ""}>
+      <ContactContent />
+    </GuestOrderBoundary>
+  );
+}
+function ContactContent() {
   const { id } = useParams();
   const {
     data,
@@ -363,9 +375,17 @@ export function Contact() {
         )}
       </div>
       <RefreshStatus loading={false} error={refreshError} retry={refresh} />
+      {order.identificationProgress?.enabled && (
+        <p className="order-identification-progress" role="status">
+          订单识别页面进度 {order.identificationProgress.completed}/{order.identificationProgress.total}
+          {order.identificationProgress.total === 0 && " · 正在准备"}
+        </p>
+      )}
       <p className="save-link-note">
         <ShieldCheck size={15} />
-        建议保存本订单专属访问链接。链接包含访问权限，请勿公开分享。
+        {order.accessKind === "OWNER" || order.ownerAccountId
+          ? "订单已保存到账号，可在「我的订单」查看订单记录。"
+          : "游客订单链接默认有效 14 天。关联账号后可长期查看订单记录。"}
       </p>
       {qr && (
         <Modal title="长按保存二维码" onClose={() => setQr(false)}>
@@ -380,6 +400,14 @@ export function Contact() {
   );
 }
 export function OrderDetail() {
+  const { id } = useParams();
+  return (
+    <GuestOrderBoundary orderId={id || ""}>
+      <OrderDetailContent />
+    </GuestOrderBoundary>
+  );
+}
+function OrderDetailContent() {
   const { id } = useParams();
   const {
     data,
@@ -403,13 +431,26 @@ export function OrderDetail() {
   const nav = useNavigate();
   const order = data.orders.find((o) => o.id === id);
   const locationSnapshot = orderLocationSnapshot(order);
-  const currentLocation = data.buildings.find((b) => b.id === order?.locationId);
+  const currentLocation = data.buildings.find(
+    (b) => b.id === order?.locationId,
+  );
   const campusId = locationSnapshot?.campusId || currentLocation?.campusId;
-  const campusAvailable = data.campuses.some((c) => c.id === campusId && c.selectionEnabled);
-  const locationChoices = selectableBuildingsForCampus(data.buildings, campusAvailable ? campusId : undefined);
+  const campusAvailable = data.campuses.some(
+    (c) => c.id === campusId && c.selectionEnabled,
+  );
+  const locationChoices = selectableBuildingsForCampus(
+    data.buildings,
+    campusAvailable ? campusId : undefined,
+  );
   const locationsReady = DEMO || !!resources.buildings?.hasData;
   useEffect(() => {
-    if (edit && building && locationsReady && !locationChoices.some((item) => item.id === building)) setBuilding("");
+    if (
+      edit &&
+      building &&
+      locationsReady &&
+      !locationChoices.some((item) => item.id === building)
+    )
+      setBuilding("");
   }, [edit, building, locationsReady, data.buildings, data.campuses, campusId]);
   if (!order)
     return (
@@ -696,14 +737,6 @@ export function OrderDetail() {
               </>
             )}
           </Panel>
-          {access && (
-            <Panel title="本单访问授权">
-              <Notice>
-                此链接仅包含当前订单权限，所有操作仍受订单状态限制。
-              </Notice>
-              <OrderImportButton orderId={order.id} />
-            </Panel>
-          )}
           <CustomerSavedLink orderId={order.id} />
           <Notice>
             如有疑问，请向管理员提供提取码 {order.pickupCode}
@@ -724,15 +757,14 @@ export function OrderDetail() {
               onChange={(e) => setBuilding(e.target.value)}
             >
               <option value="">请选择楼栋</option>
-              {locationChoices
-                .map((b) => {
-                  const campus = data.campuses.find((c) => c.id === b.campusId);
-                  return (
-                    <option value={b.id} key={b.id}>
-                      {campus ? `${campus.name} · ${b.name}` : b.name}
-                    </option>
-                  );
-                })}
+              {locationChoices.map((b) => {
+                const campus = data.campuses.find((c) => c.id === b.campusId);
+                return (
+                  <option value={b.id} key={b.id}>
+                    {campus ? `${campus.name} · ${b.name}` : b.name}
+                  </option>
+                );
+              })}
             </select>
           </Field>
           <Notice>如需跨校区配送，请联系管理员协调。</Notice>
@@ -746,9 +778,16 @@ export function OrderDetail() {
           )}
           <Button
             busy={!!pendingActions[`/orders/${order.id}/location`]}
-            disabled={!locationsReady || !locationChoices.some((item) => item.id === building)}
+            disabled={
+              !locationsReady ||
+              !locationChoices.some((item) => item.id === building)
+            }
             onClick={async () => {
-              if (!locationsReady || !locationChoices.some((item) => item.id === building)) return;
+              if (
+                !locationsReady ||
+                !locationChoices.some((item) => item.id === building)
+              )
+                return;
               if (
                 await updateOrder(
                   order.id,

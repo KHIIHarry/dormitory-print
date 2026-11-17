@@ -1,3 +1,4 @@
+import type { AdminOrderPickup } from "../lib/types";
 import type { components } from "../lib/api-schema";
 export type PromotionIntent = components["schemas"]["PromotionIntent"];
 export type Coupon = components["schemas"]["Coupon"];
@@ -42,7 +43,6 @@ export type CustomerAccount = components["schemas"]["CustomerAccount"];
 export type CustomerSession = components["schemas"]["CustomerSession"];
 export type StaffSession = components["schemas"]["StaffSession"];
 export type OrderAccess = components["schemas"]["OrderAccess"];
-export type AccessLink = components["schemas"]["AccessLink"];
 export type MailConfig = components["schemas"]["MailConfig"];
 export type MailTemplate = components["schemas"]["MailTemplate"];
 export type Campaign = components["schemas"]["Campaign"];
@@ -83,6 +83,7 @@ export type CustomerRecord = CustomerAccount & {
   allowedActions: string[];
   orders: {
     id: string;
+    adminPickup?: AdminOrderPickup | null;
     pickupCode: string;
     totalCents: number;
     status: string;

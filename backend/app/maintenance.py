@@ -372,7 +372,7 @@ def _account_principal_ids(db, account: Account) -> set[str]:
 
 def _account_orders(db, account: Account) -> list[Order]:
     principal_ids = _account_principal_ids(db, account)
-    conditions = [Order.checkout_account_id == account.id]
+    conditions = [Order.checkout_account_id == account.id, Order.owner_account_id == account.id]
     if principal_ids:
         conditions.append(Order.principal_id.in_(principal_ids))
     return list(db.scalars(select(Order).where(or_(*conditions))))

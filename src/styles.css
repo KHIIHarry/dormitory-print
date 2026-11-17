@@ -2109,13 +2109,19 @@ input[type="date"],
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: clamp(4px, 2vw, 16px);
+  min-width: 0;
+  padding: 4px;
   background: #f4f1ed;
   color: #978674;
 }
 .preview-pager > span {
-  font-size: 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
+.preview-pager > .icon-btn { width: 44px; height: 44px; flex-shrink: 0; }
+.order-identification-progress { margin: 0 0 16px; color: var(--muted); font-size: 14px; letter-spacing: normal; }
 .pdf-full {
   width: 100%;
   height: 65vh;

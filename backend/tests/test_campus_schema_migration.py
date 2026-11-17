@@ -58,10 +58,16 @@ def test_schema_upgrade_only_binds_provable_campuses_and_keeps_shared_capacity()
                 "subtotal_cents, discount_cents, total_cents, data, version, created_at, updated_at) "
                 "VALUES ('quote', 'preparation', 1, :expires_at, 10, 0, 10, '{}', 1, :now, :now)"
             ), {'expires_at': now+timedelta(days=1), 'now': now})
-            connection.execute(Order.__table__.insert().values(id='order', principal_id='principal',
-                pickup_code='HISTORY', preparation_id='preparation', quote_id='quote', total_cents=10,
-                nickname='测试', phone='13800000000', location_id='location', requested_slot_id='unique',
-                close_at=now+timedelta(days=1)))
+            connection.execute(text('''
+                INSERT INTO orders (id, principal_id, pickup_code, status, content_revision,
+                    preparation_id, quote_id, total_cents, cash_received_cents, refunded_cents,
+                    nickname, phone, customer_note, note, location_id, requested_slot_id,
+                    refund_locked, address_review, packing_status, arrangement_version,
+                    close_at, data, version, created_at, updated_at)
+                VALUES ('order', 'principal', 'HISTORY', 'PENDING_CONFIRMATION', 1,
+                    'preparation', 'quote', 10, 0, 0, '测试', '13800000000', '', '',
+                    'location', 'unique', false, false, 'BLOCKED', 0, :close_at, '{}', 1, :now, :now)
+            '''), {'close_at': now + timedelta(days=1), 'now': now})
             connection.execute(DeliveryChange.__table__.insert().values(order_id='order', slot_id='unique',
                 kind='ETA_UPDATED', original={'slotId': 'history-contradiction', 'campusId': 'west'},
                 proposed={'slotId': 'unique', 'campusId': 'east'}))

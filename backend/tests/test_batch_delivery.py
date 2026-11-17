@@ -171,6 +171,7 @@ def test_batch_proof_is_atomic_idempotent_and_keeps_one_wage_and_referral(
     invitee = account_factory()
     inviter = account_factory()
     first.principal_id = invitee.principal_id
+    first.owner_account_id = invitee.id
     first.checkout_account_id = invitee.id
     first.data = {**(first.data or {}), 'quote': {'lines': [
         {'service': 'PRINT', 'amountCents': first.total_cents}]}}
@@ -253,8 +254,11 @@ def test_batch_proof_photo_scope_shared_read_and_cross_courier(
     owner_b = account_factory()
     owner_c = account_factory()
     first.principal_id = owner_a.principal_id
+    first.owner_account_id = owner_a.id
     second.principal_id = owner_b.principal_id
+    second.owner_account_id = owner_b.id
     third.principal_id = owner_c.principal_id
+    third.owner_account_id = owner_c.id
     db.commit()
     db.refresh(first)
     db.refresh(second)
@@ -545,6 +549,7 @@ def test_start_and_proof_queue_only_a_delivered_mail(
     order = make_ready_order(db)
     order.checkout_account_id = account.id
     order.principal_id = account.principal_id
+    order.owner_account_id = account.id
     db.commit()
 
     batch, assignments = _batch(db, api, admin_client, courier, [order])
@@ -579,6 +584,7 @@ def test_admin_exception_resolve_sends_no_customer_mail(
     order = make_ready_order(db)
     order.checkout_account_id = account.id
     order.principal_id = account.principal_id
+    order.owner_account_id = account.id
     db.commit()
 
     batch, assignments = _batch(db, api, admin_client, courier, [order])
@@ -612,6 +618,7 @@ def test_auto_unpaid_timeout_close_sends_no_customer_mail(
     order = make_ready_order(db)
     order.checkout_account_id = account.id
     order.principal_id = account.principal_id
+    order.owner_account_id = account.id
     order.status = 'PENDING_CONFIRMATION'
     order.settlement_kind = None
     order.cash_received_cents = 0

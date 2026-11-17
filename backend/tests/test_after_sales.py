@@ -81,7 +81,7 @@ def test_employee_uses_customer_surface_for_own_after_sale(db,ready_preparation,
     order=submit_order(db,actor,OrderSubmit.model_validate(body))
     order.settlement_kind='CASH_MANUAL';order.cash_received_cents=10;order.status='PENDING_PRINT'
     case=create_case(db,actor,order,CaseInput(responsibility='MERCHANT',solution='REFUND',reason='错印'))
-    db.get(Principal,order.principal_id).account_id=customer_client.account.id
+    order.owner_account_id=customer_client.account.id
     staff_factory(role='COURIER',account_id=customer_client.account.id)
     db.commit()
     response=customer_client.get('/api/v1/after-sales/'+case.id)

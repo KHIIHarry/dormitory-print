@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from .core import (
     Actor, DomainError, Envelope, actor_dep, audit, authorize_order, grant_scopes,
-    lock, ok, owns_principal, require_admin, touch,
+    lock, ok, owns_order, require_admin, touch,
 )
 from .db import get_db
 from .models import (
@@ -490,13 +490,12 @@ def admin_cancel(charge_id: str, body: ChargeAction, db=Depends(get_db),
              response_model=Envelope[DisputeView])
 def customer_dispute(order_id: str, charge_id: str, body: DisputeInput, db=Depends(get_db),
                      actor: Actor = Depends(actor_dep)):
-    order = db.get(Order, order_id)
+    order = lock(db, Order, order_id)
     # ORDER_VIEW is enough to see the fee, but a readonly link cannot write.
     authorize_order(db, actor, order)
-    if not owns_principal(db, actor, order.principal_id) and \
+    if not owns_order(db, actor, order) and \
             'ORDER_AFTER_SALES' not in grant_scopes(db, actor, order.id):
         raise DomainError('FORBIDDEN', '只读授权不能发起补充费用争议', 403)
-    order = lock(db, Order, order.id)
     charge = lock(db, SupplementaryCharge, charge_id, body.expected_version)
     if charge.order_id != order.id:
         raise DomainError('NOT_FOUND', '补充费用不存在', 404)

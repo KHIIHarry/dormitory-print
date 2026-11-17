@@ -106,6 +106,7 @@ class AccessGrant(Entity, Base):
     __tablename__ = 'order_access_grants'
     order_id: Mapped[str] = mapped_column(ForeignKey('orders.id'), index=True)
     token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    encrypted_token: Mapped[str | None] = mapped_column(Text)
     account_id: Mapped[str | None] = mapped_column(ForeignKey('customer_accounts.id'), index=True)
     source_grant_id: Mapped[str | None] = mapped_column(ForeignKey('order_access_grants.id'))
     scopes: Mapped[list] = mapped_column(J, default=list)
@@ -113,6 +114,8 @@ class AccessGrant(Entity, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str] = mapped_column(String(64), default='')
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (Index('uq_order_guest_access_root', 'order_id', unique=True,
+                           postgresql_where=text('token_hash IS NOT NULL AND source_grant_id IS NULL AND revoked_at IS NULL')),)
 
 
 class ConfigSection(Entity, Base):
@@ -251,6 +254,8 @@ class Order(Entity, Base):
     __tablename__ = 'orders'
     principal_id: Mapped[str] = mapped_column(ForeignKey('principals.id'), index=True)
     checkout_account_id: Mapped[str | None] = mapped_column(ForeignKey('customer_accounts.id'))
+    owner_account_id: Mapped[str | None] = mapped_column(ForeignKey('customer_accounts.id'), index=True)
+    guest_access_version: Mapped[int] = mapped_column(Integer, default=1, server_default='1', nullable=False)
     pickup_code: Mapped[str] = mapped_column(String(20), unique=True)
     status: Mapped[str] = mapped_column(String(32), default='PENDING_CONFIRMATION', index=True)
     content_revision: Mapped[int] = mapped_column(Integer, default=1)

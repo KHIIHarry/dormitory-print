@@ -1170,61 +1170,6 @@ export interface paths {
         patch: operations["update_admin_order_api_v1_admin_orders__order_id__patch"];
         trace?: never;
     };
-    "/admin/orders/{order_id}/access-links": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Admin Access Links */
-        get: operations["admin_access_links_api_v1_admin_orders__order_id__access_links_get"];
-        put?: never;
-        /** Admin Issue Access Link */
-        post: operations["admin_issue_access_link_api_v1_admin_orders__order_id__access_links_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/orders/{order_id}/access-links/reissue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Admin Reissue Access Link
-         * @description Explicit lost-credential reissue: revoke the order's prior links first.
-         */
-        post: operations["admin_reissue_access_link_api_v1_admin_orders__order_id__access_links_reissue_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/orders/{order_id}/access-links/{grant_id}/revoke": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Admin Revoke Access Link */
-        post: operations["admin_revoke_access_link_api_v1_admin_orders__order_id__access_links__grant_id__revoke_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/admin/orders/{order_id}/after-sales": {
         parameters: {
             query?: never;
@@ -1273,6 +1218,91 @@ export interface paths {
         put?: never;
         /** Confirm Payment */
         post: operations["confirm_payment_api_v1_admin_orders__order_id__confirm_payment_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{order_id}/guest-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Guest Access */
+        get: operations["admin_guest_access_api_v1_admin_orders__order_id__guest_access_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{order_id}/guest-access/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Close Guest Access */
+        post: operations["admin_close_guest_access_api_v1_admin_orders__order_id__guest_access_close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{order_id}/guest-access/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Admin Open Guest Access */
+        get: operations["admin_open_guest_access_api_v1_admin_orders__order_id__guest_access_open_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{order_id}/guest-access/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Reset Guest Access */
+        post: operations["admin_reset_guest_access_api_v1_admin_orders__order_id__guest_access_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/orders/{order_id}/guest-owner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Bind Guest Owner */
+        post: operations["admin_bind_guest_owner_api_v1_admin_orders__order_id__guest_owner_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2764,40 +2794,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/customer/account/import-order": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Customer Import Order */
-        post: operations["customer_import_order_api_v1_customer_account_import_order_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/customer/account/link-guest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Customer Link Guest */
-        post: operations["customer_link_guest_api_v1_customer_account_link_guest_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/customer/account/notification-preferences": {
         parameters: {
             query?: never;
@@ -3045,6 +3041,40 @@ export interface paths {
         };
         /** Customer Orders */
         get: operations["customer_orders_api_v1_customer_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/customer/orders/{order_id}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Customer Claim Order */
+        post: operations["customer_claim_order_api_v1_customer_orders__order_id__claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/customer/orders/{order_id}/guest-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Customer Guest Access */
+        get: operations["customer_guest_access_api_v1_customer_orders__order_id__guest_access_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3721,73 +3751,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AccessLinkInput */
-        AccessLinkInput: {
-            /** Expiresat */
-            expiresAt?: string | null;
-            /** Reason */
-            reason: string;
-            /**
-             * Reissue
-             * @default false
-             */
-            reissue: boolean;
-            /**
-             * Revokeprevious
-             * @default false
-             */
-            revokePrevious: boolean;
-            /** Scope */
-            scope?: string[] | null;
-            /** Scopes */
-            scopes?: string[] | null;
-        };
-        /** AccessLinkIssued */
-        AccessLinkIssued: {
-            /** Accesstoken */
-            accessToken: string;
-            grant: components["schemas"]["AccessLinkView"];
-            /** Id */
-            id?: string | null;
-            /** Orderid */
-            orderId?: string | null;
-            /** Revokedgrantids */
-            revokedGrantIds?: string[];
-            /**
-             * Status
-             * @default ISSUED
-             */
-            status: string;
-        };
-        /** AccessLinkList */
-        AccessLinkList: {
-            /** Items */
-            items: components["schemas"]["AccessLinkView"][];
-        };
-        /** AccessLinkView */
-        AccessLinkView: {
-            /**
-             * Createdat
-             * Format: date-time
-             */
-            createdAt: string;
-            /** Createdby */
-            createdBy: string;
-            /** Expiresat */
-            expiresAt?: string | null;
-            /** Id */
-            id: string;
-            /** Lastaccessat */
-            lastAccessAt?: string | null;
-            /** Orderid */
-            orderId: string;
-            /** Revokedat */
-            revokedAt?: string | null;
-            /** Scopes */
-            scopes: string[];
-            /** Version */
-            version: number;
-        };
         /** ActualStartInput */
         ActualStartInput: {
             /** Attemptid */
@@ -3811,6 +3774,47 @@ export interface components {
             expectedVersion: number;
             /** Reason */
             reason: string;
+        };
+        /** AdminCaseList */
+        AdminCaseList: {
+            /** Items */
+            items: components["schemas"]["AdminCaseView"][];
+            /** Nextcursor */
+            nextCursor?: string | null;
+        };
+        /** AdminCaseView */
+        AdminCaseView: {
+            /** Adjustmentbasis */
+            adjustmentBasis: string;
+            adminPickup?: components["schemas"]["AdminOrderPickup"] | null;
+            /** Approvedcents */
+            approvedCents?: number | null;
+            /** Createdat */
+            createdAt: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: string;
+            /** Ordercode */
+            orderCode?: string | null;
+            /** Orderid */
+            orderId: string;
+            /** Reason */
+            reason: string;
+            /** Responsibility */
+            responsibility: string;
+            /** Solution */
+            solution: string;
+            /** Source */
+            source: string;
+            /** Status */
+            status: string;
+            /** Suggestedcents */
+            suggestedCents: number;
+            /** Version */
+            version: number;
         };
         /** AdminConfigView */
         AdminConfigView: {
@@ -3929,6 +3933,15 @@ export interface components {
             note?: string | null;
             /** Priority */
             priority?: boolean | null;
+        };
+        /** AdminOrderPickup */
+        AdminOrderPickup: {
+            /** Customerdetailid */
+            customerDetailId?: string | null;
+            /** Pickupcode */
+            pickupCode: string;
+            /** Placedwithaccount */
+            placedWithAccount: boolean;
         };
         /** AffectedItem */
         AffectedItem: {
@@ -4464,6 +4477,7 @@ export interface components {
         };
         /** BindingTaskDTO */
         BindingTaskDTO: {
+            adminPickup?: components["schemas"]["AdminOrderPickup"] | null;
             /**
              * Bindingtype
              * @default NONE
@@ -5027,14 +5041,6 @@ export interface components {
             /** Expectedversion */
             expectedVersion: number;
         };
-        /** ConfirmInput */
-        ConfirmInput: {
-            /**
-             * Confirm
-             * @constant
-             */
-            confirm: true;
-        };
         /** ConfirmPayment */
         ConfirmPayment: {
             /** Contentrevision */
@@ -5262,6 +5268,35 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** CustomerGuestAccessView */
+        CustomerGuestAccessView: {
+            /**
+             * Canclaimondevice
+             * @default false
+             */
+            canClaimOnDevice: boolean;
+            /**
+             * Canopen
+             * @default false
+             */
+            canOpen: boolean;
+            /** Expiresat */
+            expiresAt?: string | null;
+            /** Openedat */
+            openedAt?: string | null;
+            /**
+             * Servernow
+             * Format: date-time
+             */
+            serverNow: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ACTIVE" | "EXPIRED" | "CLOSED" | "NO_LINK";
+            /** Version */
+            version: number;
+        };
         /** CustomerList */
         CustomerList: {
             /** Items */
@@ -5296,6 +5331,7 @@ export interface components {
         };
         /** CustomerOrderSummary */
         CustomerOrderSummary: {
+            adminPickup?: components["schemas"]["AdminOrderPickup"] | null;
             /** Id */
             id: string;
             /** Pickupcode */
@@ -5794,15 +5830,15 @@ export interface components {
             /** Email */
             email: string;
         };
-        /** Envelope[AccessLinkIssued] */
-        Envelope_AccessLinkIssued_: {
-            data: components["schemas"]["AccessLinkIssued"];
+        /** Envelope[AdminCaseList] */
+        Envelope_AdminCaseList_: {
+            data: components["schemas"]["AdminCaseList"];
             /** Requestid */
             requestId: string;
         };
-        /** Envelope[AccessLinkList] */
-        Envelope_AccessLinkList_: {
-            data: components["schemas"]["AccessLinkList"];
+        /** Envelope[AdminCaseView] */
+        Envelope_AdminCaseView_: {
+            data: components["schemas"]["AdminCaseView"];
             /** Requestid */
             requestId: string;
         };
@@ -5986,6 +6022,12 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
+        /** Envelope[CustomerGuestAccessView] */
+        Envelope_CustomerGuestAccessView_: {
+            data: components["schemas"]["CustomerGuestAccessView"];
+            /** Requestid */
+            requestId: string;
+        };
         /** Envelope[CustomerList] */
         Envelope_CustomerList_: {
             data: components["schemas"]["CustomerList"];
@@ -6088,27 +6130,21 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
-        /** Envelope[GrantRevokeResult] */
-        Envelope_GrantRevokeResult_: {
-            data: components["schemas"]["GrantRevokeResult"];
-            /** Requestid */
-            requestId: string;
-        };
         /** Envelope[GrantableAccountList] */
         Envelope_GrantableAccountList_: {
             data: components["schemas"]["GrantableAccountList"];
             /** Requestid */
             requestId: string;
         };
-        /** Envelope[ImportOrderResult] */
-        Envelope_ImportOrderResult_: {
-            data: components["schemas"]["ImportOrderResult"];
+        /** Envelope[GuestAccessOpenView] */
+        Envelope_GuestAccessOpenView_: {
+            data: components["schemas"]["GuestAccessOpenView"];
             /** Requestid */
             requestId: string;
         };
-        /** Envelope[LinkGuestResult] */
-        Envelope_LinkGuestResult_: {
-            data: components["schemas"]["LinkGuestResult"];
+        /** Envelope[GuestAccessView] */
+        Envelope_GuestAccessView_: {
+            data: components["schemas"]["GuestAccessView"];
             /** Requestid */
             requestId: string;
         };
@@ -6175,6 +6211,12 @@ export interface components {
         /** Envelope[OrderList] */
         Envelope_OrderList_: {
             data: components["schemas"]["OrderList"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[OrderOwnerView] */
+        Envelope_OrderOwnerView_: {
+            data: components["schemas"]["OrderOwnerView"];
             /** Requestid */
             requestId: string;
         };
@@ -6733,29 +6775,6 @@ export interface components {
             /** Refundcents */
             refundCents: number;
         };
-        /** GrantRevokeResult */
-        GrantRevokeResult: {
-            /** Affectedgrantids */
-            affectedGrantIds: string[];
-            /** Grantid */
-            grantId: string;
-            /** Id */
-            id?: string | null;
-            /** Orderid */
-            orderId?: string | null;
-            /**
-             * Ownerpreserved
-             * @default true
-             */
-            ownerPreserved: boolean;
-            /** Revoked */
-            revoked: boolean;
-            /**
-             * Status
-             * @default REVOKED
-             */
-            status: string;
-        };
         /** GrantableAccountList */
         GrantableAccountList: {
             /** Items */
@@ -6782,6 +6801,73 @@ export interface components {
              */
             verified: true;
         };
+        /** GuestAccessActionInput */
+        GuestAccessActionInput: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
+            reason: string;
+        };
+        /** GuestAccessOpenView */
+        GuestAccessOpenView: {
+            /** Accesstoken */
+            accessToken: string;
+            /** Orderid */
+            orderId: string;
+        };
+        /** GuestAccessResetInput */
+        GuestAccessResetInput: {
+            /**
+             * Days
+             * @default 14
+             */
+            days: number;
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
+            reason: string;
+        };
+        /** GuestAccessView */
+        GuestAccessView: {
+            /**
+             * Canopen
+             * @default false
+             */
+            canOpen: boolean;
+            /** Expiresat */
+            expiresAt?: string | null;
+            /** Openedat */
+            openedAt?: string | null;
+            /**
+             * Servernow
+             * Format: date-time
+             */
+            serverNow: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ACTIVE" | "EXPIRED" | "CLOSED" | "NO_LINK";
+            /** Version */
+            version: number;
+        };
+        /** GuestOrderClaimInput */
+        GuestOrderClaimInput: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+        };
+        /** GuestOwnerInput */
+        GuestOwnerInput: {
+            /** Accountid */
+            accountId: string;
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
+            reason: string;
+        };
         /** HistoryView */
         HistoryView: {
             /** Description */
@@ -6801,44 +6887,6 @@ export interface components {
             orderId?: string | null;
             /** Pickupcode */
             pickupCode?: string | null;
-        };
-        /** ImportOrderInput */
-        ImportOrderInput: {
-            /**
-             * Confirm
-             * @constant
-             */
-            confirm: true;
-            /** Orderid */
-            orderId: string;
-        };
-        /** ImportOrderResult */
-        ImportOrderResult: {
-            /** Accountordergrantid */
-            accountOrderGrantId: string;
-            /**
-             * Expiresat
-             * Format: date-time
-             */
-            expiresAt: string;
-            /** Id */
-            id?: string | null;
-            /** Orderid */
-            orderId?: string | null;
-            /**
-             * Ownerpreserved
-             * @default true
-             */
-            ownerPreserved: boolean;
-            /** Scopes */
-            scopes: string[];
-            /** Sourcegrantid */
-            sourceGrantId: string;
-            /**
-             * Status
-             * @default IMPORTED
-             */
-            status: string;
         };
         /** LedgerSummaryDTO */
         LedgerSummaryDTO: {
@@ -6891,28 +6939,6 @@ export interface components {
              * @default 0
              */
             unpaidCents: number;
-        };
-        /** LinkGuestResult */
-        LinkGuestResult: {
-            /** Customerprincipalid */
-            customerPrincipalId: string;
-            /** Guestprincipalid */
-            guestPrincipalId: string;
-            /** Id */
-            id?: string | null;
-            /** Rotationcompleted */
-            rotationCompleted: boolean;
-            /**
-             * Status
-             * @default LINKED
-             */
-            status: string;
-            /**
-             * Visiblescope
-             * @default LINKED_ORDERS
-             * @constant
-             */
-            visibleScope: "LINKED_ORDERS";
         };
         /**
          * LocationExceptionApprovalView
@@ -7432,6 +7458,11 @@ export interface components {
             /** Orderid */
             orderId?: string | null;
             /**
+             * Servernow
+             * Format: date-time
+             */
+            serverNow: string;
+            /**
              * Status
              * @default EXCHANGED
              */
@@ -7493,6 +7524,13 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** OrderOwnerView */
+        OrderOwnerView: {
+            /** Orderid */
+            orderId: string;
+            /** Owneraccountid */
+            ownerAccountId: string;
+        };
         /** OrderResult */
         OrderResult: {
             /** Accesstoken */
@@ -7522,10 +7560,16 @@ export interface components {
         OrderView: {
             /** Accesskind */
             accessKind: string;
+            /**
+             * Accountowned
+             * @default false
+             */
+            accountOwned: boolean;
             /** Actualstartedat */
             actualStartedAt?: string | null;
             /** Addressreview */
             addressReview: boolean;
+            adminPickup?: components["schemas"]["AdminOrderPickup"] | null;
             /** Allowedactions */
             allowedActions: string[];
             /** Arrangement */
@@ -7555,6 +7599,10 @@ export interface components {
              * @default
              */
             customerNote: string;
+            /** Customersummary */
+            customerSummary?: {
+                [key: string]: unknown;
+            } | null;
             /** Deliveryassignmentid */
             deliveryAssignmentId?: string | null;
             /** Deliverynotices */
@@ -7567,6 +7615,10 @@ export interface components {
             history: components["schemas"]["HistoryView"][];
             /** Id */
             id: string;
+            /** Identificationprogress */
+            identificationProgress?: {
+                [key: string]: unknown;
+            } | null;
             /** Locationid */
             locationId: string;
             locationSnapshot?: components["schemas"]["OrderLocationSnapshot"] | null;
@@ -7666,6 +7718,7 @@ export interface components {
         };
         /** PackingTaskDTO */
         PackingTaskDTO: {
+            adminPickup?: components["schemas"]["AdminOrderPickup"] | null;
             checklist: components["schemas"]["ProductionChecklistDTO"];
             /**
              * Checklistversion
@@ -8225,6 +8278,7 @@ export interface components {
             active: boolean;
             /** Actualstartedat */
             actualStartedAt?: string | null;
+            adminPickup?: components["schemas"]["AdminOrderPickup"] | null;
             /** Artifactid */
             artifactId: string;
             /**
@@ -10468,8 +10522,6 @@ export interface components {
         StaffSession: components["schemas"]["StaffSessionView"];
         /** @description 前端兼容别名，实际后端 DTO 为 OrderAccessView。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。 */
         OrderAccess: components["schemas"]["OrderAccessView"];
-        /** @description 前端兼容别名，实际后端 DTO 为 AccessLinkView。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。 */
-        AccessLink: components["schemas"]["AccessLinkView"];
         /** @description 前端兼容别名，实际后端 DTO 为 MailConfigDTO。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。 */
         MailConfig: components["schemas"]["MailConfigDTO"];
         /** @description 前端兼容别名，实际后端 DTO 为 MailTemplateDTO。仅用于保持已发布前端类型的导入兼容，不新增后端路由或行为。 */
@@ -10543,7 +10595,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseList_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseList_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
@@ -10583,7 +10635,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseView_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseView_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
@@ -10634,7 +10686,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseView_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -10694,7 +10746,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseView_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -10814,7 +10866,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseView_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -10874,7 +10926,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseView_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -14602,227 +14654,6 @@ export interface operations {
             };
         };
     };
-    admin_access_links_api_v1_admin_orders__order_id__access_links_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                order_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_AccessLinkList_"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    admin_issue_access_link_api_v1_admin_orders__order_id__access_links_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path: {
-                order_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccessLinkInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_AccessLinkIssued_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    admin_reissue_access_link_api_v1_admin_orders__order_id__access_links_reissue_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path: {
-                order_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccessLinkInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_AccessLinkIssued_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    admin_revoke_access_link_api_v1_admin_orders__order_id__access_links__grant_id__revoke_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path: {
-                order_id: string;
-                grant_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReasonInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_GrantRevokeResult_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     admin_create_api_v1_admin_orders__order_id__after_sales_post: {
         parameters: {
             query?: never;
@@ -14851,7 +14682,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_CaseView_"];
+                    "application/json": components["schemas"]["Envelope_AdminCaseView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -14972,6 +14803,266 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_OrderView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_guest_access_api_v1_admin_orders__order_id__guest_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_GuestAccessView_"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_close_guest_access_api_v1_admin_orders__order_id__guest_access_close_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuestAccessActionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_GuestAccessView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_open_guest_access_api_v1_admin_orders__order_id__guest_access_open_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_GuestAccessOpenView_"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_reset_guest_access_api_v1_admin_orders__order_id__guest_access_reset_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuestAccessResetInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_GuestAccessView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    admin_bind_guest_owner_api_v1_admin_orders__order_id__guest_owner_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuestOwnerInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderOwnerView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -19965,122 +20056,6 @@ export interface operations {
             };
         };
     };
-    customer_import_order_api_v1_customer_account_import_order_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImportOrderInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_ImportOrderResult_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    customer_link_guest_api_v1_customer_account_link_guest_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
-                "Idempotency-Key": string;
-                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
-                "X-CSRF-Token": string;
-                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
-                Origin?: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConfirmInput"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Envelope_LinkGuestResult_"];
-                };
-            };
-            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     customer_notification_preferences_api_v1_customer_account_notification_preferences_patch: {
         parameters: {
             query?: never;
@@ -20821,6 +20796,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_OrderList_"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    customer_claim_order_api_v1_customer_orders__order_id__claim_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。 */
+                "Idempotency-Key": string;
+                /** @description 必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。 */
+                "X-CSRF-Token": string;
+                /** @description 浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。 */
+                Origin?: string;
+            };
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuestOrderClaimInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OrderOwnerView_"];
+                };
+            };
+            /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    customer_guest_access_api_v1_customer_orders__order_id__guest_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CustomerGuestAccessView_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */

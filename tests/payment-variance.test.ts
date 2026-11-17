@@ -29,14 +29,15 @@ it("keeps payment notes private in demo owner and shared-link projections", asyn
     },
   } as unknown as Order;
   db.orders.set(order.id, order);
+  db.staff = { id: "admin", role: "ADMIN", capabilities: ["*"] } as any;
+  await demoRequest(`/admin/orders/${order.id}/guest-access/reset`, {
+    method: "POST", body: { expectedVersion: 1, reason: "测试" },
+  });
   const owner = visibleDemoOrders("customer", db.customer, null)[0];
   expect(owner.settlement?.note).toBeUndefined();
   syncDemoOrders([owner]);
   expect(db.orders.get(order.id)?.settlement?.note).toBe("内部备注");
-  const link = (await demoRequest(`/admin/orders/${order.id}/access-links`, {
-    method: "POST",
-    body: { reason: "测试" },
-  })) as any;
+  const link = (await demoRequest(`/admin/orders/${order.id}/guest-access/open`)) as any;
   const ownerExchange = (await demoRequest("/order-access/exchange", {
     method: "POST",
     body: { orderId: order.id, accessToken: link.accessToken },

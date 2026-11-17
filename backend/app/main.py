@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException
 
 from . import db as database
 from .core import (Actor, DomainError, _result_reference, actor_key, canonical_hash, csrf_value,
-                   lookup_idempotency, ok, request_id_var, save_idempotency, unseal, valid_csrf)
+                   lookup_idempotency, ok, public_result_reference, request_id_var, save_idempotency, unseal, valid_csrf, validate_order_replay)
 from .db import SessionLocal
 from .settings import get_settings
 
@@ -148,6 +148,7 @@ def create_app(modules=None):
                         scope=actor_key(actor,request,payload)
             if cached:
                 data=unseal(cached.encrypted_response)
+                await _database_call(_security_pool,validate_order_replay,session,actor,request,payload,cached,data)
                 response=JSONResponse(data['body'],status_code=cached.status_code)
                 for name,value in data.get('headers',[]):
                     if name.lower()=='set-cookie':
@@ -218,7 +219,7 @@ def create_app(modules=None):
             IdempotencyRecord.route==path,IdempotencyRecord.key==key))
         if not record:
             raise DomainError('NOT_FOUND','未找到当前身份的操作结果',404)
-        return ok({'status':'COMPLETED','statusCode':record.status_code,'result':record.result_ref})
+        return ok({'status':'COMPLETED','statusCode':record.status_code,'result':public_result_reference(record.result_ref)})
 
     names=modules if modules is not None else ['config','auth','growth','mail','media','commerce','production','delivery','after_sales','exports','maintenance','benefits','payroll','supplementary','finance']
     for name in names:

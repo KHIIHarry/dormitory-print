@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   ArrowRight,
   ChevronDown,
@@ -31,6 +31,16 @@ export function Help() {
   const configState = resources.config;
   const configReady = DEMO || !!configState?.hasData;
   const [open, setOpen] = useState<number | null>(0);
+  const contact = useRef<HTMLElement>(null);
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== "#contact-admin") return;
+    const frame = requestAnimationFrame(() => {
+      contact.current?.scrollIntoView({ block: "center" });
+      contact.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [hash, configReady]);
   const faqs = [
     [
       "哪些文件可以打印？",
@@ -128,22 +138,34 @@ export function Help() {
               ))}
             </div>
           </Panel>
-          <Panel title="还需要帮助？">
-            <p className="muted">
-              联系管理员时，提供订单提取码，更方便我们帮你核查。
-            </p>
-            {!configReady ? (
+          <section
+            id="contact-admin"
+            tabIndex={-1}
+            ref={contact}
+            aria-label="联系管理员"
+          >
+            <Panel title="还需要帮助？">
               <p className="muted">
-                {configState?.error
-                  ? "管理员联系方式暂时无法读取"
-                  : "正在读取管理员联系方式…"}
+                联系管理员时，提供订单提取码，更方便我们帮你核查。
               </p>
-            ) : data.config.wechat ? (
-              <CopyButton text={data.config.wechat} label="复制管理员微信号" />
-            ) : (
-              <Notice>管理员联系方式尚未配置，请通过校园服务渠道联系。</Notice>
-            )}
-          </Panel>
+              {!configReady ? (
+                <p className="muted">
+                  {configState?.error
+                    ? "管理员联系方式暂时无法读取"
+                    : "正在读取管理员联系方式…"}
+                </p>
+              ) : data.config.wechat ? (
+                <CopyButton
+                  text={data.config.wechat}
+                  label="复制管理员微信号"
+                />
+              ) : (
+                <Notice>
+                  管理员联系方式尚未配置，请通过校园服务渠道联系。
+                </Notice>
+              )}
+            </Panel>
+          </section>
         </aside>
       </div>
     </main>

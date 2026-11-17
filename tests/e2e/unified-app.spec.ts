@@ -487,8 +487,6 @@ test.describe("one customer login (real API contract, not backend acceptance)", 
     await page.locator('input[type="email"]').fill("student@example.com");
     await page.locator('input[type="password"]').fill("password123");
     await page.getByRole("button", { name: "登录", exact: true }).click();
-    await expect(page.getByText("账号已就绪")).toBeVisible();
-    await page.getByRole("button", { name: "暂不关联" }).click();
     await expect(page).toHaveURL(`${base}/u/account`);
 
     const portal = page.locator(".staff-portal");

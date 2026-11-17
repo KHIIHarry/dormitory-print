@@ -1,3 +1,4 @@
+import type { AdminOrderPickup } from "../lib/types";
 import { SERVICE_PRICES } from "../lib/service-prices";
 import { validateIdentificationWebsite } from "../lib/link-qr";
 import type { SlotBrief } from "./customer";
@@ -300,6 +301,7 @@ export type AfterSaleStatus =
   | string;
 
 export type AfterSaleCase = {
+  adminPickup?: AdminOrderPickup | null;
   id: string;
   orderId: string;
   version: number;
@@ -450,6 +452,7 @@ export type ReprintRecordView = {
 };
 
 export type PrintTaskView = {
+  adminPickup?: AdminOrderPickup | null;
   id: string;
   orderId: string;
   pickupCode: string;
@@ -488,6 +491,7 @@ export type PrintQueueView = {
 };
 
 export type BindingTaskView = {
+  adminPickup?: AdminOrderPickup | null;
   id: string;
   orderId: string;
   pickupCode: string;
@@ -513,6 +517,7 @@ export type CheckListItemView = {
 };
 
 export type PackingTaskView = {
+  adminPickup?: AdminOrderPickup | null;
   id: string;
   orderId: string;
   pickupCode: string;
@@ -1201,4 +1206,22 @@ export function afterSaleStatusLabel(status: string): string {
       } as Record<string, string>
     )[status] || status
   );
+}
+
+export type GuestAccessView = {
+  status: "ACTIVE" | "EXPIRED" | "CLOSED" | "NO_LINK";
+  version: number;
+  openedAt: string | null;
+  expiresAt: string | null;
+  serverNow: string;
+  canOpen: boolean;
+};
+
+export function guestAccessActionPayload(view: GuestAccessView, reason: string, days?: string) {
+  if (!reason.trim()) throw new Error("请填写操作原因");
+  if (!Number.isSafeInteger(view.version) || view.version < 1) throw new Error("访问状态已变化，请刷新后重试");
+  if (days === undefined) return { expectedVersion: view.version, reason: reason.trim() };
+  const value = Number(days);
+  if (!/^\d+$/.test(days) || !Number.isSafeInteger(value) || value < 1 || value > 14) throw new Error("有效天数必须为 1–14 的整数");
+  return { expectedVersion: view.version, reason: reason.trim(), days: value };
 }

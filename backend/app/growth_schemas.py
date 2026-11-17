@@ -10,7 +10,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import AwareDatetime, Field as PField, model_validator
 
-from .core import DTO
+from .core import AdminOrderPickup, DTO
 
 SelectionMode = Literal['AUTO', 'NO_COUPON', 'SPECIFIC_COUPON']
 PromotionType = Literal['NONE', 'COUPON', 'VOLUME_TIER', 'STAFF_GRADE']
@@ -416,6 +416,7 @@ class CustomerAccountDTO(DTO):
 
 class CustomerOrderSummary(DTO):
     id: str
+    admin_pickup: AdminOrderPickup | None = None
     pickup_code: str
     total_cents: int
     status: str
