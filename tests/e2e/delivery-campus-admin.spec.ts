@@ -7,6 +7,7 @@ async function fixture(
     | "batches"
     | "proposals"
     | "paid"
+    | "paid-late"
     | "detail"
     | "packing"
     | "binding",
@@ -78,9 +79,14 @@ async function fixture(
       const campuses=[{id:'east',name:'东校区',selectionEnabled:true},{id:'west',name:'西校区',selectionEnabled:true}];
       const slots=[{id:'e1',campusId:'east',campusName:'东校区',name:'东时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1},{id:'w1',campusId:'west',campusName:'西校区',name:'西时段',date:'2030-11-01',start:'12:00',end:'13:00',enabled:true,capacity:30,version:1}];
       window.fixture={calls:[],campuses,slots,orders:[{id:'order',pickupCode:'P1',locationId:'building',status:'PENDING_CONFIRMATION',version:1}],data:{campuses:[],slots,buildings:[],orders:[],staff:[],batches:[{id:'legacy',name:'旧空批次',campusId:'old',campusName:'停用校区',status:'PLANNED',date:'2030-11-01',time:'12:00',orderIds:[],version:1}]}};
-      if ('${view}' === 'paid') window.fixture.orders=[{id:'paid-order',pickupCode:'PAID1',locationId:'building',status:'PENDING_PRINT',version:1,confirmedSlotId:'e1',arrangement:{effective:{id:'e1',name:'东时段',startsAt:'2030-11-01T05:30:00Z',endsAt:'2030-11-01T06:30:00Z'}}}];
+      if ('${view}'.startsWith('paid')) window.fixture.orders=[{id:'paid-order',pickupCode:'PAID1',locationId:'building',status:'PENDING_PRINT',version:1,confirmedSlotId:'e1',arrangement:{effective:{id:'e1',name:'东时段',startsAt:'2030-11-01T05:30:00Z',endsAt:'2030-11-01T06:30:00Z'}}}];
+      if ('${view}' === 'paid-late') slots.push(
+        {...slots[0],id:'earlier',name:'午间配送',start:'11:15',end:'11:35',selectable:false,lateRescheduleSelectable:true},
+        {...slots[0],id:'started',name:'已经出发',selectable:false,lateRescheduleSelectable:false},
+        {...slots[1],id:'other-campus',selectable:false,lateRescheduleSelectable:true},
+      );
       if ('${view}' === 'detail') {window.fixture.data.batches=[{id:'source',name:'测试批次',campusId:'east',campusName:'东校区',status:'PLANNED',date:'2030-11-01',time:'12:00 – 13:00',orderIds:['o1'],version:1,allowedActions:['ASSIGN_COURIER']}];window.fixture.data.orders=[{id:'o1',pickupCode:'P1',locationId:'building',status:'PAID',packingStatus:'PACKED'}];window.fixture.data.buildings=[{id:'building',name:'楼栋',campusId:'east'}];}
-      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view === "paid" ? "React.createElement(PaidArrangementProposals,{slots,buildings:[{id:'building',campusId:'east'}]})" : view === "packing" ? "React.createElement(PackingCenter)" : view === "binding" ? "React.createElement(BindingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
+      const component=${view === "slots" ? "React.createElement(Slots)" : view === "batches" ? "React.createElement(Batches)" : view.startsWith("paid") ? "React.createElement(PaidArrangementProposals,{slots,buildings:[{id:'building',campusId:'east'}]})" : view === "packing" ? "React.createElement(PackingCenter)" : view === "binding" ? "React.createElement(BindingCenter)" : view === "detail" ? "React.createElement(MemoryRouter,{initialEntries:['/admin/batches/source']},React.createElement(Routes,null,React.createElement(Route,{path:'/admin/batches/:id',element:React.createElement(BatchDetail)})))" : "React.createElement(SlotProposals,{slots:[{...slots[0],cutoffAt:new Date(Date.now()+60000).toISOString()}],buildings:[{id:'building',campusId:'east'}]})"};
       ReactDOM.createRoot(document.getElementById('root')).render('${view}'==='detail' ? component : React.createElement(BrowserRouter,null,component));
     </script>`,
     }),
@@ -306,6 +312,43 @@ test("slot change submission rechecks an elapsed cutoff", async ({ page }) => {
   await page.clock.fastForward(61000);
   await page.getByRole("button", { name: "保存配送时段" }).click();
   await expect(page.getByText("请选择该订单校区可预约的时段")).toBeVisible();
+});
+
+test("已结算订单可调到同校区已截单但未出发的批次", async ({ page }, info) => {
+  await fixture(page, "paid-late");
+  await page.getByRole("button", { name: "调整配送时段" }).click();
+  const dialog = page.getByRole("dialog");
+  const slot = dialog.getByLabel("配送时段", { exact: true });
+  await expect(slot.locator("option")).toHaveCount(2);
+  await slot.selectOption("earlier");
+  await expect(dialog.getByText("已发布的批次会邮件通知配送员。", { exact: false })).toBeVisible();
+  const save = dialog.getByRole("button", { name: "保存配送时段" });
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const field = await slot.evaluate((select) => {
+      const bounds = select.getBoundingClientRect();
+      const parent = select.parentElement!.getBoundingClientRect();
+      return {
+        fits: bounds.left >= parent.left && bounds.right <= parent.right + 1,
+        height: bounds.height,
+        fontSize: parseFloat(getComputedStyle(select).fontSize),
+      };
+    });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    expect(field.fits).toBe(true);
+    expect(field.height).toBeGreaterThanOrEqual(44);
+    if (width < 768) expect(field.fontSize).toBeGreaterThanOrEqual(16);
+    if (width === 390 || width === 1440) {
+      await dialog.screenshot({ path: info.outputPath(`late-slot-change-${width}.png`) });
+    }
+  }
+  await dialog.getByLabel("调整原因").fill("微信确认提前配送");
+  await save.click();
+  await expect(dialog).toBeHidden();
+  expect(await page.evaluate(() => (window as any).fixture.calls)).toContainEqual({
+    path: "/admin/orders/paid-order/slot-change",
+    body: { expectedVersion: 1, slotId: "earlier", reason: "微信确认提前配送" },
+  });
 });
 
 test("a rejected slot change preserves the form and a successful retry closes it", async ({

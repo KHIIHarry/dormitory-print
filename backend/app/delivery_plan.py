@@ -652,7 +652,29 @@ def persist_seal_facts(db, slot: DeliverySlot, actor, reason: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _target_slot_problem(db, order, slot, now=None) -> tuple[str, str] | None:
+PRESTART_BATCH_STATUSES = ('PLANNED', 'POSTPONED', 'PUBLISHED')
+
+
+def _closed_slot_batch_status(db, slot: DeliverySlot, acceptance_status: str) -> str | None:
+    if acceptance_status not in (CUTOFF, SEALED) or not slot.enabled:
+        return None
+    return db.scalar(select(DeliveryBatch.status).join(DeliveryGroup).where(
+        DeliveryGroup.slot_id == slot.id,
+        DeliveryGroup.campus_id == slot.campus_id,
+        DeliveryBatch.slot_id == slot.id,
+        DeliveryBatch.campus_id == slot.campus_id,
+        DeliveryBatch.is_regular.is_(True),
+        DeliveryBatch.deleted_at.is_(None),
+    ))
+
+
+def late_reschedule_selectable(db, slot: DeliverySlot, acceptance_status: str) -> bool:
+    """An existing batch can receive a paid admin move after closing bookings."""
+    return (slot.occupied < slot.capacity and
+            _closed_slot_batch_status(db, slot, acceptance_status) in PRESTART_BATCH_STATUSES)
+
+
+def _target_slot_problem(db, order, slot, now=None, *, admin_change=False) -> tuple[str, str] | None:
     """Return (code, message) when *slot* cannot receive this paid order."""
     now = now or utcnow()
     if slot is None or slot.id is None:
@@ -661,13 +683,18 @@ def _target_slot_problem(db, order, slot, now=None) -> tuple[str, str] | None:
         return 'SLOT_ARCHIVED', '配送时段已归档'
     if slot.open_at is None or slot.cutoff_at is None:
         return 'SLOT_CONFIG_MISSING', '配送时段尚未补齐接单规则'
-    if slot.sealed_at is not None:
+    state = slot_acceptance(db, slot, now)
+    batch_status = _closed_slot_batch_status(db, slot, state['status']) if admin_change else None
+    late_change = batch_status in PRESTART_BATCH_STATUSES
+    if batch_status is not None and not late_change:
+        return 'BATCH_NOT_ACCEPTING', '目标批次当前不能加入订单，请刷新后重新选择'
+    if slot.sealed_at is not None and not late_change:
         return 'SLOT_SEALED', '配送时段已封批'
     if not slot.enabled:
         return 'SLOT_DISABLED', '配送时段已停用'
-    if now >= slot.cutoff_at:
+    if now >= slot.cutoff_at and not late_change:
         return 'SLOT_CUTOFF', '配送时段已截单'
-    if now >= slot.starts_at:
+    if now >= slot.starts_at and not late_change:
         return 'SLOT_DEPARTED', '配送时段已开始'
     if slot.occupied >= slot.capacity:
         return 'SLOT_FULL', '配送时段已满'
@@ -680,8 +707,7 @@ def _target_slot_problem(db, order, slot, now=None) -> tuple[str, str] | None:
         return 'SLOT_CAMPUS_MISMATCH', '订单与时段校区不一致'
     if slot.id == order.confirmed_slot_id:
         return 'SLOT_UNCHANGED', '目标时段与原安排相同'
-    state = slot_acceptance(db, slot, now)
-    if state['status'] != OPEN:
+    if state['status'] != OPEN and not late_change:
         return SLOT_ERRORS[state['status']]
     return None
 
@@ -797,7 +823,7 @@ def apply_reschedule(db, actor, order: Order, slot_id: str, reason: str, *,
                     for sid in sorted({slot_id, source_id} - {None})}
     target = locked_slots[slot_id]
     source = locked_slots.get(source_id) if source_id and source_id != slot_id else None
-    problem = _target_slot_problem(db, order, target)
+    problem = _target_slot_problem(db, order, target, admin_change=proposal is None)
     if problem is not None:
         code, message = problem
         # The target may have been reserved after proposal; keep the pending
@@ -832,9 +858,11 @@ def apply_reschedule(db, actor, order: Order, slot_id: str, reason: str, *,
     try:
         with db.begin_nested():
             group = group_for_slot_campus(db, target, campus)
-            target_batch = regular_batch_for_group(db, group, target, campus)
-            if target_batch.status not in ('PLANNED', 'POSTPONED'):
-                raise DomainError('BATCH_NOT_ACCEPTING', '目标批次已发布或出发，不能加入', 409)
+            regular = regular_batch_for_group(db, group, target, campus)
+            target_batch = lock(db, DeliveryBatch, regular.id)
+            allowed = PRESTART_BATCH_STATUSES if proposal is None else ('PLANNED', 'POSTPONED')
+            if target_batch.deleted_at is not None or target_batch.status not in allowed:
+                raise DomainError('BATCH_NOT_ACCEPTING', '目标批次当前不能加入订单，请刷新后重新选择', 409)
             if assignment is not None:
                 assignment.active = False
                 assignment.status = 'CANCELLED'
@@ -853,6 +881,7 @@ def apply_reschedule(db, actor, order: Order, slot_id: str, reason: str, *,
                       'source': 'RESCHEDULE',
                       'locationSnapshot': (assignment.data or {}).get('locationSnapshot')
                       if assignment is not None else None}))
+            touch(target_batch)
             db.flush()
     except DomainError:
         raise
@@ -901,5 +930,7 @@ def apply_reschedule(db, actor, order: Order, slot_id: str, reason: str, *,
     order.data = {**data, 'lastArrangementChange': {
         'changeId': applied.id, 'kind': applied.kind, 'reason': reason,
         'at': utcnow().isoformat(), 'batchId': target_batch.id, 'batchName': target_batch.name}}
-    from .growth import notify_delivery_change
+    from .growth import notify_courier_dispatch, notify_delivery_change
     notify_delivery_change(db, order, applied)
+    if target_batch.status == 'PUBLISHED':
+        notify_courier_dispatch(db, target_batch)

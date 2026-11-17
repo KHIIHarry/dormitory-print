@@ -62,21 +62,20 @@ export function OrderSlotChangeForm({
       ? order.slotProposal.slotId
       : order.requestedSlotId || order.slotId);
   const canKeep = !!(legacy && currentId);
-  const available = slotsForCampus(slots, campusId).filter(
-    (slot) => slot.id !== currentId && slotCurrentlySelectable(slot),
-  );
-  const unavailableSelection =
-    slotId &&
-    slotId !== currentId &&
-    !available.some((slot) => slot.id === slotId);
+  const canJoinClosedBatch = (slot: Slot) =>
+    !!order.confirmedSlotId && slot.lateRescheduleSelectable === true;
+  const canSelect = (slot: Slot) =>
+    slot.id !== currentId &&
+    (slotCurrentlySelectable(slot) || canJoinClosedBatch(slot));
+  const available = slotsForCampus(slots, campusId).filter(canSelect);
+  const selection = available.find((slot) => slot.id === slotId);
+  const unavailableSelection = slotId && slotId !== currentId && !selection;
 
   const submit = async () => {
     if (busy) return;
     if (
       !(canKeep && slotId === currentId) &&
-      !available.some(
-        (slot) => slot.id === slotId && slotCurrentlySelectable(slot),
-      )
+      !(selection && canSelect(selection))
     ) {
       setError("请选择该订单校区可预约的时段");
       return;
@@ -120,7 +119,14 @@ export function OrderSlotChangeForm({
       {legacy && (
         <Notice>有一条旧改期建议。请核对微信沟通结果后选择时段保存。</Notice>
       )}
-      <Field label="配送时段">
+      <Field
+        label="配送时段"
+        hint={
+          selection && canJoinClosedBatch(selection)
+            ? "保存后会更新配送名单。已发布的批次会邮件通知配送员。"
+            : undefined
+        }
+      >
         <select
           value={slotId}
           onChange={(event) => setSlotId(event.target.value)}
@@ -130,7 +136,7 @@ export function OrderSlotChangeForm({
           {unavailableSelection && (
             <option value={slotId} disabled>
               {slots.find((slot) => slot.id === slotId)?.name || "所选时段"}
-              （当前不可预约）
+              （当前不可选）
             </option>
           )}
           {available.map((slot) => (
@@ -141,7 +147,7 @@ export function OrderSlotChangeForm({
         </select>
       </Field>
       {!available.length && !canKeep && (
-        <p className="form-hint">该订单校区暂无其他可预约时段。</p>
+        <p className="form-hint">该订单校区暂无其他可选时段。</p>
       )}
       <Field label="调整原因">
         <textarea

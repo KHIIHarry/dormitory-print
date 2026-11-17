@@ -7,8 +7,10 @@ from sqlalchemy import func, select
 from app.core import Actor, DomainError
 from app.models import (BusinessException, DeliveryAssignment, DeliveryBatch,
                         DeliveryChange, DeliverySlot, Order, Receipt, utcnow)
+from test_delivery_batch_audit import another_order, preview
 from test_delivery_closed_loop import (APP_MODULES, admin_client_actor, configured_slot,
                                       make_world, settle, submit)
+from test_mail import seed_mail_config, settings_allow_local, smtp_server
 
 
 def paid_order(db, admin_client):
@@ -463,6 +465,118 @@ def test_direct_change_uses_target_batch_eta_and_cancels_empty_published_source(
     arrangement = response.json()['data']['arrangement']
     assert arrangement['effective']['startsAt'] == batch.starts_at.isoformat()
     assert arrangement['confirmed']['startsAt'] == target.starts_at.isoformat()
+
+
+@pytest.mark.parametrize('target_state', [
+    'SEALED', 'CUTOFF', 'PAST_TIME', 'DELIVERING', 'FULL', 'NO_BATCH',
+])
+def test_admin_late_reschedule_requires_an_unstarted_batch_with_room(
+        db, admin_client, api, staff_factory, smtp_server, settings_allow_local, target_state):
+    from app.core import unseal
+    from app.delivery_plan import group_for_slot_campus, regular_batch_for_group
+    from app.mail import process_email_job
+    from app.models import EmailJob
+
+    world, order, _ = paid_order(db, admin_client)
+    courier = staff_factory(role='COURIER', email='late-add@example.invalid', email_verified=True)
+    smtp, port = smtp_server
+    seed_mail_config(db, port)
+    target = configured_slot(db, offset_hours=-0.25 if target_state == 'PAST_TIME' else 12,
+                             campus=world.campus,
+                             cutoff_offset=1 if target_state == 'SEALED' else -0.5)
+    if target_state == 'SEALED':
+        target.sealed_at = utcnow()
+    if target_state != 'NO_BATCH':
+        group = group_for_slot_campus(db, target, world.campus)
+        batch = regular_batch_for_group(db, group, target, world.campus)
+        batch.status = 'DELIVERING' if target_state == 'DELIVERING' else 'PUBLISHED'
+        batch.courier_id = courier.id
+        member = another_order(db, world, confirmed_slot_id=target.id,
+                               status='READY_FOR_DELIVERY', settlement_kind='CASH_MANUAL')
+        db.add(DeliveryAssignment(order_id=member.id, batch_id=batch.id, courier_id=courier.id,
+                                  status='STARTED' if target_state == 'DELIVERING' else 'PLANNED'))
+        target.occupied = 1
+        if target_state == 'FULL':
+            target.capacity = 1
+        previous_version = batch.version
+    source_assignment = assignment_for(db, order)
+    db.commit()
+
+    slots = admin_client.get('/api/v1/admin/slots').json()['data']['items']
+    slot_view = next(slot for slot in slots if slot['id'] == target.id)
+    assert slot_view['selectable'] is False
+    public_slots = admin_client.get('/api/v1/public/slots').json()['data']['items']
+    assert target.id not in {slot['id'] for slot in public_slots}
+    change = {'expectedVersion': order.version, 'slotId': target.id, 'reason': '微信确认提前配送'}
+    path = f'/admin/orders/{order.id}/slot-change'
+    response = api(admin_client, path, change, key='late-reschedule')
+    db.expire_all()
+
+    if target_state in ('SEALED', 'CUTOFF', 'PAST_TIME'):
+        assert response.status_code == 200, response.text
+        assert api(admin_client, path, change, key='late-reschedule').status_code == 200
+        assert slot_view['lateRescheduleSelectable'] is True
+        assert order.confirmed_slot_id == target.id
+        assert not source_assignment.active
+        assert assignment_for(db, order).batch_id == batch.id
+        assert assignment_for(db, order).courier_id == courier.id
+        assert batch.status == 'PUBLISHED' and batch.version == previous_version + 1
+        assert target.occupied == 2 and world.slot.occupied == 0
+        jobs = list(db.scalars(select(EmailJob).where(EmailJob.template_key == 'COURIER_DISPATCH')))
+        job, = jobs
+        payload = unseal(job.protected_payload)
+        assert payload['to'] == courier.email and '共 2 单' in payload['textBody']
+        assert f'/courier/batches/{batch.id}' in payload['textBody']
+        process_email_job(db, job.id)
+        assert job.status == 'SMTP_ACCEPTED'
+        assert smtp.messages[0]['to'] == [courier.email]
+        stale_start = api(admin_client, f'/admin/batches/{batch.id}/start', {
+            'expectedVersion': previous_version})
+        assert stale_start.json()['error']['code'] == 'VERSION_CONFLICT'
+        fresh_start = api(admin_client, f'/admin/batches/{batch.id}/start', {
+            'expectedVersion': batch.version})
+        assert fresh_start.status_code == 409
+        blockers = fresh_start.json()['error']['details']['blockers']
+        assert any(item['code'] == 'PACKING_REQUIRED' and item['relatedId'] == order.id
+                   for item in blockers)
+    else:
+        assert response.status_code == 409, response.text
+        assert response.json()['error']['code'] == {
+            'DELIVERING': 'BATCH_NOT_ACCEPTING', 'FULL': 'SLOT_FULL', 'NO_BATCH': 'SLOT_CUTOFF',
+        }[target_state]
+        assert slot_view['lateRescheduleSelectable'] is False
+        assert order.confirmed_slot_id == world.slot.id and source_assignment.active
+        assert db.scalar(select(func.count()).select_from(EmailJob)) == 0
+
+
+def test_add_to_published_batch_notifies_the_assigned_courier(
+        db, admin_client, api, staff_factory, smtp_server, settings_allow_local):
+    from app.core import unseal
+    from app.models import EmailJob
+
+    world, member, _ = paid_order(db, admin_client)
+    courier = staff_factory(role='COURIER', email='batch-add@example.invalid', email_verified=True)
+    seed_mail_config(db, smtp_server[1])
+    batch = db.get(DeliveryBatch, assignment_for(db, member).batch_id)
+    batch.status = 'PUBLISHED'
+    batch.courier_id = courier.id
+    assignment_for(db, member).courier_id = courier.id
+    order = another_order(db, world, confirmed_slot_id=world.slot.id,
+                          status='READY_FOR_DELIVERY', settlement_kind='CASH_MANUAL',
+                          cash_received_cents=10)
+    world.slot.occupied = 2
+    world.slot.cutoff_at = utcnow() - timedelta(minutes=1)
+    db.commit()
+
+    result = preview(api, admin_client, batch, 'ADD', orderIds=[order.id])
+    plan = result.json()['data']
+    assert not plan['blockers']
+    committed = api(admin_client, '/admin/batch-operations/commit', {'planId': plan['planId']})
+    assert committed.status_code == 200, committed.text
+    assert assignment_for(db, order).batch_id == batch.id
+    job = db.scalars(select(EmailJob).where(EmailJob.template_key == 'COURIER_DISPATCH')).one()
+    payload = unseal(job.protected_payload)
+    assert payload['to'] == courier.email and '共 2 单' in payload['textBody']
 
 
 def test_direct_change_rejects_open_delivery_exception_without_moving_facts(db, admin_client, api):

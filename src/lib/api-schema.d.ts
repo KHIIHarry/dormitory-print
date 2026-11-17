@@ -9455,6 +9455,11 @@ export interface components {
             endsAt: string;
             /** Id */
             id: string;
+            /**
+             * Laterescheduleselectable
+             * @default false
+             */
+            lateRescheduleSelectable: boolean;
             /** Name */
             name: string;
             /** Occupied */

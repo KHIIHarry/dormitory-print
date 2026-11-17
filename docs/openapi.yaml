@@ -16496,6 +16496,11 @@
             "title": "Id",
             "type": "string"
           },
+          "lateRescheduleSelectable": {
+            "default": false,
+            "title": "Laterescheduleselectable",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"

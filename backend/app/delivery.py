@@ -51,6 +51,7 @@ from .delivery_plan import (
     delivery_task_conditions,
     empty_auto_batch,
     group_for_slot_campus,
+    late_reschedule_selectable,
     operational_slot_batches,
     pending_slot_orders,
     persist_seal_facts,
@@ -290,6 +291,7 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
         'enabled': slot.enabled,
         'autoPublish': admin and (slot.data or {}).get('autoPublish') is True,
         'selectable': state['selectable'],
+        'lateRescheduleSelectable': admin and late_reschedule_selectable(db, slot, state['status']),
         'acceptanceStatus': state['status'],
         'blockers': state['blockers'],
         'pendingApplicationCount': pending,
@@ -2403,6 +2405,12 @@ def batch_operation_commit(payload: BatchOperationCommit, db=Depends(get_db),
                        if order_id in locked_orders}
     affected = _execute_operation(db, actor, operation.action, operation, source_batches,
                                   target_batch, selected_orders, reason)
+    if operation.action == 'ADD' and target_batch is None:
+        target_batch = next(iter(source_batches.values()))
+    if (operation.action in ('ADD', 'TRANSFER', 'MERGE') and selected_orders
+            and target_batch is not None and target_batch.status == 'PUBLISHED'):
+        from .growth import notify_courier_dispatch
+        notify_courier_dispatch(db, target_batch)
     plan.committed_at = utcnow()
     plan.data = {**data, 'committedBy': actor.id,
                  'committedAt': plan.committed_at.isoformat()}

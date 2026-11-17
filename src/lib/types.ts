@@ -199,6 +199,7 @@ export type Slot = {
   sealedAt?: string | null;
   acceptanceStatus?: string;
   selectable?: boolean;
+  lateRescheduleSelectable?: boolean;
   occupied?: number;
   remaining?: number;
   batchCount?: number;

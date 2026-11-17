@@ -666,6 +666,7 @@ class SlotView(DTO):
     enabled: bool
     auto_publish: bool = False
     selectable: bool
+    late_reschedule_selectable: bool = False
     acceptance_status: str = 'OPEN'
     blockers: list[BlockerView] = Field(default_factory=list)
     pending_application_count: int = 0
