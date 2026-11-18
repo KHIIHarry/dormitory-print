@@ -31,6 +31,7 @@ manifest / hashes ──┘              │
 - 远端仓库必须是专用仓库；脚本不做跨应用共享仓库的静默 prune。
 - 未配置 `RESTIC_REPOSITORY`/`RESTIC_PASSWORD(_FILE)` 时，脚本在任何数据库/文件操作前以非零退出并输出 `BACKUP_UNAVAILABLE`，不写 `last-success.json`，不打印成功。
 - `last-success.json` 记录最近成功快照，可用于监控 RPO；`last-attempt.json` 记录最近失败，备份容器 healthcheck 会因超过 3 小时无成功而变为 unhealthy。远端不可达时不会伪造成功。
+- 每次 `backup.sh` 启动时，在获取存储协调文件锁之前执行一次 `restic unlock`，只清理 restic 判定为 stale 的仓库锁；活跃锁保留，绝不使用 `--remove-all`。上传或 prune 遇到锁竞争时清理一次 stale 锁，并带 `--retry-lock` 有界重试；详见 2.2。
 
 ### 2.1 保留期轮换（真实命令）
 
@@ -44,7 +45,28 @@ restic forget --group-by host --tag dormprint --keep-hourly 168 --keep-daily 30 
 
 含义：保留最近 168 个小时恢复点（7 天）+ 最近 30 天中每天最后一个恢复点。该命令由 `backup.sh --mode daily` 实际执行；`--prune` 真正删除仓库中不再被保留策略引用的数据。`restic snapshots` 可核对实际保留结果。仓库必须专用，避免误删其他系统快照。
 
-### 2.2 容量告警
+### 2.2 restic 仓库锁与恢复
+
+restic 在 backup/forget/prune 过程中会在仓库内创建加密 lock object。它与 3.2 的存储协调文件锁不是同一把锁：文件锁保护本地卷的删除/扫描竞态，restic 锁保护远端仓库操作。进程崩溃、容器被 `SIGKILL` 或网络中断后，restic 锁不会随进程消失；在超过 restic 的 30 分钟 stale 阈值前，后续 `forget --prune` 会收到 `repository is already locked` 并以 11 退出，而 hourly backup 可能仍成功。因此只看 `last-success` 会误以为保留策略正常，必须同时检查 daily 的完成日志。
+
+恢复协议（实现见 `deploy/backup/lib.sh` 的 `restic_unlock_stale` 与 `run_restic_with_lock_recovery`）：
+
+1. 每次 `backup.sh` 在取得存储协调文件锁之前执行 `restic unlock`。该命令只删除 restic 判定为 stale 的锁，活跃锁原样保留；脚本绝不传 `--remove-all`，也不按 PID/主机名自行删锁。日志包含 `RESTIC_LOCKS context=startup before=...` 和 `RESTIC_UNLOCK context=startup removed=... remaining=...`。
+2. `restic unlock` 失败不阻断本次备份，只记录 `RESTIC_LOCK_RECOVERY_SKIPPED`；随后的 backup/forget 仍会尝试并在锁竞争时进入恢复。
+3. backup、daily forget/prune 第一次执行不等待。若退出码为 11 或输出包含锁错误，先再执行一次 stale-only `restic unlock`，随后带 `--retry-lock ${BACKUP_RESTIC_LOCK_RETRY_SECONDS}s` 重试一次。默认 300 秒，范围 0–3600；`0` 表示解锁后立即重试、不等待。
+4. 重试仍锁住则退出 5，输出 `BACKUP_BUSY`，不写 `last-success.json`，不打印 `BACKUP_OK`；活跃锁保留。下一小时调度会再次尝试。其他上传/prune 错误仍为 4 `BACKUP_FAILED`。
+
+人工排查：
+
+```bash
+docker compose -f deploy/compose.yaml --env-file deploy/.env logs backup | grep -E 'RESTIC_(LOCK|UNLOCK)'
+docker compose -f deploy/compose.yaml --env-file deploy/.env run --rm backup restic list locks
+docker compose -f deploy/compose.yaml --env-file deploy/.env run --rm backup restic cat lock <lock-id>
+```
+
+人工恢复也只运行 `restic unlock`（不加 `--remove-all`）。若仍显示锁住，先确认没有正在运行的 backup/forget 进程，并核对 lock 的 `time`/`hostname`/`pid`；不要为了让本次任务通过而强制删除活跃锁。锁清理后重新运行 daily 备份，确认 `BACKUP_OK` 且 `restic snapshots` 的保留结果符合 2.1。
+
+### 2.3 容量告警
 
 `check_capacity.sh` 用 `df` 检查私有卷使用率，超过 `DORMPRINT_CAPACITY_ALERT_PERCENT`（默认 85%）返回 10 并输出 `CAPACITY_ALERT`。备份调度会调用它并记录；请把该退出码接入真实监控/告警通道。脚本本身不宣称已送达外部告警。
 
@@ -164,6 +186,7 @@ AWS_SECRET_ACCESS_KEY=...
 AWS_DEFAULT_REGION=...
 AWS_ENDPOINT=...
 BACKUP_DAILY_UTC_HOUR=2
+BACKUP_RESTIC_LOCK_RETRY_SECONDS=300               # 0–3600；锁竞争重试上限
 DORMPRINT_CAPACITY_ALERT_PERCENT=85
 DORMPRINT_MASTER_KEY_FINGERPRINT=...                # 独立保存的 sha256(secret)
 ```
@@ -184,7 +207,7 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env run --rm backup \
   /opt/dormprint/backup.sh --mode hourly
 ```
 
-只有同时满足 pg_dump 非空、manifest/不可变 PDF 校验通过、restic 上传成功、快照可确认（每日还包括 prune 成功）时，脚本才打印 `BACKUP_OK` 并写 `last-success.json`。任何一步失败都以非零退出，并保留/输出失败类别（`BACKUP_FAILED`/`BACKUP_INTEGRITY`/`BACKUP_UNAVAILABLE`）。
+只有同时满足 pg_dump 非空、manifest/不可变 PDF 校验通过、restic 上传成功、快照可确认（每日还包括 prune 成功）时，脚本才打印 `BACKUP_OK` 并写 `last-success.json`。任何一步失败都以非零退出，并保留/输出失败类别（`BACKUP_FAILED`/`BACKUP_BUSY`/`BACKUP_INTEGRITY`/`BACKUP_UNAVAILABLE`）。`BACKUP_BUSY` 表示 restic 仓库锁在 stale-only 清理和有界重试后仍被占用，退出码为 5。
 
 ## 5. 恢复 Runbook
 
@@ -267,11 +290,13 @@ WHERE protected_payload IS NOT NULL OR status IN ('QUEUED','RETRY','RETRY_PENDIN
 - 未配置远端：`BACKUP_UNAVAILABLE`，退出 3，无成功记录；
 - 仓库不可达/未初始化：`BACKUP_UNAVAILABLE` 或 `BACKUP_FAILED`，不写成功；
 - 数据库 dump 为空、文件缺失/篡改、不可变 PDF hash 不匹配：`BACKUP_INTEGRITY`，不上传/不宣称成功；
-- restic 上传或 prune 失败：`BACKUP_FAILED`；
+- restic 仓库锁竞争：脚本先执行 stale-only `restic unlock`，再带 `--retry-lock` 重试一次；仍锁住则 `BACKUP_BUSY`，退出 5，不写成功，活跃锁保留；
+- restic 上传或 prune 其他失败：`BACKUP_FAILED`；
 - 恢复目标不安全、主密钥缺失/指纹不符、无 tombstone、tombstone 不完整、文件校验失败：`REFUSED`/`RESTORE_FAILED`，不暴露恢复库；
 - **残余风险（外部重试）**：`backend/app/storage_coordination.py` 和 `deploy/backup/apply_tombstones.py` 已实现并测试协调锁、暂存/恢复、完整 tombstone、authority fail-closed。`process_purge_job` 已包装 `purge_guard`，`maintenance_sweep` 已自行包装 `storage_gc_guard`，account-deletion 的 `_revoke_account_credentials` 已包装；剩余外部依赖是 root 拥有的 `jobs.py` 对 commit 前 `PURGE_PENDING` 做有界 `QUEUED` 重试。该文件不在本 worker 所有权内，未修改。
 - **残余风险（恢复后权限）**：旧快照可能包含备份后已被撤销的员工 grant。`post_restore.sql` 在无更新 authority manifest 时禁用全部 staff（含 super admin），不会让旧权限仅凭重新登录复活；需要人工 bootstrap review 后重新授权。
 - **残余风险（非普通文件清理）**：`purge_guard` 的暂存只覆盖普通文件；手工永久清理遇到目录/符号链接时，maintenance 集成在**任何 unlink 之前**拒绝并保留 `PURGE_PENDING`/`storageCleanup`，不会声称 `PURGED`，也不会产生“先删后无法回滚”的窗口。此类目标需人工转换为普通文件或走单独 Q29 路径后才能清理。
+- **残余风险（daily retention 监控）**：`last-success.json` 只证明最近一次 hourly/daily 中的某次成功；若 daily prune 因锁失败，hourly 仍会更新 `last-success`，容器 healthcheck 可能保持 healthy。生产监控必须额外检查每日 `BACKUP_OK mode=daily`、`BACKUP_BUSY` 或 prune 失败日志，不能只看 healthcheck。
 - **演练边界**：本机只验证了隔离 schema 的锁/暂存/回放/SQL 行为，未在真实 restic 仓库、生产数据量或独立恢复主机上计时，因此不宣称生产 RPO/RTO。
 
 ## 8. 本机演练证据（仅限本机）
@@ -295,3 +320,15 @@ cd /path/to/dormprint/backend
 - 本次暴露并修复两个 root-owned 脚本缺陷：`last-success` 曾因 `restic snapshots --latest 1` 的 host+paths 分组选中 hourly 旧 ID，现改为解析 `restic backup --json` 的 `summary.snapshot_id` 并用 `restic cat snapshot` 校验；daily retention 曾按默认 host+paths 分组导致每次运行永久保留，现改为 `--group-by host --tag dormprint` 的 168 hourly + 30 daily 策略。
 - 清理：测试 finally 删除一次性数据库和 named volumes，演练后无 `dormprint_drill_*` / `dormprint_restore_*` 残留；未触碰 55432 测试库、`date-*`/`userdate-*` 或其他 worker 容器。
 - 边界：未验证真实远端、异地恢复、生产数据量或旧 `--time` 快照 age-prune；本记录不是生产备份验收。
+
+2026-11-18 实际执行（仓库锁恢复与 retention）：
+
+- 环境：同一 `dormprint-backup:prod`（restic `0.18.1`）；隔离 named volumes `dormprint-stale-vol` / `dormprint-e2e-vol`；仅脚本从 host 只读挂载，`pg_dump`/`psql` 用 fake，restic 为真实二进制。`dormprint-stale-vol` 的仓库由被 `SIGKILL` 的 restic holder 遗留锁的 lab 仓库复制而来。
+- 活跃锁：持有非独占 backup 锁时，`run_restic_with_lock_recovery forget ...` 返回 `11`；日志依次为 `RESTIC_LOCK_CONTENTION operation=forget exit=11`、`RESTIC_LOCKS context=retry:forget before=1`、`RESTIC_UNLOCK context=retry:forget removed=0 remaining=1`、`RESTIC_LOCK_TIMEOUT operation=forget retry_lock=2s; active lock preserved`，查询锁数仍为 1。未删除活跃锁。
+- 存储维护锁：另一容器用 util-linux `flock -x /e2e/storage/.coordination/maintenance.lock` 持锁，`backup.sh --mode hourly` 设 `BACKUP_LOCK_TIMEOUT_SECONDS=1`，退出码 5，输出 `BACKUP_BUSY: maintenance/purge holds the storage lock; retry later`；运行前后 `last-success.json` 的 sha256 相同，未覆盖成功记录。
+- hourly：`BACKUP_OK snapshot=c1b30895ef6819fb372b46d83af590a6559afa18e951540476fee738a7b4c432 mode=hourly files=1 objects=1`；`last-success.mode=hourly`，快照 ID 与记录一致；日志有 `maintenance-lock acquired file=/e2e/storage/.coordination/maintenance.lock`，确认真实 `flock` 路径仍被使用。
+- stale lock 恢复：`dormprint-stale-vol` 中两把锁的 `time` 分别为 `2026-11-18T01:54:06.579799002Z` 和 `2026-11-18T01:59:06.794848419Z`；02:29Z 运行 daily 时启动日志为 `RESTIC_LOCKS context=startup before=2`、`successfully removed 2 locks`、`RESTIC_UNLOCK context=startup removed=2 remaining=0`，随后 `BACKUP_OK snapshot=ed6c5f7a4a97c99536062a928ad4aac828d6a43d2a627cb3237fdca411ad0826 mode=daily files=1 objects=1`，`last-success.mode=daily`。该次仓库只有 38 个快照，少于 `--keep-hourly 168` 的 168 个保留槽位，因此旧点仍被 hourly 策略保留、快照数没有下降；这不是 prune 失败。
+- retention 真正删除：在同一仓库用 `--no-lock` 种入 200 个 hourly 点（2026-11-09 至 2026-11-17）后，full daily 再次 `BACKUP_OK snapshot=de7a67ce2ac3c13e429f64c1144cf0d6825e5df3e158e0d45770e85d7b03a3d5`；`restic snapshots --no-lock` 从 **238** 降到 **191**，`last-success` 从 `ed6c…` 更新为 `de7a…`，证明 `forget --prune` 在锁恢复后实际生效。保留结果包含 2026-10-16 至 2026-11-04 的 daily 点和 2026-11-18 的新 daily 点，另有 168 小时窗口内的 hourly 点。
+- 回归：`backend/.venv/bin/pytest -q backend/tests/test_backup_locks.py backend/tests/test_backup_tools.py backend/tests/test_guest_order_access_migration.py` → **49 passed, 1 warning in 17.62s**。
+- 清理：实验容器、named volumes 和 `/tmp/dormprint-*` lab 目录在记录后删除；未触碰生产仓库、生产库或 `dormprint-test-postgres`。
+- 边界：仍是本机隔离仓库、合成数据；未验证真实远端、生产数据量、真实并发 purge 或异地恢复，不宣称生产 RPO/RTO 达标。

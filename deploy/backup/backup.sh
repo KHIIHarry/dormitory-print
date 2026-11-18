@@ -26,14 +26,29 @@ case "$MODE" in hourly|daily) ;; *) die 2 "invalid --mode '$MODE'" ;; esac
 WORK_DIR=""
 cleanup() {
     local status=$?
+    trap - EXIT
     if [ "$status" -ne 0 ]; then
         log "BACKUP_FAILED mode=$MODE status=$status"
     fi
     if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
-        rm -rf "$WORK_DIR"
+        if ! rm -rf "$WORK_DIR"; then
+            log "BACKUP_CLEANUP_FAILED mode=$MODE path=$WORK_DIR status=$status"
+        fi
     fi
+    exit "$status"
 }
 trap cleanup EXIT
+
+on_signal() {
+    local signal="$1"
+    local code="$2"
+    trap - "$signal"
+    log "BACKUP_INTERRUPTED mode=$MODE signal=$signal"
+    exit "$code"
+}
+trap 'on_signal TERM 143' TERM
+trap 'on_signal INT 130' INT
+trap 'on_signal HUP 129' HUP
 
 # Fail closed before touching the database when the remote target is absent.
 require_restic
@@ -57,6 +72,14 @@ if ! restic cat config >/dev/null 2>&1; then
     else
         die 3 "BACKUP_UNAVAILABLE: encrypted repository is unreachable or not initialized; run once with --init after configuring RESTIC_*"
     fi
+fi
+
+# Clear locks left by a crashed process once restic considers them stale.  This
+# is deliberately before the storage-maintenance flock: the two locks protect
+# different resources, and a remote repository lock must not block local purges.
+# `restic unlock` preserves active locks; we never pass --remove-all.
+if ! restic_unlock_stale startup; then
+    log "RESTIC_LOCK_RECOVERY_SKIPPED context=startup; continuing to the repository operation"
 fi
 
 # Hold the storage maintenance lock for the DB snapshot + file scan + upload.
@@ -154,15 +177,22 @@ cat > "$METADATA" <<EOF
 EOF
 
 log "restic backup start mode=$MODE files=$file_count objects=$asset_count"
-if ! restic backup \
+backup_rc=0
+run_restic_with_lock_recovery backup "$WORK_DIR/restic.log" \
+    backup \
     --json \
     --host "${BACKUP_HOSTNAME:-dormprint}" \
     --tag dormprint --tag "$MODE" \
     --exclude "$STORAGE/tmp" \
     --exclude "$STORAGE/.coordination" \
     --exclude "$WORK_DIR/restic.log" \
-    "$STORAGE" "$WORK_DIR" > "$WORK_DIR/restic.log" 2>&1; then
+    --exclude "$WORK_DIR/restic.log.retry" \
+    "$STORAGE" "$WORK_DIR" || backup_rc=$?
+if [ "$backup_rc" -ne 0 ]; then
     tail -n 40 "$WORK_DIR/restic.log" >&2 || true
+    if [ "$backup_rc" -eq 11 ]; then
+        die 5 "BACKUP_BUSY: restic repository lock is held by another process; stale locks were cleaned, active lock preserved"
+    fi
     die 4 "BACKUP_FAILED: restic upload failed"
 fi
 
@@ -190,10 +220,15 @@ if [ "$MODE" = daily ]; then
     # of the last 30 days.  This is the only automatic rotation command.
     # Each dump has a unique work directory. Grouping by paths would retain a
     # separate last snapshot for every run forever, defeating the time policy.
-    if ! restic forget --group-by host --tag dormprint \
-        --keep-hourly 168 --keep-daily 30 --keep-last 1 --prune \
-        > "$WORK_DIR/forget.log" 2>&1; then
+    forget_rc=0
+    run_restic_with_lock_recovery forget "$WORK_DIR/forget.log" \
+        forget --group-by host --tag dormprint \
+        --keep-hourly 168 --keep-daily 30 --keep-last 1 --prune || forget_rc=$?
+    if [ "$forget_rc" -ne 0 ]; then
         tail -n 40 "$WORK_DIR/forget.log" >&2 || true
+        if [ "$forget_rc" -eq 11 ]; then
+            die 5 "BACKUP_BUSY: retention/prune is blocked by an active restic repository lock; stale locks were cleaned, active lock preserved"
+        fi
         die 4 "BACKUP_FAILED: retention/prune failed"
     fi
 fi

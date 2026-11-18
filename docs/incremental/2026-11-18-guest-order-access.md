@@ -33,7 +33,7 @@
 
 ## 回退限制与验收范围
 
-本迁移不会在降级时重新开放已撤销链接。若上线后已发生新的独立订单归属，Alembic downgrade 会拒绝删除归属列，避免订单变回游客单。此时优先前向修复；需要整库恢复时，先核对上线后新增订单、收付和履约事实，再按备份恢复手册执行，不能只回滚代码。
+本迁移不会在降级时重新开放已撤销链接。若上线后已发生新的独立订单归属（`orders.owner_account_id` 非空且与 `principals.account_id` 不一致），Alembic downgrade 会直接 `RuntimeError` 并要求使用部署前备份恢复，避免订单变回游客单；它不会删除这类归属列。即使不存在这种不一致，成功 downgrade 仍会先把全部 `order_access_grants` 的 `revoked_at` 置位、清空 `encrypted_token`，撤销全部 `kind='ORDER_ACCESS'` 的 `auth_sessions`，再删除 `encrypted_token`、`guest_access_version`、`owner_account_id` 等列。也就是说，降级会作废所有游客链接、链接密文和已有游客会话，不能保留为可用的游客访问。上线后已有新账号归属或需要保留游客访问时，应前向修复，不要降级；需要整库恢复时，先核对上线后新增订单、收付和履约事实，再按备份恢复手册执行，不能只回滚代码。
 
 本地已完成 PostgreSQL 历史结构迁移、唯一约束、并发、旧请求重放和私有资源专项测试；完整页面用实际 Chrome + API + PostgreSQL 验证，有效/到期/关闭三个状态检查 320、375、390、430、768、1440 px。Chromium/WebKit 自动化为浏览器模拟，未包含 iPhone Safari、微信内置浏览器、已安装 PWA 及真实邮件客户端的物理设备验收，请生产端分别检查这些环境。
 

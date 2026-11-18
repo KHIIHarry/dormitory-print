@@ -274,6 +274,8 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env down
 
 迁移是前向的；回滚代码前先确认新迁移与旧代码兼容，必要时从独立恢复库恢复，不要对生产库执行 `DROP`/`TRUNCATE`。升级前必须保留可恢复的加密备份点。
 
+`ce72aa117014`（游客订单与账号归属）的 downgrade 有额外破坏性：若存在 `orders.owner_account_id IS NOT NULL` 且与 `principals.account_id` 不一致的订单归属，迁移会直接 `RuntimeError`，要求使用部署前备份恢复，不会删除这类归属列；即使没有这种不一致，成功 downgrade 也会先撤销全部 `order_access_grants`（`revoked_at` 置位、`encrypted_token` 清空）和全部 `kind='ORDER_ACCESS'` 的 `auth_sessions`，再删除归属列/索引。因此上线后已有新账号归属或需要保留游客链接时，应前向修复，不要降级；只有确认没有新归属且接受所有游客链接/会话失效时，才可回退代码。
+
 ## PDF 预览脚本与 MIME 类型
 
 PDF.js 的工作线程及浏览器回退加载都要求脚本以 JavaScript 类型响应。若 `.mjs` 被静态服务器当成 `application/octet-stream`，会出现 `Setting up fake worker failed` 或 `Failed to fetch dynamically imported module`，即使脚本请求返回 200 也不能预览。
