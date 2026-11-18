@@ -127,6 +127,14 @@ test("active guest notice follows navigation with an inline account link at all 
       .locator(".guest-access-banner")
       .boundingBox())!;
     expect(navBounds.y + navBounds.height).toBeLessThanOrEqual(bannerBounds.y);
+    const spacing = await page.locator(".guest-access-banner").evaluate((banner) => {
+      const css = getComputedStyle(banner);
+      return { top: parseFloat(css.paddingTop), bottom: parseFloat(css.paddingBottom),
+        height: banner.getBoundingClientRect().height };
+    });
+    expect(Math.abs(spacing.top - spacing.bottom)).toBeLessThanOrEqual(0.5);
+    if (width >= 375) expect(spacing.height).toBeLessThanOrEqual(width >= 768 ? 110 : 150);
+
     const inline = await accountLink.evaluate((link) => {
       const style = getComputedStyle(link),
         parent = link.parentElement!;

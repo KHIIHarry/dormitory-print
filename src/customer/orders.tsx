@@ -286,8 +286,8 @@ function ContactContent() {
           <Badge status={displayOrderStatus(order)} />
           <p>你的订单提取码</p>
           <div className="pickup-code">
-            {order.pickupCode}
-            <CopyButton text={order.pickupCode} />
+            <span>{order.pickupCode}</span>
+            <CopyButton text={text} label="复制联系文案" iconOnly />
           </div>
           <div className="contact-amount">
             本次应付<strong>{money(order.totalCents)}</strong>
@@ -297,12 +297,8 @@ function ContactContent() {
               ? "本单结算已确认，可通过订单详情查看后续进度。"
               : order.totalCents === 0
                 ? "本单无需转账。请发送提取码，请管理员明确确认零元结算后安排打印。"
-                : "复制提取码并发送给管理员，完成线下付款后，我们会核对收款并安排打印。"}
+                : "点击提取码后的复制图标，将订单文案发送给管理员；完成线下付款后，我们会核对收款并安排打印。"}
           </Notice>
-          <div className="contact-text">
-            <p>{text}</p>
-            <CopyButton text={text} label="复制联系文案" />
-          </div>
         </Panel>
         <Panel className="wechat-panel">
           <div className="wechat-title">
@@ -540,8 +536,8 @@ function OrderDetailContent() {
         <div className="detail-code">
           <span>订单提取码</span>
           <strong>
-            {order.pickupCode}
-            <CopyButton text={order.pickupCode} label="复制提取码" iconOnly />
+            <span>{order.pickupCode}</span>
+            <CopyButton text={orderContactMessage(order)} label="复制联系文案" iconOnly />
           </strong>
         </div>
       </div>
@@ -722,13 +718,6 @@ function OrderDetailContent() {
                     : "联系管理员付款"}
                   <ArrowRight size={16} />
                 </LinkButton>
-                <div className="order-contact-message">
-                  <p>{orderContactMessage(order)}</p>
-                  <CopyButton
-                    text={orderContactMessage(order)}
-                    label="复制联系文案"
-                  />
-                </div>
                 {can("ORDER_REVISE_PENDING") && (
                   <Button
                     className="full"

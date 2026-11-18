@@ -2869,24 +2869,6 @@ input[type="date"],
 .contact-order > .notice {
   text-align: left;
 }
-.contact-text {
-  margin-top: 25px;
-  text-align: left;
-  border-top: 1px solid var(--line);
-  padding-top: 18px;
-}
-.contact-text p {
-  font-size: 11px;
-  color: #a08975;
-  line-height: 1.9;
-}
-.contact-text > .copy-btn {
-  border: 0;
-  background: #faf6f2;
-  width: 100%;
-  color: var(--primary);
-  height: 40px;
-}
 .wechat-title {
   display: flex;
   align-items: center;
@@ -6671,13 +6653,6 @@ select.campus-filter:focus {
     font-size: 23px;
   }
   .contact-order .notice {
-    font-size: 10px;
-  }
-  .contact-text {
-    margin-top: 17px;
-    padding-top: 14px;
-  }
-  .contact-text p {
     font-size: 10px;
   }
   .wechat-title h2 {

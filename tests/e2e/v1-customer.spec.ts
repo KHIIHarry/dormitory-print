@@ -1567,33 +1567,43 @@ test("security page shows the owner's browser and login IP per session and marks
   expect(reloads.length).toBeGreaterThanOrEqual(2);
 });
 
-test("order contact copy remains distinct from pickup-code copy", async ({
-  page,
-}) => {
+test("pickup-code icon copies the complete contact message without a separate module", async ({ page }) => {
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: async (text: string) => {
-          (window as any).orderCopiedText = text;
-        },
-      },
-    });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async (text: string) => { (window as any).orderCopiedText = text; },
+    } });
   });
-  await installApi(page, {
-    order: orderFixture({ status: "PENDING_CONFIRMATION", settlement: null }),
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
+  await installApi(page, { order: orderFixture({ pickupCode: "AB12CD34", status: "PENDING_CONFIRMATION", settlement: null }) });
   await page.goto(appUrl("/u/orders/ORD-1"));
-  await page.getByRole("button", { name: "复制提取码", exact: true }).click();
-  expect(await page.evaluate(() => (window as any).orderCopiedText)).toBe(
-    "ABC12",
-  );
-  await page.getByRole("button", { name: "复制联系文案", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "订单详情", exact: true })).toBeVisible();
+  await expect(page.locator(".order-contact-message")).toHaveCount(0);
+  const copy = page.locator(".detail-code").getByRole("button", { name: "复制联系文案", exact: true });
+  await copy.click();
   const copied = await page.evaluate(() => (window as any).orderCopiedText);
-  expect(copied).toContain("提取码 ABC12");
+  expect(copied).toContain("提取码 AB12CD34");
   expect(copied).toContain("12.00");
   expect(copied).toContain("微信昵称 验收同学");
   expect(copied).not.toContain("/order-link");
-  await expect(page.locator(".order-contact-message")).toContainText(copied);
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    const metrics = await page.locator(".detail-code").evaluate((row) => {
+      const label = row.querySelector(":scope > span")!.getBoundingClientRect();
+      const value = row.querySelector("strong > span")!.getBoundingClientRect();
+      const button = row.querySelector("button")!.getBoundingClientRect();
+      return { labelY: label.y + label.height / 2, valueY: value.y + value.height / 2,
+        buttonY: button.y + button.height / 2, buttonW: button.width, buttonH: button.height,
+        gap: button.left - value.right, scroll: document.documentElement.scrollWidth,
+        overflow: [...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).slice(0, 12).map(el => ({ tag: el.tagName, cls: el.className, right: el.getBoundingClientRect().right })) };
+    });
+    expect(Math.abs(metrics.labelY - metrics.valueY)).toBeLessThanOrEqual(1);
+    expect(Math.abs(metrics.buttonY - metrics.valueY)).toBeLessThanOrEqual(1);
+    expect(metrics.gap).toBeGreaterThanOrEqual(8);
+    expect(metrics.buttonW).toBeGreaterThanOrEqual(44);
+    expect(metrics.buttonH).toBeGreaterThanOrEqual(44);
+    expect(metrics.scroll, JSON.stringify(metrics.overflow)).toBeLessThanOrEqual(width + 1);
+  }
+  await page.goto(appUrl("/u/orders/ORD-1/contact"));
+  await expect(page.locator(".contact-text")).toHaveCount(0);
+  await page.locator(".pickup-code").getByRole("button", { name: "复制联系文案", exact: true }).click();
+  expect(await page.evaluate(() => (window as any).orderCopiedText)).toBe(copied);
 });

@@ -68,17 +68,30 @@
   padding-top: 24px;
   padding-bottom: 0;
 }
+.guest-access-section + main.content-page {
+  padding-top: 12px;
+}
 .guest-access-banner {
+  display: grid;
+  gap: 4px;
   min-width: 0;
   margin: 0;
-  padding: 20px;
+  padding: 12px 16px;
   border: 1px solid #e3e3e3;
   border-radius: 16px;
   background: #f9f2ed;
   overflow-wrap: anywhere;
 }
 .guest-access-banner p {
-  margin: 8px 0 12px;
+  margin: 0;
+  line-height: 1.6;
+}
+.guest-access-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+  line-height: 1.6;
 }
 .guest-access-banner .btn {
   white-space: normal;
@@ -89,6 +102,7 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
+  margin-block: -8px;
   max-width: 100%;
   color: #9e532e;
   font: inherit;
@@ -103,26 +117,42 @@
   outline: 2px solid var(--primary);
   outline-offset: 3px;
 }
-.order-contact-message {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+.detail-code {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.detail-status > div:first-child {
   min-width: 0;
 }
-.order-contact-message p {
-  margin: 0 0 8px;
-  font-size: 13px;
-  line-height: 1.75;
-  color: var(--muted);
-  overflow-wrap: anywhere;
+.detail-code > span {
+  flex-shrink: 0;
+  line-height: 1.5;
 }
-.order-contact-message > .copy-btn {
-  min-height: 44px;
-  width: 100%;
+.detail-code > strong {
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
 }
-.detail-code > strong > .copy-btn {
+.detail-code > strong > span,
+.contact-order .pickup-code > span {
+  display: block;
+  line-height: 1;
+}
+.detail-code > strong > .copy-btn,
+.contact-order .pickup-code > .copy-btn {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
   min-width: 44px;
   min-height: 44px;
+}
+.contact-order .pickup-code {
+  gap: 8px;
+  font-size: clamp(24px, 5vw, 43px);
 }
 #contact-admin {
   scroll-margin-top: 100px;

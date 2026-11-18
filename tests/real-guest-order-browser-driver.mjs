@@ -80,9 +80,9 @@ async function verifyCustomerShell(page, state, active = false) {
       await page.screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, `${state}-${width}.png`), fullPage: true });
       await page.screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, `${state}-${width}-viewport.png`) });
       if (active && width === 390) {
-        await expect(page.getByRole('button', { name: '复制提取码', exact: true })).toBeVisible();
         await expect(page.getByRole('button', { name: '复制联系文案', exact: true })).toBeVisible();
-        await page.locator('.order-contact-message').screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, 'order-contact-copy-390.png') });
+        await expect(page.locator('.order-contact-message')).toHaveCount(0);
+        await page.locator('.detail-code').screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, 'order-contact-copy-390.png') });
       }
     }
   }

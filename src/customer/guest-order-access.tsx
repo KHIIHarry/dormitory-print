@@ -247,7 +247,7 @@ function GuestOrderAccessBoundary({
           role="status"
           aria-label="游客订单访问期限"
         >
-          <div>
+          <div className="guest-access-summary">
             <strong>游客订单链接默认有效 14 天</strong>
             <p>{guestAccessRemaining(current.value, elapsed)}</p>
           </div>
