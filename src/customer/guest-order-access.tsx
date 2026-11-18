@@ -49,6 +49,24 @@ export function GuestOrderUnavailable({
 }
 
 export function GuestOrderBoundary({
+  navigation,
+  ...props
+}: {
+  orderId: string;
+  children: ReactNode;
+  navigation?: ReactNode;
+}) {
+  return (
+    <>
+      {navigation && (
+        <div className="content-page order-page-navigation">{navigation}</div>
+      )}
+      <GuestOrderAccessBoundary {...props} />
+    </>
+  );
+}
+
+function GuestOrderAccessBoundary({
   orderId,
   children,
 }: {
@@ -233,7 +251,20 @@ export function GuestOrderBoundary({
             <strong>游客订单链接默认有效 14 天</strong>
             <p>{guestAccessRemaining(current.value, elapsed)}</p>
           </div>
-          <p>关联已验证的账号后，可在「我的订单」长期查看订单记录。</p>
+          <p>
+            关联已验证的账号后，可在「我的订单」长期查看订单记录。
+            {!identity.customer.account?.verified && (
+              <>
+                {" "}
+                <Link
+                  className="guest-account-link"
+                  to={`/u/account/login?${new URLSearchParams({ returnTo })}`}
+                >
+                  注册或登录，保存到我的订单
+                </Link>
+              </>
+            )}
+          </p>
           {claimError && <Notice type="error">{claimError}</Notice>}
           {identity.customer.account?.verified ? (
             current.value.canClaimOnDevice ? (
@@ -246,14 +277,7 @@ export function GuestOrderBoundary({
                 <Link to="/u/help#contact-admin">联系管理员</Link>
               </p>
             )
-          ) : (
-            <Link
-              className="btn secondary"
-              to={`/u/account/login?${new URLSearchParams({ returnTo })}`}
-            >
-              注册或登录，保存到我的订单
-            </Link>
-          )}
+          ) : null}
         </section>
       </div>
       {children}

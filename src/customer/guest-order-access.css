@@ -51,6 +51,18 @@
 .guest-status-actions .btn:not(.secondary) {
   background: #9e532e;
 }
+.content-page.order-page-navigation {
+  min-height: 0;
+  padding-top: 16px;
+  padding-bottom: 0;
+}
+.order-page-navigation .back-link {
+  min-height: 44px;
+  margin-bottom: 0;
+}
+.order-page-navigation + .content-page.guest-access-section {
+  padding-top: 12px;
+}
 .content-page.guest-access-section {
   min-height: 0;
   padding-top: 24px;
@@ -72,6 +84,45 @@
   white-space: normal;
   min-height: 44px;
   max-width: 100%;
+}
+.guest-access-banner .guest-account-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  max-width: 100%;
+  color: #9e532e;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.guest-account-link:hover {
+  color: var(--primary-dark);
+}
+.guest-account-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+.order-contact-message {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.order-contact-message p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.order-contact-message > .copy-btn {
+  min-height: 44px;
+  width: 100%;
+}
+.detail-code > strong > .copy-btn {
+  min-width: 44px;
+  min-height: 44px;
 }
 #contact-admin {
   scroll-margin-top: 100px;

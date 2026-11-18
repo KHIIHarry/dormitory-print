@@ -79,6 +79,9 @@ function displayOrderStatus(order: Order) {
     ? "PRINTING"
     : order.status;
 }
+function orderContactMessage(order: Order) {
+  return `提取码 ${order.pickupCode}，${order.totalCents === 0 ? "本单优惠后应付¥0.00，请人工确认零元结算，无需转账" : `本次应付 ${money(order.totalCents)}，请核对线下付款`}，微信昵称 ${order.nickname}`;
+}
 
 export function OrderList() {
   const { data, resources, refreshing, refreshError, refresh } = useStore();
@@ -253,7 +256,7 @@ function ContactContent() {
         />
       </main>
     );
-  const text = `提取码 ${order.pickupCode}，${order.totalCents === 0 ? "本单优惠后应付¥0.00，请人工确认零元结算，无需转账" : `本次应付 ${money(order.totalCents)}，请核对线下付款`}，微信昵称 ${order.nickname}`;
+  const text = orderContactMessage(order);
   return (
     <main className="contact-page">
       <div className="success-heading">
@@ -402,7 +405,15 @@ function ContactContent() {
 export function OrderDetail() {
   const { id } = useParams();
   return (
-    <GuestOrderBoundary orderId={id || ""}>
+    <GuestOrderBoundary
+      orderId={id || ""}
+      navigation={
+        <Link className="back-link" to="/u/orders">
+          <ArrowLeft size={16} />
+          返回我的订单
+        </Link>
+      }
+    >
       <OrderDetailContent />
     </GuestOrderBoundary>
   );
@@ -494,10 +505,6 @@ function OrderDetailContent() {
   }[order.status];
   return (
     <main className="content-page order-detail-page">
-      <Link className="back-link" to="/u/orders">
-        <ArrowLeft size={16} />
-        返回我的订单
-      </Link>
       <PageHeading
         title="订单详情"
         description={`下单时间 ${formatDisplayTime(order.createdAt)}`}
@@ -534,7 +541,7 @@ function OrderDetailContent() {
           <span>订单提取码</span>
           <strong>
             {order.pickupCode}
-            <CopyButton text={order.pickupCode} />
+            <CopyButton text={order.pickupCode} label="复制提取码" iconOnly />
           </strong>
         </div>
       </div>
@@ -715,6 +722,13 @@ function OrderDetailContent() {
                     : "联系管理员付款"}
                   <ArrowRight size={16} />
                 </LinkButton>
+                <div className="order-contact-message">
+                  <p>{orderContactMessage(order)}</p>
+                  <CopyButton
+                    text={orderContactMessage(order)}
+                    label="复制联系文案"
+                  />
+                </div>
                 {can("ORDER_REVISE_PENDING") && (
                   <Button
                     className="full"

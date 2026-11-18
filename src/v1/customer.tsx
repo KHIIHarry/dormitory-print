@@ -763,7 +763,15 @@ export function AfterSalesPanel({
 export function CustomerAfterSalesPage() {
   const { id } = useParams();
   return (
-    <GuestOrderBoundary orderId={id || ""}>
+    <GuestOrderBoundary
+      orderId={id || ""}
+      navigation={
+        <Link className="back-link" to={id ? `/u/orders/${id}` : "/u/orders"}>
+          <ArrowLeft size={16} />
+          返回订单详情
+        </Link>
+      }
+    >
       <CustomerAfterSalesContent />
     </GuestOrderBoundary>
   );
@@ -775,10 +783,6 @@ function CustomerAfterSalesContent() {
   const loading = resources.orders?.loading && !resources.orders?.hasData;
   return (
     <main className="content-page">
-      <Link className="back-link" to={id ? `/u/orders/${id}` : "/u/orders"}>
-        <ArrowLeft size={16} />
-        返回订单详情
-      </Link>
       <PageHeading
         title="售后与退款"
         description="提交申请，查看核实、批准与管理员线下退款登记的真实状态。"

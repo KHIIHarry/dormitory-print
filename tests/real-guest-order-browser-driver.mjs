@@ -70,6 +70,8 @@ async function verifyCustomerShell(page, state, active = false) {
     });
     expect(metrics.scroll).toBeLessThanOrEqual(width + 1);
     if (active) {
+      const navigation = (await page.getByRole('link', { name: '返回我的订单', exact: true }).boundingBox());
+      expect(navigation.y + navigation.height).toBeLessThanOrEqual(metrics.banner.y);
       expect(Math.abs(metrics.banner.left - metrics.contentLeft)).toBeLessThanOrEqual(1);
       expect(Math.abs(metrics.banner.right - metrics.contentRight)).toBeLessThanOrEqual(1);
       await expect(page.locator('.guest-access-banner')).toContainText(/剩余\s*\d+\s*天\s*\d+\s*小时/);
@@ -77,6 +79,11 @@ async function verifyCustomerShell(page, state, active = false) {
     if (width === 390 || width === 1440) {
       await page.screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, `${state}-${width}.png`), fullPage: true });
       await page.screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, `${state}-${width}-viewport.png`) });
+      if (active && width === 390) {
+        await expect(page.getByRole('button', { name: '复制提取码', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: '复制联系文案', exact: true })).toBeVisible();
+        await page.locator('.order-contact-message').screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, 'order-contact-copy-390.png') });
+      }
     }
   }
 }

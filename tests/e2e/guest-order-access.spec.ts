@@ -58,7 +58,7 @@ async function mount(
       body: `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div>
  <script type="module">import R from '/@react-refresh';R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
  <script type="module">
- import React from '${react}';import ReactDOM from '${dom}';import {MemoryRouter,Routes,Route,useLocation} from '${router}';
+ import React from '${react}';import ReactDOM from '${dom}';import {MemoryRouter,Routes,Route,useLocation,Link} from '${router}';
  import {GuestOrderBoundary} from '/src/customer/guest-order-access.tsx';import {OrderLinkPage,CustomerAuthForm} from '/src/customer/account.tsx';import {Help} from '/src/customer/help.tsx';import {Modal} from '/src/components/ui.tsx';import {createDemo} from '/src/lib/demo.ts';import '/src/styles.css';
  const registered=${options.registered ?? false};const data=createDemo();data.config.wechat=${JSON.stringify(options.wechat ?? "dormprint")};
  const order={...data.orders[0],id:'o1',pickupCode:'ABC12',ownerAccountId:${JSON.stringify(options.owned ? "account" : null)},accessKind:${JSON.stringify(options.owned ? "OWNER" : "GUEST_OWNER")}};data.orders=[order];
@@ -67,7 +67,7 @@ async function mount(
  f.store={data:state,setData,resources:{config:{hasData:true}},savedAccessLinks:saved,setSavedAccessLinks:setSaved,refresh:async()=>{},toast:()=>{},setDraft:()=>{},setEditingOrderId:()=>{},setCheckoutMemory:()=>{}};
  f.identity={generation:0,customer,staff:null,orderAccess:access,setOrderAccess,invalidate:()=>{},refreshCustomer:async()=>{if(f.verified){const verified={authKind:'REGISTERED',capabilities:[],account:{id:'account',verified:true}};setCustomer(verified);return verified;}return customer;},loginCustomer:async()=>{setCustomer({authKind:'REGISTERED',capabilities:[],account:{id:'account',verified:true}});return false;}};
  React.useEffect(()=>{const end=e=>{f.ended=e.detail;setData(current=>({...current,orders:current.orders.filter(o=>o.id!==e.detail.orderId)}));};window.addEventListener('dormprint:order-access-ended',end);return()=>window.removeEventListener('dormprint:order-access-ended',end);},[]);
- return React.createElement(Routes,null,React.createElement(Route,{path:'/u/orders/:id',element:React.createElement(GuestOrderBoundary,{orderId:'o1'},React.createElement(Private))}),React.createElement(Route,{path:'/u/order-link',element:React.createElement(OrderLinkPage)}),React.createElement(Route,{path:'/u/account/login',element:React.createElement(CustomerAuthForm,{mode:'login'})}),React.createElement(Route,{path:'/u/account/register',element:React.createElement(CustomerAuthForm,{mode:'register'})}),React.createElement(Route,{path:'/u/account/verify',element:React.createElement(CustomerAuthForm,{mode:'verify'})}),React.createElement(Route,{path:'/u/help',element:React.createElement(Help)}));}
+ return React.createElement(Routes,null,React.createElement(Route,{path:'/u/orders/:id',element:React.createElement(GuestOrderBoundary,{orderId:'o1',navigation:React.createElement(Link,{className:'back-link',to:'/u/orders'},'返回我的订单')},React.createElement(Private))}),React.createElement(Route,{path:'/u/order-link',element:React.createElement(OrderLinkPage)}),React.createElement(Route,{path:'/u/account/login',element:React.createElement(CustomerAuthForm,{mode:'login'})}),React.createElement(Route,{path:'/u/account/register',element:React.createElement(CustomerAuthForm,{mode:'register'})}),React.createElement(Route,{path:'/u/account/verify',element:React.createElement(CustomerAuthForm,{mode:'verify'})}),React.createElement(Route,{path:'/u/help',element:React.createElement(Help)}));}
  function Private(){f.privateMounted=true;const[preview,setPreview]=React.useState(false);return React.createElement('main',{className:'content-page'},React.createElement('h1',null,'订单 ABC12'),React.createElement('button',{className:'btn',onClick:()=>setPreview(true)},'查看私有 PDF'),preview&&React.createElement(Modal,{title:'最终 PDF',onClose:()=>setPreview(false)},React.createElement('p',null,'私有文件内容')));}
  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(${options.strict ? "React.StrictMode" : "React.Fragment"},null,React.createElement(MemoryRouter,{initialEntries:[${JSON.stringify(options.path || "/u/orders/o1")}]},React.createElement(App))));
  </script></html>`,
@@ -104,7 +104,7 @@ test("server deadline ends an offline open page and closes its private preview",
   ).toEqual([]);
 });
 
-test("active guest notice aligns with the standard order content at all supported widths", async ({
+test("active guest notice follows navigation with an inline account link at all supported widths", async ({
   page,
 }) => {
   await mount(page, { seconds: (11 * 24 + 7) * 3600 });
@@ -113,6 +113,40 @@ test("active guest notice aligns with the standard order content at all supporte
   ).toBeVisible();
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
+    const navigation = page.getByRole("link", {
+      name: "返回我的订单",
+      exact: true,
+    });
+    const accountLink = page.getByRole("link", {
+      name: "注册或登录，保存到我的订单",
+      exact: true,
+    });
+    await expect(navigation).toBeVisible();
+    const navBounds = (await navigation.boundingBox())!;
+    const bannerBounds = (await page
+      .locator(".guest-access-banner")
+      .boundingBox())!;
+    expect(navBounds.y + navBounds.height).toBeLessThanOrEqual(bannerBounds.y);
+    const inline = await accountLink.evaluate((link) => {
+      const style = getComputedStyle(link),
+        parent = link.parentElement!;
+      return {
+        tag: parent.tagName,
+        size: style.fontSize,
+        parentSize: getComputedStyle(parent).fontSize,
+        decoration: style.textDecorationLine,
+        color: style.color,
+        parentColor: getComputedStyle(parent).color,
+        button: link.classList.contains("btn"),
+        height: link.getBoundingClientRect().height,
+      };
+    });
+    expect(inline.tag).toBe("P");
+    expect(inline.size).toBe(inline.parentSize);
+    expect(inline.color).not.toBe(inline.parentColor);
+    expect(inline.decoration).toContain("underline");
+    expect(inline.button).toBe(false);
+    expect(inline.height).toBeGreaterThanOrEqual(44);
     const metrics = await page.evaluate(() => {
       const banner = document
         .querySelector(".guest-access-banner")!

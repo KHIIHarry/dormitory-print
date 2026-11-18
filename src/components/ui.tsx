@@ -469,10 +469,12 @@ export function CopyButton({
   text,
   label = "复制",
   className = "",
+  iconOnly = false,
 }: {
   text: string;
   label?: string;
   className?: string;
+  iconOnly?: boolean;
 }) {
   const { toast } = useStore();
   const [manual, setManual] = useState(false);
@@ -493,7 +495,7 @@ export function CopyButton({
         aria-label={label}
       >
         <Copy size={16} />
-        {label !== "复制" && label}
+        {!iconOnly && label !== "复制" && label}
       </button>
       {manual && (
         <Modal title="长按或选择下方文字复制" onClose={() => setManual(false)}>

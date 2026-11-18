@@ -1566,3 +1566,34 @@ test("security page shows the owner's browser and login IP per session and marks
   );
   expect(reloads.length).toBeGreaterThanOrEqual(2);
 });
+
+test("order contact copy remains distinct from pickup-code copy", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as any).orderCopiedText = text;
+        },
+      },
+    });
+  });
+  await installApi(page, {
+    order: orderFixture({ status: "PENDING_CONFIRMATION", settlement: null }),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(appUrl("/u/orders/ORD-1"));
+  await page.getByRole("button", { name: "复制提取码", exact: true }).click();
+  expect(await page.evaluate(() => (window as any).orderCopiedText)).toBe(
+    "ABC12",
+  );
+  await page.getByRole("button", { name: "复制联系文案", exact: true }).click();
+  const copied = await page.evaluate(() => (window as any).orderCopiedText);
+  expect(copied).toContain("提取码 ABC12");
+  expect(copied).toContain("12.00");
+  expect(copied).toContain("微信昵称 验收同学");
+  expect(copied).not.toContain("/order-link");
+  await expect(page.locator(".order-contact-message")).toContainText(copied);
+});
