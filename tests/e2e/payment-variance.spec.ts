@@ -156,6 +156,61 @@ test("resets acknowledgement and optional note on reopening, keeps equal cash si
   ).toMatchObject({ receivedCents: 1000, note: "" });
 });
 
+test("cash amount requests a decimal keypad and refuses invalid edits", async ({
+  page,
+}, info) => {
+  await fixture(page);
+  await page.getByRole("button", { name: "确认线下收款", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const cash = dialog.getByLabel("实际收到金额（元）");
+  await expect(cash).toHaveAttribute("inputmode", "decimal");
+  await cash.pressSequentially(".50");
+  await expect(cash).toHaveValue("0.50");
+  for (const edit of ["e", "+", "-", "A", ".", "1"]) {
+    await page.keyboard.insertText(edit);
+    await expect(cash).toHaveValue("0.50");
+  }
+  for (const pasted of ["-10.00", "1e3", "¥1.25", "1.2.5", "2.345"]) {
+    await cash.fill(pasted);
+    await expect(cash).toHaveValue("0.50");
+  }
+  await cash.fill("１０．００");
+  await expect(cash).toHaveValue("10.00");
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const size = await cash.evaluate((input) => {
+      const panel = input.closest("[role=dialog]")!;
+      const style = getComputedStyle(panel);
+      const box = panel.getBoundingClientRect();
+      const control = input.getBoundingClientRect();
+      return {
+        height: control.height,
+        font: parseFloat(getComputedStyle(input).fontSize),
+        inside:
+          control.left >= box.left + parseFloat(style.paddingLeft) - 1 &&
+          control.right <= box.right - parseFloat(style.paddingRight) + 1,
+        fits: document.documentElement.scrollWidth <= innerWidth + 1,
+      };
+    });
+    expect(size).toMatchObject({ inside: true, fits: true });
+    expect(size.height).toBeGreaterThanOrEqual(44);
+    if (width <= 430) expect(size.font).toBeGreaterThanOrEqual(16);
+    if (width === 390 || width === 1440)
+      await dialog.screenshot({
+        path: info.outputPath(`cash-amount-${width}.png`),
+        scale: "css",
+      });
+  }
+  await dialog
+    .getByRole("button", { name: "已核对，确认实际收款", exact: true })
+    .click();
+  expect(
+    await page.evaluate(
+      () => (window as any).fixture.calls[0]?.body.receivedCents,
+    ),
+  ).toBe(1000);
+});
+
 test("reconciles a historical mismatch using its existing cash receipt", async ({
   page,
 }) => {
@@ -231,7 +286,7 @@ test("shows a filled priority star and asks again before reopening a timed-out o
         right: bounds.right,
         dialogOverflow: element.scrollWidth - element.clientWidth,
         pageOverflow: document.documentElement.scrollWidth - innerWidth,
-        buttons: [...element.querySelectorAll('button')].map((button) => ({
+        buttons: [...element.querySelectorAll("button")].map((button) => ({
           name: button.getAttribute("aria-label") || button.textContent,
           height: button.getBoundingClientRect().height,
         })),
@@ -239,10 +294,14 @@ test("shows a filled priority star and asks again before reopening a timed-out o
     });
     expect(metrics.left, `${width}px viewport`).toBeGreaterThanOrEqual(0);
     expect(metrics.right, `${width}px viewport`).toBeLessThanOrEqual(width + 1);
-    expect(metrics.dialogOverflow, `${width}px viewport`).toBeLessThanOrEqual(1);
+    expect(metrics.dialogOverflow, `${width}px viewport`).toBeLessThanOrEqual(
+      1,
+    );
     expect(metrics.pageOverflow, `${width}px viewport`).toBeLessThanOrEqual(1);
     for (const button of metrics.buttons) {
-      expect(button.height, `${width}px ${button.name}`).toBeGreaterThanOrEqual(44);
+      expect(button.height, `${width}px ${button.name}`).toBeGreaterThanOrEqual(
+        44,
+      );
     }
     if (width === 390 || width === 1440)
       await dialog.screenshot({ path: info.outputPath(`reopen-${width}.png`) });
@@ -250,7 +309,10 @@ test("shows a filled priority star and asks again before reopening a timed-out o
   await dialog.getByRole("button", { name: "确认恢复" }).click();
   await expect(dialog).toHaveCount(0);
   expect(await page.evaluate(() => (window as any).fixture.calls)).toEqual([
-    { path: "/admin/orders/order/reopen", body: { expectedVersion: 1, confirmed: true } },
+    {
+      path: "/admin/orders/order/reopen",
+      body: { expectedVersion: 1, confirmed: true },
+    },
   ]);
   await expect(reopen).toHaveCount(0);
   await page.getByRole("button", { name: "确认线下收款", exact: true }).click();

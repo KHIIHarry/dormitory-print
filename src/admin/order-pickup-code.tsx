@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ADMIN } from "../lib/store";
-import type { AdminOrderPickup } from "../lib/types";
+import type { AdminOrderPickup, Order } from "../lib/types";
 import "./order-pickup-code.css";
 
 export function adminPickupOf(order: {
@@ -17,18 +17,16 @@ export function adminPickupOf(order: {
   );
 }
 
-export function OrderPickupCode({
-  pickup,
-  href,
-  subline,
-  trailing,
+function OrderCustomerIcon({
+  placedWithAccount,
+  customerDetailId,
+  label,
 }: {
-  pickup: AdminOrderPickup;
-  href: string;
-  subline?: ReactNode;
-  trailing?: ReactNode;
+  placedWithAccount: boolean;
+  customerDetailId: string | null;
+  label: string;
 }) {
-  const icon = pickup.placedWithAccount && (
+  const icon = placedWithAccount && (
     <span className="order-pickup-icon">
       <svg
         width="18"
@@ -47,13 +45,13 @@ export function OrderPickupCode({
     </span>
   );
   return (
-    <div className="order-pickup-code">
-      {pickup.placedWithAccount && pickup.customerDetailId ? (
+    <>
+      {placedWithAccount && customerDetailId ? (
         <Link
           className="order-pickup-origin"
-          to={`${ADMIN}/customers/${encodeURIComponent(pickup.customerDetailId)}`}
-          aria-label={`查看 ${pickup.pickupCode} 的客户详情`}
-          title="登录下单 · 查看客户详情"
+          to={`${ADMIN}/customers/${encodeURIComponent(customerDetailId)}`}
+          aria-label={label}
+          title="查看客户详情"
           onClick={(event) => event.stopPropagation()}
         >
           {icon}
@@ -61,13 +59,54 @@ export function OrderPickupCode({
       ) : (
         <span
           className="order-pickup-origin"
-          role={pickup.placedWithAccount ? "img" : undefined}
-          aria-label={pickup.placedWithAccount ? "登录下单" : undefined}
-          aria-hidden={pickup.placedWithAccount ? undefined : true}
+          role={placedWithAccount ? "img" : undefined}
+          aria-label={placedWithAccount ? "账号订单" : undefined}
+          aria-hidden={placedWithAccount ? undefined : true}
         >
           {icon}
         </span>
       )}
+    </>
+  );
+}
+
+export function OrderCustomerIdentity({ order }: { order: Order }) {
+  const pickup = adminPickupOf(order);
+  if (!(order.accountOwned ?? pickup.placedWithAccount))
+    return <p className="order-customer-identity">游客订单</p>;
+
+  return (
+    <div className="order-customer-identity">
+      <OrderCustomerIcon
+        placedWithAccount
+        customerDetailId={
+          order.customerSummary?.accountId ?? pickup.customerDetailId
+        }
+        label="查看客户详情"
+      />
+      <span>{order.customerSummary?.email || "账号订单"}</span>
+    </div>
+  );
+}
+
+export function OrderPickupCode({
+  pickup,
+  href,
+  subline,
+  trailing,
+}: {
+  pickup: AdminOrderPickup;
+  href: string;
+  subline?: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="order-pickup-code">
+      <OrderCustomerIcon
+        placedWithAccount={pickup.placedWithAccount}
+        customerDetailId={pickup.customerDetailId}
+        label={`查看 ${pickup.pickupCode} 的客户详情`}
+      />
       <Link
         className="order-pickup-value"
         to={href}

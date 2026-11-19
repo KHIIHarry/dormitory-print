@@ -38,7 +38,7 @@ describe("admin pickup code", () => {
       placedWithAccount: true,
       customerDetailId: null,
     });
-    expect(html).toContain("登录下单");
+    expect(html).toContain("账号订单");
     expect(html.match(/<a /g)).toHaveLength(1);
     expect(html).not.toContain("/customers/");
   });

@@ -1,3 +1,5 @@
+import { AmountInput } from "../components/amount-input";
+import { SearchSuggestions, useSearchTerm } from "../components/search-suggestions";
 import { OrderPickupCode, adminPickupOf } from "../admin/order-pickup-code";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -25,6 +27,8 @@ import { ResourceSkeleton, RefreshStatus } from "../components/feedback";
 import { growthRequest, useGrowthResource } from "../growth/client";
 import type { StaffSession } from "../growth/types";
 import { money, ADMIN } from "../lib/api";
+import type { Order } from "../lib/types";
+import { useIdentity } from "../growth/identity";
 import {
   AccessState,
   ConfirmAction,
@@ -226,13 +230,16 @@ export function AdminAfterSalesPage() {
         <>
       <Panel className="filter-panel">
         <div className="filter-row">
-          <Field label="搜索">
-            <input
-              value={q}
-              onChange={(event) => setQ(event.target.value)}
-              placeholder="订单号、客户或原因"
-            />
-          </Field>
+          <SearchSuggestions
+            label="搜索"
+            value={q}
+            onValueChange={setQ}
+            placeholder="提取码、订单号或原因"
+            options={list.items.flatMap((item) => [
+              { value: item.orderCode || item.orderId, detail: item.reason, keywords: `${item.id} ${item.orderId}` },
+              item.reason,
+            ])}
+          />
           <Field label="状态">
             <select value={status} onChange={(event) => setStatus(event.target.value)}>
               {AFTER_SALE_STATUSES.map(([value, label]) => (
@@ -484,10 +491,9 @@ function UnmatchedReceipts({ orderId }: { orderId?: string }) {
               默认填入剩余可退金额；本次退款不能超过剩余可退，累计退款上限由后端再次校验。
             </Notice>
             <Field label="退款金额（元）">
-              <input
-                inputMode="decimal"
+              <AmountInput
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={setAmount}
                 required
               />
             </Field>
@@ -1162,13 +1168,10 @@ function ReviewAfterSale({
                 : "批准金额（元）"
             }
           >
-            <input
-              type="number"
-              min="0"
-              step="0.01"
+            <AmountInput
               readOnly={customerReason}
               value={approved}
-              onChange={(event) => setApproved(event.target.value)}
+              onValueChange={setApproved}
             />
           </Field>
           {!customerReason && (
@@ -1684,6 +1687,16 @@ function ExportOperations() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
+  const { staff } = useIdentity();
+  const mayReadOrders = staff?.capabilities?.some((capability) =>
+    ["*", "orders.view", "orders.manage", "production.manage", "delivery.manage", "payment.manage", "customer.manage"].includes(capability),
+  );
+  const term = useSearchTerm(q);
+  const suggestions = useGrowthResource<{ items: Order[] }>(
+    mayReadOrders && term
+      ? `/admin/orders?${new URLSearchParams({ q: term, limit: "6", ...(status ? { status } : {}) })}`
+      : null,
+  );
   const [fields, setFields] = useState<string[]>(["orderId", "pickupCode", "status"]);
   const [reason, setReason] = useState("");
   const [job, setJob] = useState<ExportJobView | null>(null);
@@ -1742,9 +1755,21 @@ function ExportOperations() {
               <option value="FINANCE">收退款对账</option>
             </select>
           </Field>
-          <Field label="订单状态筛选">
-            <input value={status} onChange={(event) => setStatus(event.target.value)} placeholder="如 DELIVERED" />
-          </Field>
+          <SearchSuggestions
+            label="订单状态筛选"
+            value={status}
+            onValueChange={setStatus}
+            placeholder="如 DELIVERED"
+            options={[
+              { value: "PENDING_CONFIRMATION", label: "待确认" },
+              { value: "PENDING_PRINT", label: "待打印" },
+              { value: "READY_FOR_DELIVERY", label: "待配送" },
+              { value: "DELIVERING", label: "配送中" },
+              { value: "DELIVERED", label: "已送达" },
+              { value: "DELIVERY_EXCEPTION", label: "配送异常" },
+              { value: "CANCELLED", label: "已撤销" },
+            ]}
+          />
           <Field label="开始日期">
             <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
           </Field>
@@ -1752,9 +1777,19 @@ function ExportOperations() {
             <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
           </Field>
         </div>
-        <Field label="搜索">
-          <input value={q} onChange={(event) => setQ(event.target.value)} />
-        </Field>
+        <SearchSuggestions
+          label="搜索"
+          placeholder="提取码、昵称或手机号"
+          value={q}
+          onValueChange={setQ}
+          minimum={2}
+          pending={suggestions.loading}
+          options={(suggestions.data?.items ?? []).map((order) => ({
+            value: order.pickupCode,
+            detail: order.nickname,
+            keywords: order.phone,
+          }))}
+        />
         <Field label="字段白名单">
           <div className="v1-permission-grid">
             {fieldOptions.map((field) => (

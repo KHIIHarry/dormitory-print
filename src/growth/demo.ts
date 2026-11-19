@@ -465,7 +465,7 @@ export function visibleDemoOrders(
       (db.staff.capabilities || []).some(capability => ["*", "customer.manage"].includes(capability));
     return all.map(order => {
       const customer = canCustomer ? db.accounts.find(account => account.id === order.ownerAccountId) : null;
-      const placedWithAccount = !!order.checkoutAccountId;
+      const placedWithAccount = !!order.ownerAccountId;
       return {
         ...order,
         accountOwned: !!order.ownerAccountId,
@@ -1608,7 +1608,8 @@ export async function demoRequest(
           (!query.get("minCoupons") ||
             a.couponCount >= Number(query.get("minCoupons"))),
       );
-    return { items };
+    const limit = query.get("limit");
+    return { items: limit ? items.slice(0, Number(limit)) : items };
   }
   if (seg[0] === "admin" && seg[1] === "customers") {
     const a = db.accounts.find((a) => a.id === seg[2]);

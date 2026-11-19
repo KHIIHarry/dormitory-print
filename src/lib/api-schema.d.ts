@@ -12779,6 +12779,7 @@ export interface operations {
                 createdTo?: string | null;
                 minOrders?: number | null;
                 minCoupons?: number | null;
+                limit?: number | null;
             };
             header?: never;
             path?: never;

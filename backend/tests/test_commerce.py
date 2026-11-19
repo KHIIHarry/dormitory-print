@@ -154,3 +154,38 @@ def test_admin_order_views_tolerate_null_proof_fields(db,ready_preparation,admin
     listing=api(admin_client,'/admin/orders',None,method='GET')
     assert listing.status_code==200,listing.text
     assert order.id in [item['id'] for item in listing.json()['data']['items']]
+
+
+def test_dashboard_ignores_inactive_production_work(db, admin_client):
+    from test_production import _seed
+
+    for status in ('PENDING_CONFIRMATION', 'DELIVERING', 'DELIVERED', 'CANCELLED'):
+        _seed(db, status=status, binding='CORNER')
+    deleted = _seed(db, status='PENDING_PRINT', binding='CORNER')
+    deleted.order.deleted_at = utcnow()
+    current = _seed(db, binding='CORNER', file_count=2)
+    current.order.content_revision = 2
+    current.files[0].revision = 2
+    db.commit()
+
+    def pending():
+        response = admin_client.get('/api/v1/admin/dashboard')
+        assert response.status_code == 200, response.text
+        summary = response.json()['data']
+        return summary['pendingPrintTaskCount'], summary['pendingBindingCount']
+
+    assert pending() == (1, 1)
+    current.order.status = 'DELIVERED'
+    db.commit()
+    assert pending() == (0, 0)
+
+
+def test_admin_order_search_matches_current_filename(db, ready_preparation, admin_client):
+    from app.commerce import OrderSubmit, submit_order
+
+    actor, _, _, _, body = ready_preparation
+    order = submit_order(db, actor, OrderSubmit.model_validate(body))
+    db.commit()
+    result = admin_client.get('/api/v1/admin/orders', params={'q': 'TEST.PDF'})
+    assert result.status_code == 200, result.text
+    assert [item['id'] for item in result.json()['data']['items']] == [order.id]

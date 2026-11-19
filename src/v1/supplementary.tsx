@@ -1,3 +1,4 @@
+import { AmountInput } from "../components/amount-input";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -598,10 +599,9 @@ export function AdminSupplementaryPanel({ orderId }: { orderId: string }) {
               error={formError && purpose.trim() ? formError : ""}
               hint="按最终商定金额填写，精确到分。"
             >
-              <input
-                inputMode="decimal"
+              <AmountInput
                 value={amount}
-                onChange={(event) => setAmount(event.target.value)}
+                onValueChange={setAmount}
                 placeholder="0.00"
               />
             </Field>
@@ -679,11 +679,10 @@ export function AdminSupplementaryPanel({ orderId }: { orderId: string }) {
               label="金额（元）"
               error={receiptOvershoot ? undefined : moveError}
             >
-              <input
-                inputMode="decimal"
+              <AmountInput
                 value={moveAmount}
-                onChange={(event) => {
-                  setMoveAmount(event.target.value);
+                onValueChange={(value) => {
+                  setMoveAmount(value);
                   setReceiptOvershoot(null);
                   setMoveError("");
                 }}

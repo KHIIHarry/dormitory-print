@@ -1,3 +1,4 @@
+import { SearchSuggestions } from "../components/search-suggestions";
 import "./production.css";
 import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { taskStatus, aggregatePrintStatus } from "../lib/print-state";
@@ -150,14 +151,15 @@ function DemoPrintCenter() {
               </button>
             ))}
           </div>
-          <div className="search-input">
-            <Search size={17} />
-            <input
-              placeholder="搜索提取码或文件"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <SearchSuggestions
+            wrapperClassName="search-input"
+            icon={<Search size={17} aria-hidden="true" />}
+            aria-label="搜索提取码或文件"
+            placeholder="搜索提取码或文件"
+            value={search}
+            onValueChange={setSearch}
+            options={tasks.flatMap(({ o, f }) => [o.pickupCode, { value: f.name, detail: o.pickupCode }])}
+          />
           <CampusFilter
             campuses={data.campuses}
             value={campus}
@@ -1186,15 +1188,19 @@ function ServerPrintCenter() {
       </div>
       <Panel className="filter-panel">
         <div className="filter-row print-queue-filters">
-          <div className="search-input grow">
-            <Search size={17} />
-            <input
-              aria-label="搜索提取码或文件"
-              placeholder="搜索提取码或文件"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </div>
+          <SearchSuggestions
+            wrapperClassName="search-input grow"
+            icon={<Search size={17} aria-hidden="true" />}
+            aria-label="搜索提取码或文件"
+            placeholder="搜索提取码或文件"
+            value={search}
+            onValueChange={setSearch}
+            options={visibleOrders.flatMap((order) => [
+              order.code,
+              ...order.tasks.map((task) => ({ value: task.fileName, detail: order.code })),
+              ...(order.job ? ["订单识别页.pdf"] : []),
+            ])}
+          />
           <CampusFilter
             campuses={data.campuses}
             value={campus}

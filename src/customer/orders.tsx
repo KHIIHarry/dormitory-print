@@ -1,3 +1,4 @@
+import { SearchSuggestions } from "../components/search-suggestions";
 import { formatDisplayTime } from "../lib/display-format";
 import {
   orderLocationSnapshot,
@@ -90,11 +91,12 @@ export function OrderList() {
     !DEMO && !ordersResource?.hasData && !ordersResource?.error;
   const firstError =
     !DEMO && !ordersResource?.hasData ? ordersResource?.error : "";
-  const { customer, orderAccess } = useIdentity();
+  const { customer } = useIdentity();
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState(params.get("q") || "");
   const status = params.get("status") || "";
-  const orders = data.orders.filter(
+  const listedOrders = data.orders.filter((order) => order.accessKind !== "ORDER_GRANT");
+  const orders = listedOrders.filter(
     (o) =>
       (!status || displayOrderStatus(o) === status) &&
       (!search ||
@@ -129,23 +131,29 @@ export function OrderList() {
               {label}
               {s === "" && (
                 <b>
-                  {!DEMO && !ordersResource?.hasData ? "—" : data.orders.length}
+                  {!DEMO && !ordersResource?.hasData ? "—" : listedOrders.length}
                 </b>
               )}
             </button>
           ))}
         </div>
-        <div className="search-input">
-          <Search size={17} />
-          <input
-            placeholder="搜索提取码或文件名"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setParams({ ...Object.fromEntries(params), q: e.target.value });
-            }}
-          />
-        </div>
+        <SearchSuggestions
+          wrapperClassName="search-input"
+          icon={<Search size={17} aria-hidden="true" />}
+          aria-label="搜索提取码或文件名"
+          placeholder="搜索提取码或文件名"
+          value={search}
+          options={listedOrders
+            .filter((order) => !status || displayOrderStatus(order) === status)
+            .flatMap((order) => [
+              order.pickupCode,
+              ...order.files.map((file) => ({ value: file.name, detail: order.pickupCode })),
+            ])}
+          onValueChange={(value) => {
+            setSearch(value);
+            setParams({ ...Object.fromEntries(params), q: value });
+          }}
+        />
       </div>
       <RefreshStatus
         loading={refreshing && !firstLoading}
@@ -212,9 +220,7 @@ export function OrderList() {
         )}
       </div>
       <Notice>
-        {orderAccess
-          ? "当前链接额外授权一笔订单；这不代表拥有下单游客的其他订单。"
-          : "这里只显示当前授权范围内的订单。短提取码与手机号不能公开查询私有文件；链接丢失请联系管理员重新签发。"}
+        专属链接可单独查看订单。链接丢失后，请联系管理员重新签发。
       </Notice>
     </main>
   );

@@ -7,6 +7,8 @@ export function demoDashboardSummary(
   deliveryExceptionCount = 0,
 ): DashboardSummary {
   const active = orders.filter((o) => o.status !== "CANCELLED");
+  const production = orders.filter((order) => order.status === "PENDING_PRINT");
+  const productionFiles = production.flatMap((order) => order.files || []);
   const sum = (pick: (o: Order) => number) =>
     active.reduce((total, o) => total + pick(o), 0);
   return {
@@ -16,16 +18,13 @@ export function demoDashboardSummary(
       (o) => o.status === "PENDING_CONFIRMATION",
     ).length,
     deliveredCount: orders.filter((o) => o.status === "DELIVERED").length,
-    pendingPrintTaskCount: orders
-      .flatMap((o) => o.files || [])
-      .filter((f) => f.printStatus === "PENDING").length,
-    pendingBindingCount: orders
-      .flatMap((o) => o.files || [])
-      .filter(
-        (f) => f.bindingType !== "NONE" && f.bindingStatus !== "COMPLETED",
-      ).length,
-    pendingPackingCount: orders.filter((o) => o.status === "PENDING_PRINT")
-      .length,
+    pendingPrintTaskCount: productionFiles.filter((file) =>
+      ["PENDING", "ATTEMPTED", "EXCEPTION"].includes(file.printStatus),
+    ).length,
+    pendingBindingCount: productionFiles.filter(
+      (file) => file.bindingType !== "NONE" && file.bindingStatus !== "COMPLETED",
+    ).length,
+    pendingPackingCount: production.length,
     readyForDeliveryCount: orders.filter(
       (o) => o.status === "READY_FOR_DELIVERY",
     ).length,

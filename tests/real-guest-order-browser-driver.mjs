@@ -31,15 +31,18 @@ async function adminMutation(page, action, reason, days = 1) {
 
 async function openGuestLink(page) {
   const responsePromise = page.waitForResponse(response => response.url().endsWith('/guest-access/open'));
-  const exchangePromise = page.waitForRequest(request =>
-    request.url().endsWith('/order-access/exchange') && request.method() === 'POST');
+  const popupPromise = page.waitForEvent('popup');
   await page.getByRole('button', { name: '打开游客订单页', exact: true }).click();
-  const response = await responsePromise;
+  const [response, popup] = await Promise.all([responsePromise, popupPromise]);
   expect(response.status()).toBe(200);
-  const token = (await exchangePromise).postDataJSON().accessToken;
-  await expect(page).toHaveURL(new RegExp(`/u/orders/${orderId}$`));
-  await expect(page.getByText('游客订单链接默认有效 14 天', { exact: true })).toBeVisible();
-  return token;
+  const { accessToken } = (await response.json()).data;
+  await expect(page).toHaveURL(new RegExp(`/manage/orders/${orderId}$`));
+  await expect(popup).toHaveURL(new RegExp(`/u/orders/${orderId}$`));
+  await expect(popup.getByText('游客订单链接默认有效 14 天', { exact: true })).toBeVisible();
+  await popup.goto(base + '/u/orders');
+  await expect(popup.getByRole('heading', { name: '还没有这样的订单' })).toBeVisible();
+  await popup.close();
+  return accessToken;
 }
 
 async function resume(page) {
@@ -159,7 +162,31 @@ try {
   await expect(admin.page.getByRole('heading', { name: '客户信息', exact: true })).toBeVisible();
   await expect(admin.page.getByText('guest-browser-user@example.test', { exact: true })).toBeVisible();
   await admin.page.screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, 'guest-claimed-admin-desktop.png'), fullPage: true });
-  console.log('REAL_GUEST_BROWSER_PASS: actual UI and API reset, open, close, reset, old-link denial, original-device login and claim, forwarded-session revocation, account ownership, no token storage.');
+
+  const expiredOrderId = process.env.DORMPRINT_BROWSER_EXPIRED_ORDER_ID;
+  const targetEmail = 'guest-browser-user@example.test';
+  await admin.page.goto(`${base}/manage/orders/${expiredOrderId}`);
+  await admin.page.getByRole('button', { name: '关联到客户账号', exact: true }).click();
+  const dialog = admin.page.getByRole('dialog', { name: '关联到客户账号' });
+  await dialog.getByRole('combobox', { name: '目标客户邮箱或账号 ID' }).fill('guest-browser-us');
+  await dialog.getByRole('option', { name: /guest-browser-user@example.test/ }).click();
+  await expect(dialog.getByText(targetEmail, { exact: true })).toBeVisible();
+  const confirm = dialog.getByRole('button', { name: '确认操作', exact: true });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel('已核实订单与目标已验证账号，确认关联此单').check();
+  await dialog.getByLabel('操作原因').fill('已核实订单与客户注册邮箱');
+  const bindResponse = admin.page.waitForResponse(response =>
+    response.url().endsWith(`/admin/orders/${expiredOrderId}/guest-owner`));
+  await confirm.click();
+  const binding = await bindResponse;
+  expect(binding.status()).toBe(200);
+  expect((await binding.json()).data).toEqual({
+    orderId: expiredOrderId, ownerAccountId: process.env.DORMPRINT_BROWSER_OWNER_ID,
+  });
+  await expect(admin.page.locator('.order-customer-identity')).toContainText(targetEmail);
+  await original.page.goto(`${base}/u/orders`);
+  await expect(original.page.locator(`a[href="/u/orders/${expiredOrderId}"]`)).toBeVisible();
+  console.log('REAL_GUEST_BROWSER_PASS: actual UI and API reset, open, close, reset, old-link denial, original-device claim, admin association by email, forwarded-session revocation, account ownership, no token storage.');
 } finally {
   for (const context of contexts) await context.close();
   await browser.close();

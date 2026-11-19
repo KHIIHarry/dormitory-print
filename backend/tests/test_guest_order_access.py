@@ -348,3 +348,25 @@ def test_order_write_replay_rejects_prior_access_version_after_reset(db, app, ad
     stale = api(guest, f'/orders/{order.id}/cancel', body, key=key)
     assert stale.status_code == 409, stale.text
     assert 'data' not in stale.json()
+
+
+def test_link_view_does_not_add_order_to_account_list(db, app, admin_client, customer_client):
+    from test_order_void import seed_quote
+
+    original, order = guest_order(db, app)
+    seed_quote(db, order)
+    # A separate, account-owned order still belongs in the customer's list.
+    owned = make_order(db, customer_client.account.principal_id)
+    owned.owner_account_id = customer_client.account.id
+    seed_quote(db, owned)
+    assert reset(admin_client, order).status_code == 200
+    grant_count = db.scalar(select(func.count()).select_from(AccessGrant))
+    assert exchange(customer_client, order, open_token(admin_client, order)).status_code == 200
+    detail = customer_client.get(f'/api/v1/orders/{order.id}')
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['data']['accessKind'] == 'ORDER_GRANT'
+    listing = customer_client.get('/api/v1/customer/orders')
+    assert [item['id'] for item in listing.json()['data']['items']] == [owned.id]
+    listing = original.get('/api/v1/customer/orders')
+    assert [item['id'] for item in listing.json()['data']['items']] == [order.id]
+    assert db.scalar(select(func.count()).select_from(AccessGrant)) == grant_count

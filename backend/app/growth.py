@@ -1959,6 +1959,7 @@ def list_customers(
     createdFrom: str | None = Query(default=None), createdTo: str | None = Query(default=None),
     minOrders: int | None = Query(default=None, ge=0),
     minCoupons: int | None = Query(default=None, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=50),
     db=Depends(get_db), actor: Actor = Depends(actor_dep),
 ):
     require_admin(actor, 'customer.manage')
@@ -1987,6 +1988,8 @@ def list_customers(
         if minCoupons is not None and view.coupon_count < minCoupons:
             continue
         items.append(view)
+        if limit is not None and len(items) >= limit:
+            break
     return ok({'items': items})
 
 

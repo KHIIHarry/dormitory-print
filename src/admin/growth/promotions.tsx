@@ -1,3 +1,5 @@
+import { AmountInput } from "../../components/amount-input";
+import { SearchSuggestions } from "../../components/search-suggestions";
 import { useState, type FormEvent } from "react";
 import {
   Button,
@@ -325,19 +327,17 @@ export function PromotionSettingsPage() {
                 </select>
               </Field>
               <Field label="固定券面额（元）">
-                <input
+                <AmountInput
                   required
-                  inputMode="decimal"
                   value={draft.amount}
-                  onChange={(e) => patch({ amount: e.target.value })}
+                  onValueChange={(value) => patch({ amount: value })}
                 />
               </Field>
               <Field label="最低适用消费（元）">
-                <input
+                <AmountInput
                   required
-                  inputMode="decimal"
                   value={draft.minimum}
-                  onChange={(e) => patch({ minimum: e.target.value })}
+                  onValueChange={(value) => patch({ minimum: value })}
                 />
               </Field>
               <Field label="适用服务">
@@ -364,10 +364,9 @@ export function PromotionSettingsPage() {
                 />
               </Field>
               <Field label="总预算（元，留空不限定）">
-                <input
-                  inputMode="decimal"
+                <AmountInput
                   value={draft.budget}
-                  onChange={(e) => patch({ budget: e.target.value })}
+                  onValueChange={(value) => patch({ budget: value })}
                 />
               </Field>
               <Field label="总发行份数（留空不限定）">
@@ -423,13 +422,10 @@ export function PromotionSettingsPage() {
                     label="新人订单商品小计门槛（元）"
                     hint="用于判断新人订单是否达标；邀请人使用奖励券时，仍需满足上方的“最低适用消费”。"
                   >
-                    <input
+                    <AmountInput
                       required
-                      inputMode="decimal"
                       value={draft.qualificationMinimum}
-                      onChange={(e) =>
-                        patch({ qualificationMinimum: e.target.value })
-                      }
+                      onValueChange={(value) => patch({ qualificationMinimum: value })}
                     />
                   </Field>
                   <Field label="新人订单计入达标的服务">
@@ -577,6 +573,8 @@ export function PromotionRecordsPage() {
   const access = useAdminAccess("promotion.manage"),
     exportAccess = useAdminAccess("promotion.export"),
     submit = useSubmit();
+  const [recordSearch, setRecordSearch] = useState("");
+  const [campaignSearch, setCampaignSearch] = useState("");
   const [query, setQuery] = useState(""),
     [action, setAction] = useState<{
       record: PromotionRecord;
@@ -636,12 +634,27 @@ export function PromotionRecordsPage() {
       <SubmitState state={submit} />
       <Panel>
         <form onSubmit={filter} className="growth-filter">
-          <Field label="客户 / 记录搜索">
-            <input name="q" />
-          </Field>
-          <Field label="活动">
-            <input name="campaignId" placeholder="活动编号" />
-          </Field>
+          <SearchSuggestions
+            label="客户 / 记录搜索"
+            name="q"
+            value={recordSearch}
+            onValueChange={setRecordSearch}
+            options={(resource.data?.items ?? []).flatMap((record) => [
+              record.accountMasked,
+              record.couponGrantId || "",
+              record.id,
+            ])}
+          />
+          <SearchSuggestions
+            label="活动"
+            name="campaignId"
+            placeholder="活动编号"
+            value={campaignSearch}
+            onValueChange={setCampaignSearch}
+            options={(resource.data?.items ?? []).flatMap((record) => record.campaignId
+              ? [{ value: record.campaignId, label: record.campaignName, detail: record.campaignId }]
+              : [])}
+          />
           <Field label="类型">
             <select name="type">
               <option value="">全部</option>

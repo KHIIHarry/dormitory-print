@@ -695,8 +695,7 @@ function SettingsForm() {
                     label={`${label}（元 / ${unit}）`}
                   >
                     <NumberInput
-                      min={0}
-                      step="0.01"
+                      asAmount
                       scale={100}
                       placeholder="未配置"
                       value={config.prices?.[key]}

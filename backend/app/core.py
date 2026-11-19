@@ -118,7 +118,7 @@ class AdminOrderPickup(DTO):
 
 
 def admin_order_pickup(order, actor):
-    placed_with_account = bool(order.checkout_account_id)
+    placed_with_account = bool(order.owner_account_id)
     can_view = actor.staff_role == 'ADMIN' and not actor.restricted and bool(
         {'*', 'customer.manage'} & actor.capabilities)
     return {'pickupCode': order.pickup_code, 'placedWithAccount': placed_with_account,

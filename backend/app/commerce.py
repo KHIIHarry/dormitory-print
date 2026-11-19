@@ -743,14 +743,10 @@ def _list_query(db,actor,admin=False):
     active_grants = select(AccessGrant.order_id).where(
         AccessGrant.token_hash.is_not(None), AccessGrant.source_grant_id.is_(None),
         AccessGrant.revoked_at.is_(None), AccessGrant.expires_at > utcnow())
-    linked_grants = select(AccessGrant.order_id).where(
-        AccessGrant.id.in_(actor.grant_ids), AccessGrant.token_hash.is_not(None),
-        AccessGrant.source_grant_id.is_(None), AccessGrant.revoked_at.is_(None),
-        AccessGrant.expires_at > utcnow())
     return query.where(or_(
         Order.owner_account_id == actor.account_id if actor.account_id else False,
         and_(Order.owner_account_id.is_(None), Order.id.in_(active_grants),
-             or_(Order.principal_id.in_(guest_principals), Order.id.in_(linked_grants)))))
+             Order.principal_id.in_(guest_principals))))
 
 
 def _order_list(db,actor,admin=False,cursor=None,limit=50,**filters):
@@ -758,7 +754,15 @@ def _order_list(db,actor,admin=False,cursor=None,limit=50,**filters):
     for name,column in (('status',Order.status),('building',Order.location_id),('slot',Order.requested_slot_id)):
         if filters.get(name):query=query.where(column==filters[name])
     if q:=filters.get('q'):
-        query=query.where(or_(Order.pickup_code.ilike('%'+q+'%'),Order.phone.ilike('%'+q+'%'),Order.nickname.ilike('%'+q+'%')))
+        pattern = '%' + q + '%'
+        filename_matches = (
+            select(OrderFile.id).join(Asset, Asset.id == OrderFile.asset_id)
+            .where(OrderFile.order_id == Order.id,
+                   OrderFile.revision == Order.content_revision, Asset.name.ilike(pattern))
+            .exists()
+        )
+        query = query.where(or_(Order.pickup_code.ilike(pattern), Order.phone.ilike(pattern),
+                                Order.nickname.ilike(pattern), filename_matches))
     if filters.get('batch'):
         query=query.where(Order.id.in_(select(DeliveryAssignment.order_id).where(DeliveryAssignment.batch_id==filters['batch'],DeliveryAssignment.active.is_(True))))
     if cursor:
@@ -1427,10 +1431,19 @@ def dashboard(db=Depends(get_db),actor:Actor=Depends(actor_dep)):
             result['cashReceivedCents']+=order.cash_received_cents
             result['refundCents']+=order.refunded_cents
             if order.settlement_kind=='ZERO_PAYABLE':result['zeroPayableCount']+=1
-    result['pendingPrintTaskCount']=db.scalar(select(func.count()).select_from(PrintTask).where(
-        PrintTask.active.is_(True), PrintTask.file_id.is_not(None),
-        PrintTask.status.in_(['PENDING','ATTEMPTED','EXCEPTION'])))
-    result['pendingBindingCount']=db.scalar(select(func.count()).select_from(BindingTask).where(BindingTask.status!='COMPLETED'))
+    def pending_production_tasks(task):
+        return (
+            select(func.count()).select_from(task)
+            .join(Order, Order.id == task.order_id)
+            .join(OrderFile, and_(OrderFile.id == task.file_id, OrderFile.order_id == Order.id,
+                                 OrderFile.revision == Order.content_revision))
+            .where(Order.deleted_at.is_(None), Order.status == 'PENDING_PRINT')
+        )
+
+    result['pendingPrintTaskCount'] = db.scalar(pending_production_tasks(PrintTask).where(
+        PrintTask.active.is_(True), PrintTask.status.in_(('PENDING', 'ATTEMPTED', 'EXCEPTION'))))
+    result['pendingBindingCount'] = db.scalar(pending_production_tasks(BindingTask).where(
+        OrderFile.binding_type != 'NONE', BindingTask.status.in_(('WAITING_PRINT', 'READY'))))
     from .models import AfterSale,Refund
     result['manualAdjustmentCents']=sum((r.amount_cents-int((r.data or {}).get('suggestedCents',r.amount_cents))) for r in db.scalars(select(Refund)))
     from .models import SupplementaryCharge

@@ -1,4 +1,11 @@
-import { useEffect, useState, type InputHTMLAttributes } from "react";
+import {
+  useEffect,
+  useState,
+  type FocusEvent,
+  type InputHTMLAttributes,
+} from "react";
+import { AmountInput } from "./amount-input";
+
 type NumberInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
   "type" | "value" | "onChange" | "defaultValue"
@@ -7,6 +14,7 @@ type NumberInputProps = Omit<
   onValueChange: (value: number | null) => void;
   /** Multiply the display value by this factor, e.g. 100 for yuan/cents. */
   scale?: number;
+  asAmount?: boolean;
   step?: number | string;
 };
 /**
@@ -19,6 +27,7 @@ export function NumberInput({
   value,
   onValueChange,
   scale = 1,
+  asAmount = false,
   step,
   onFocus,
   onBlur,
@@ -31,34 +40,35 @@ export function NumberInput({
   useEffect(() => {
     if (!focused) setDraft(format(value));
   }, [value, scale, focused]);
-  return (
+  const controls = {
+    ...rest,
+    value: draft,
+    onFocus: (event: FocusEvent<HTMLInputElement>) => {
+      setFocused(true);
+      onFocus?.(event);
+    },
+    onBlur: (event: FocusEvent<HTMLInputElement>) => {
+      setFocused(false);
+      onBlur?.(event);
+    },
+  };
+  const update = (raw: string) => {
+    setDraft(raw);
+    const parsed = Number(raw);
+    if (!raw.trim() || !Number.isFinite(parsed)) {
+      onValueChange(null);
+      return;
+    }
+    onValueChange(scale === 1 ? parsed : Math.round(parsed * scale));
+  };
+  return asAmount ? (
+    <AmountInput {...controls} onValueChange={update} />
+  ) : (
     <input
-      {...rest}
+      {...controls}
       type="number"
       step={step}
-      value={draft}
-      onFocus={(event) => {
-        setFocused(true);
-        onFocus?.(event);
-      }}
-      onBlur={(event) => {
-        setFocused(false);
-        onBlur?.(event);
-      }}
-      onChange={(event) => {
-        const raw = event.target.value;
-        setDraft(raw);
-        if (raw.trim() === "") {
-          onValueChange(null);
-          return;
-        }
-        const parsed = Number(raw);
-        if (!Number.isFinite(parsed)) {
-          onValueChange(null);
-          return;
-        }
-        onValueChange(scale === 1 ? parsed : Math.round(parsed * scale));
-      }}
+      onChange={(event) => update(event.target.value)}
     />
   );
 }

@@ -169,6 +169,7 @@ test("settings edits and saves delivery in cents with binding per copy", async (
     page.getByLabel("左侧双钉（元 / 份）", { exact: true }),
   ).toHaveValue("0.1");
   const delivery = page.getByLabel("配送费（元 / 次）", { exact: true });
+  await expect(delivery).toHaveAttribute("inputmode", "decimal");
   await expect(delivery).toHaveValue("2.5");
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });

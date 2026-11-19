@@ -1,18 +1,23 @@
+import {
+  SearchSuggestions,
+  useSearchTerm,
+} from "../components/search-suggestions";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { ExternalLink } from "lucide-react";
 import { Button, Field, Modal, Notice, Panel } from "../components/ui";
 import { useIdentity } from "../growth/identity";
 import { growthRequest, useGrowthResource } from "../growth/client";
 import { orderAccessUrl } from "../growth/order-security";
+import type { CustomerRecord } from "../growth/types";
 import { ApiError } from "../lib/api";
 import { formatDisplayTime } from "../lib/display-format";
-import { ADMIN, useStore } from "../lib/store";
+import { useStore } from "../lib/store";
 import type { Order } from "../lib/types";
 import {
   guestAccessActionPayload,
   type GuestAccessView,
 } from "../v1/admin-api";
-import "./order-pickup-code.css";
+import "./order-access.css";
 
 const labels = {
   ACTIVE: "开放中",
@@ -22,7 +27,9 @@ const labels = {
 };
 function remaining(view: GuestAccessView, elapsed: number) {
   const milliseconds =
-    Date.parse(view.expiresAt || "") - Date.parse(view.serverNow) - elapsed;
+    Date.parse(view.expiresAt || "") -
+    Date.parse(view.serverNow) -
+    Math.max(0, elapsed);
   if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "已到期";
   const hours = Math.floor(milliseconds / 3_600_000);
   if (hours === 0) return "不足 1 小时";
@@ -44,7 +51,8 @@ export function AdminOrderAccess({ order }: { order: Order }) {
   const detail = useGrowthResource<Order>(
     `/admin/orders/${encodeURIComponent(order.id)}`,
   );
-  const current = detail.data?.id === order.id ? detail.data : order;
+  const latest = detail.data?.id === order.id ? detail.data : null;
+  const current = order.accountOwned ? order : (latest ?? order);
   const owned = current.accountOwned === true;
   const access = useGrowthResource<GuestAccessView>(
     canManage && !owned
@@ -59,8 +67,20 @@ export function AdminOrderAccess({ order }: { order: Order }) {
   );
   const [days, setDays] = useState("14");
   const [reason, setReason] = useState("");
-  const [accountId, setAccountId] = useState("");
+  const [accountQuery, setAccountQuery] = useState("");
+  const [target, setTarget] = useState<CustomerRecord | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const customerTerm = useSearchTerm(target ? "" : accountQuery);
+  const lookup = useGrowthResource<{ items: CustomerRecord[] }>(
+    action === "owner" && canManage && canCustomer && customerTerm
+      ? `/admin/customers?${new URLSearchParams({ q: customerTerm, verified: "true", status: "ACTIVE", limit: "12" })}`
+      : null,
+  );
+  const candidates = lookup.error
+    ? []
+    : (lookup.data?.items ?? []).filter(
+        (customer) => customer.verified && customer.status === "ACTIVE",
+      );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [resetRequired, setResetRequired] = useState(false);
@@ -106,7 +126,8 @@ export function AdminOrderAccess({ order }: { order: Order }) {
     setAction(next);
     setReason("");
     setDays("14");
-    setAccountId("");
+    setAccountQuery("");
+    setTarget(null);
     setConfirmed(false);
     setError("");
   };
@@ -121,15 +142,22 @@ export function AdminOrderAccess({ order }: { order: Order }) {
           action === "reset" ? days : undefined,
         );
         if (action === "owner") {
-          if (!accountId.trim() || !confirmed)
-            throw new Error("请填写目标账号 ID，并确认已核实订单和目标账号");
-          body = { ...body, accountId: accountId.trim() };
+          if (!target || !confirmed)
+            throw new Error("请查找目标账号，并确认已核实订单和目标账号");
+          body = { ...body, accountId: target.id };
         }
       }
     } catch (issue) {
       setError((issue as Error).message);
       return;
     }
+    const tab = opening ? window.open("", "_blank") : null;
+    if (opening && !tab) {
+      setError("浏览器阻止了新标签页，请允许弹出窗口后重试。");
+      return;
+    }
+    if (tab) tab.opener = null;
+    let navigated = false;
     const origin = { ...context.current, epoch: epoch.current };
     const active = () =>
       origin.orderId === context.current.orderId &&
@@ -139,43 +167,43 @@ export function AdminOrderAccess({ order }: { order: Order }) {
     setBusy(true);
     setError("");
     try {
-      // Reconcile the current version before every retry after an unknown result.
-      const latest = await growthRequest<GuestAccessView>(
-        `/admin/orders/${order.id}/guest-access`,
-      );
-      if (!active()) return;
-      setView(latest);
-      setReceivedAt(Date.now());
-      if (
-        !opening &&
-        uncertainVersion.current !== null &&
-        latest.version !== uncertainVersion.current
-      ) {
-        await reload();
-        setError(
-          "上次操作后访问状态已更新，请核对最新结果。如需再次操作，请关闭弹窗后重新选择。",
-        );
-        return;
-      }
-      if (!opening && latest.version !== view.version) {
-        await reload();
-        setError("访问状态已更新，请核对最新状态后再次确认。");
-        return;
-      }
-      if (opening) {
+      if (tab) {
         const result = await growthRequest<{
           orderId: string;
           accessToken: string;
         }>(`/admin/orders/${order.id}/guest-access/open`);
-        if (active())
-          window.location.assign(
-            orderAccessUrl(
-              window.location.origin,
-              result.orderId,
-              result.accessToken,
-            ),
-          );
+        if (!active() || tab.closed) return;
+        tab.location.replace(
+          orderAccessUrl(
+            window.location.origin,
+            result.orderId,
+            result.accessToken,
+          ),
+        );
+        navigated = true;
       } else {
+        // Reconcile the version before retrying an operation with an unknown result.
+        const latest = await growthRequest<GuestAccessView>(
+          `/admin/orders/${order.id}/guest-access`,
+        );
+        if (!active()) return;
+        setView(latest);
+        setReceivedAt(Date.now());
+        if (
+          uncertainVersion.current !== null &&
+          latest.version !== uncertainVersion.current
+        ) {
+          await reload();
+          setError(
+            "上次操作后访问状态已更新，请核对最新结果。如需再次操作，请关闭弹窗后重新选择。",
+          );
+          return;
+        }
+        if (latest.version !== view.version) {
+          await reload();
+          setError("访问状态已更新，请核对最新状态后再次确认。");
+          return;
+        }
         const path =
           action === "owner" ? "guest-owner" : `guest-access/${action}`;
         uncertainVersion.current = view.version;
@@ -211,6 +239,7 @@ export function AdminOrderAccess({ order }: { order: Order }) {
         await reload();
       }
     } finally {
+      if (!navigated) tab?.close();
       if (active()) {
         running.current = false;
         setBusy(false);
@@ -221,34 +250,20 @@ export function AdminOrderAccess({ order }: { order: Order }) {
     return (
       <Panel className="admin-order-access" title="客户信息">
         {canCustomer && current.customerSummary ? (
-          <>
-            <dl className="growth-facts">
-              <div>
-                <dt>注册邮箱</dt>
-                <dd>{current.customerSummary.email}</dd>
-              </div>
-              <div>
-                <dt>昵称</dt>
-                <dd>{current.customerSummary.displayName || "未填写"}</dd>
-              </div>
-              <div>
-                <dt>注册时间</dt>
-                <dd>{formatDisplayTime(current.customerSummary.createdAt)}</dd>
-              </div>
-              <div>
-                <dt>验证状态</dt>
-                <dd>
-                  {current.customerSummary.verified ? "已验证" : "未验证"}
-                </dd>
-              </div>
-            </dl>
-            <Link
-              className="btn secondary"
-              to={`${ADMIN}/customers/${encodeURIComponent(current.customerSummary.accountId)}`}
-            >
-              查看客户详情
-            </Link>
-          </>
+          <dl className="order-access-facts">
+            <div>
+              <dt>昵称</dt>
+              <dd>{current.customerSummary.displayName || "未填写"}</dd>
+            </div>
+            <div>
+              <dt>注册时间</dt>
+              <dd>{formatDisplayTime(current.customerSummary.createdAt)}</dd>
+            </div>
+            <div>
+              <dt>验证状态</dt>
+              <dd>{current.customerSummary.verified ? "已验证" : "未验证"}</dd>
+            </div>
+          </dl>
         ) : canCustomer ? (
           <Notice>
             客户资料暂未返回。
@@ -279,6 +294,8 @@ export function AdminOrderAccess({ order }: { order: Order }) {
     );
   const activeLink =
     view?.status === "ACTIVE" && remaining(view, now - receivedAt) !== "已到期";
+  const status =
+    view?.status === "ACTIVE" && !activeLink ? "EXPIRED" : view?.status;
   const estimate =
     Number.isInteger(Number(days)) && Number(days) >= 1 && Number(days) <= 14
       ? new Date(
@@ -288,7 +305,17 @@ export function AdminOrderAccess({ order }: { order: Order }) {
         ).toISOString()
       : null;
   return (
-    <Panel className="admin-order-access" title="订单专属链接">
+    <Panel
+      className="admin-order-access"
+      title="订单专属链接"
+      action={
+        status && (
+          <span className={activeLink ? "badge green" : "badge gray"}>
+            {labels[status]}
+          </span>
+        )
+      }
+    >
       {access.loading && <p role="status">正在读取链接状态…</p>}
       {access.error && (
         <Notice type="error">
@@ -300,39 +327,34 @@ export function AdminOrderAccess({ order }: { order: Order }) {
       )}
       {view && (
         <>
-          <dl className="growth-facts">
-            <div>
-              <dt>链接状态</dt>
-              <dd>
-                {view.status === "ACTIVE" && !activeLink
-                  ? "已到期"
-                  : labels[view.status]}
-              </dd>
-            </div>
-            <div>
-              <dt>开放时间</dt>
-              <dd>{formatDisplayTime(view.openedAt)}</dd>
-            </div>
-            <div>
-              <dt>到期时间</dt>
-              <dd>{formatDisplayTime(view.expiresAt)}</dd>
-            </div>
-            {activeLink && (
+          {view.status !== "NO_LINK" && (
+            <dl className="order-access-facts">
               <div>
-                <dt>剩余时间</dt>
-                <dd>{remaining(view, now - receivedAt)}</dd>
+                <dt>开放时间</dt>
+                <dd>{formatDisplayTime(view.openedAt)}</dd>
               </div>
-            )}
-          </dl>
+              <div>
+                <dt>到期时间</dt>
+                <dd>{formatDisplayTime(view.expiresAt)}</dd>
+              </div>
+              {activeLink && (
+                <div>
+                  <dt>剩余时间</dt>
+                  <dd>{remaining(view, now - receivedAt)}</dd>
+                </div>
+              )}
+            </dl>
+          )}
           {(resetRequired || (activeLink && !view.canOpen)) && (
             <Notice>重置后可从后台打开。</Notice>
           )}
-          <div className="button-row">
+          <div className="order-access-actions">
             <Button
-              variant="secondary"
+              className="order-access-open"
               disabled={busy || !activeLink || !view.canOpen}
               onClick={() => void execute(true)}
             >
+              <ExternalLink size={16} strokeWidth={1.7} aria-hidden="true" />
               打开游客订单页
             </Button>
             <Button
@@ -408,19 +430,55 @@ export function AdminOrderAccess({ order }: { order: Order }) {
             )}
             {action === "owner" && (
               <>
-                <Field label="目标客户账号 ID">
-                  <input
-                    value={accountId}
-                    onChange={(event) => setAccountId(event.target.value)}
-                    disabled={busy}
-                  />
-                </Field>
+                <SearchSuggestions
+                  label="目标客户邮箱或账号 ID"
+                  placeholder="输入注册邮箱的部分字符"
+                  value={accountQuery}
+                  onValueChange={(value) => {
+                    setAccountQuery(value);
+                    setTarget(null);
+                    setConfirmed(false);
+                  }}
+                  disabled={busy}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  minimum={2}
+                  inline
+                  pending={lookup.loading}
+                  status={
+                    customerTerm
+                      ? lookup.error || "未找到匹配的已验证账号。"
+                      : undefined
+                  }
+                  options={candidates.map((customer) => ({
+                    key: customer.id,
+                    value: customer.email,
+                    label: customer.displayName || "未命名客户",
+                    detail: customer.email,
+                    keywords: customer.id,
+                  }))}
+                  onPick={(option) =>
+                    setTarget(
+                      candidates.find(
+                        (customer) => customer.id === option.key,
+                      ) ?? null,
+                    )
+                  }
+                />
+                {target && (
+                  <div className="order-owner-result" role="status">
+                    <strong>
+                      {target.displayName || "未命名客户"} · 已验证
+                    </strong>
+                    <span>{target.email}</span>
+                  </div>
+                )}
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
                     checked={confirmed}
                     onChange={(event) => setConfirmed(event.target.checked)}
-                    disabled={busy}
+                    disabled={busy || !target}
                   />
                   已核实订单与目标已验证账号，确认关联此单
                 </label>
@@ -440,7 +498,14 @@ export function AdminOrderAccess({ order }: { order: Order }) {
                 <span role="alert">{error}</span>
               </Notice>
             )}
-            <Button disabled={busy} onClick={() => void execute()}>
+            <Button
+              disabled={
+                busy ||
+                (action === "owner" &&
+                  (!target || !confirmed || !reason.trim()))
+              }
+              onClick={() => void execute()}
+            >
               {busy ? "正在提交…" : "确认操作"}
             </Button>
           </div>

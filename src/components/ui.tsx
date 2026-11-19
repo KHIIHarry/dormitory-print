@@ -1,4 +1,5 @@
 import { NumberInput } from "./number-input";
+import { AmountInput } from "./amount-input";
 import { formatFileSize } from "../lib/display-format";
 import { getIdentityGeneration } from "../growth/client";
 import { MOTION, usePresence } from "./presence";
@@ -435,6 +436,7 @@ export function Field({
   const simple =
     isValidElement(children) &&
     (children.type === NumberInput ||
+      children.type === AmountInput ||
       (typeof children.type === "string" &&
         ["input", "select", "textarea"].includes(children.type)));
   const control = simple

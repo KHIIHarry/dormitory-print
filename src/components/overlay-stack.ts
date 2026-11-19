@@ -38,6 +38,13 @@ function onKey(e: KeyboardEvent) {
   const layer = top();
   if (!layer) return;
   if (e.key === "Escape") {
+    if (
+      e.target instanceof HTMLElement &&
+      e.target.matches(
+        '[role="combobox"][aria-autocomplete="list"][aria-expanded="true"]',
+      )
+    )
+      return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (layer.interactive()) layer.close();

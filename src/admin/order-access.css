@@ -1,0 +1,85 @@
+.admin-order-access {
+  min-width: 0;
+}
+
+.admin-order-access .panel-heading {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.order-access-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 144px), 1fr));
+  gap: 12px 16px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--cream);
+}
+
+.order-access-facts > div {
+  min-width: 0;
+}
+
+.order-access-facts dt {
+  color: #735c49;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.order-access-facts dd {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.order-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-order-access .order-access-actions .btn {
+  flex: 1 1 126px;
+  width: auto;
+  min-width: 0;
+  min-height: 44px;
+  margin-top: 0;
+  padding-inline: 10px;
+  text-align: center;
+  white-space: normal;
+  letter-spacing: normal;
+}
+
+.admin-order-access .order-access-actions .order-access-open {
+  flex-basis: 100%;
+  background: var(--primary-dark);
+}
+
+.order-access-actions .order-access-open:hover:not(:disabled) {
+  background: #904d29;
+}
+
+.order-access-actions .order-access-open svg {
+  flex-shrink: 0;
+}
+
+.admin-order-access > .notice + .order-access-actions,
+.admin-order-access > .order-access-actions + .notice {
+  margin-top: 12px;
+}
+
+.order-owner-result {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--cream);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}

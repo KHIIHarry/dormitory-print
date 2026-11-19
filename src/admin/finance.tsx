@@ -1,3 +1,4 @@
+import { AmountInput } from "../components/amount-input";
 import { useEffect, useRef, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import {
@@ -275,12 +276,11 @@ export function AdminFinance() {
                     </select>
                   </Field>
                   <Field label="金额（元）">
-                    <input
-                      inputMode="decimal"
+                    <AmountInput
                       required
                       placeholder="0.00"
                       value={form.amount}
-                      onChange={(event) => patch("amount", event.target.value)}
+                      onValueChange={(value) => patch("amount", value)}
                     />
                   </Field>
                   {form.category === "PAPER" && (

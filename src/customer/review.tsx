@@ -1,3 +1,4 @@
+import { SearchSuggestions } from "../components/search-suggestions";
 import { useEffect, useState, useRef, type CSSProperties } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import {
@@ -1371,11 +1372,15 @@ function ReviewContent() {
                     tabIndex={-1}
                     className="map-search"
                   >
-                    <Search size={17} />
-                    <input
+                    <Search size={17} aria-hidden="true" />
+                    <SearchSuggestions
+                      wrapperClassName="map-search-field"
+                      aria-label="搜索宿舍楼或教学楼"
                       placeholder="搜索宿舍楼或教学楼"
                       value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      onValueChange={setSearch}
+                      options={campusBuildings.map((item) => ({ value: item.name, key: item.id }))}
+                      onPick={(item) => selectBuilding(item.key!)}
                     />
                   </div>
                   <CampusMap

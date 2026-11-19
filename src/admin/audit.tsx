@@ -1,3 +1,4 @@
+import { SearchSuggestions } from "../components/search-suggestions";
 import { useEffect, useState } from "react";
 import { Eye, RefreshCw, Search } from "lucide-react";
 import { DEMO, useStore } from "../lib/store";
@@ -97,21 +98,24 @@ export function AuditPage() {
             setFilters({ ...form });
           }}
         >
-          <Field label="搜索操作">
-            <input
-              placeholder="动作、对象或原因"
-              maxLength={200}
-              value={form.q}
-              onChange={(e) => patch("q", e.target.value)}
-            />
-          </Field>
-          <Field label="操作者 ID">
-            <input
-              placeholder="按员工或客户 ID 筛选"
-              value={form.actorId}
-              onChange={(e) => patch("actorId", e.target.value)}
-            />
-          </Field>
+          <SearchSuggestions
+            label="搜索操作"
+            placeholder="动作、对象或原因"
+            maxLength={200}
+            value={form.q}
+            onValueChange={(value) => patch("q", value)}
+            options={[
+              ...Object.entries(auditActionNames).map(([value, label]) => ({ value, label })),
+              ...rows.flatMap((row) => [row.targetId, row.targetType, row.reason.slice(0, 200)]),
+            ]}
+          />
+          <SearchSuggestions
+            label="操作者 ID"
+            placeholder="按员工或客户 ID 筛选"
+            value={form.actorId}
+            onValueChange={(value) => patch("actorId", value)}
+            options={rows.map((row) => ({ value: row.actorId, label: row.actorName, detail: row.actorId }))}
+          />
           <Field label="开始日期">
             <input
               type="date"

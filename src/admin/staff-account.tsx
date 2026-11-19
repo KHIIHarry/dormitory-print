@@ -1,3 +1,4 @@
+import { SearchSuggestions } from "../components/search-suggestions";
 import {
   useEffect,
   useLayoutEffect,
@@ -1204,70 +1205,29 @@ export function StaffManagementPage() {
                   演示模式没有真实客户账号，无法完成授权；请在真实后台操作。
                 </Notice>
               )}
-              <Field label="搜索客户账号">
-                <input
-                  autoFocus
-                  disabled={DEMO}
-                  placeholder="完整邮箱或姓名（至少 3 个字符）"
-                  value={customerQuery}
-                  onChange={(e) => setCustomerQuery(e.target.value)}
-                />
-              </Field>
-              {!DEMO && customerTerm.length < 3 && (
-                <p className="muted">输入至少 3 个字符开始搜索。</p>
-              )}
-              {!DEMO && customerTerm.length >= 3 && (
-                <>
-                  <ResourceState
-                    loading={grantable.loading}
-                    error={grantable.error}
-                    reload={grantable.reload}
-                    hasData={!!grantable.data?.items.length}
-                    empty={
-                      !grantable.loading &&
-                      !grantable.error &&
-                      !grantable.data?.items.length
-                    }
-                  />
-                  {!!grantable.data?.items.length && (
-                    <div className="growth-table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>客户</th>
-                            <th>账号状态</th>
-                            <th>操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {grantable.data.items.map((account) => (
-                            <tr key={account.id}>
-                              <td>
-                                <b>{account.displayName}</b>
-                                <small>
-                                  {account.emailMasked} · {account.id}
-                                </small>
-                              </td>
-                              <td>
-                                已验证
-                                <small>可授予员工权限</small>
-                              </td>
-                              <td>
-                                <Button
-                                  variant="secondary"
-                                  onClick={() => chooseAccount(account)}
-                                >
-                                  选择
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </>
-              )}
+              <SearchSuggestions
+                label="搜索客户账号"
+                hint={!DEMO ? "输入至少 3 个字符开始搜索。" : undefined}
+                autoFocus
+                disabled={DEMO}
+                placeholder="邮箱或姓名"
+                value={customerQuery}
+                onValueChange={setCustomerQuery}
+                minimum={3}
+                inline
+                pending={grantable.loading}
+                status={customerTerm.length >= 3 ? grantable.error || "没有可授予权限的匹配账号。" : undefined}
+                options={(customerTerm === customerQuery.trim() ? grantable.data?.items ?? [] : []).map((account) => ({
+                  key: account.id,
+                  value: account.displayName || account.id,
+                  detail: account.emailMasked,
+                  keywords: `${account.id} ${customerTerm}`,
+                }))}
+                onPick={(option) => {
+                  const account = grantable.data?.items.find((item) => item.id === option.key);
+                  if (account) chooseAccount(account);
+                }}
+              />
             </div>
           ) : (
             <form

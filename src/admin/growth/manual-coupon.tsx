@@ -1,11 +1,14 @@
+import { AmountInput } from "../../components/amount-input";
+import { SearchSuggestions, useSearchTerm } from "../../components/search-suggestions";
 import { useState, type FormEvent } from "react";
 import { Button, Field, Modal, Notice } from "../../components/ui";
-import { growthRequest } from "../../growth/client";
+import { growthRequest, useGrowthResource } from "../../growth/client";
 import type {
+  CustomerRecord,
   ManualCouponIssueResult,
   ManualCouponRecipient,
 } from "../../growth/types";
-import { mutate, SubmitState, useSubmit } from "./common";
+import { mutate, SubmitState, useAdminAccess, useSubmit } from "./common";
 import { parseCents, yuan } from "./logic";
 
 const services = [
@@ -57,6 +60,13 @@ export function ManualCouponModal({
   const submit = useSubmit();
   const [step, setStep] = useState<"lookup" | "form" | "done">("lookup");
   const [email, setEmail] = useState("");
+  const customerAccess = useAdminAccess("customer.manage");
+  const term = useSearchTerm(email);
+  const candidates = useGrowthResource<{ items: CustomerRecord[] }>(
+    customerAccess.allowed && step === "lookup" && term
+      ? `/admin/customers?${new URLSearchParams({ q: term, verified: "true", status: "ACTIVE", limit: "12" })}`
+      : null,
+  );
   const [recipient, setRecipient] = useState<ManualCouponRecipient | null>(null);
   const [amount, setAmount] = useState("20.00");
   const [minSpend, setMinSpend] = useState("0");
@@ -164,17 +174,24 @@ export function ManualCouponModal({
               按客户注册邮箱精确查找账号。未验证、已停用或注销中的账号不能收券。
             </p>
             <form className="growth-stack" onSubmit={lookup}>
-              <Field label="客户邮箱" hint="请输入完整邮箱地址，不区分大小写">
-                <input
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="customer@example.com"
-                  autoFocus
-                />
-              </Field>
+              <SearchSuggestions
+                label="客户邮箱"
+                hint="输入完整邮箱，也可从建议中选择"
+                inputMode="email"
+                type="email"
+                value={email}
+                onValueChange={setEmail}
+                placeholder="customer@example.com"
+                autoFocus
+                inline
+                minimum={2}
+                pending={candidates.loading}
+                options={(candidates.data?.items ?? []).map((account) => ({
+                  value: account.email,
+                  label: account.displayName,
+                  detail: account.email,
+                }))}
+              />
               <div className="manual-coupon__actions">
                 <Button type="button" variant="secondary" disabled={submit.pending} onClick={onClose}>
                   取消
@@ -202,17 +219,15 @@ export function ManualCouponModal({
             <form className="growth-stack" onSubmit={issue}>
               <div className="growth-form-grid">
                 <Field label="券面额（元）" hint="单张不超过 ¥200">
-                  <input
-                    inputMode="decimal"
+                  <AmountInput
                     value={amount}
-                    onChange={(event) => setAmount(event.target.value)}
+                    onValueChange={setAmount}
                   />
                 </Field>
                 <Field label="使用门槛（元）" hint="0 表示无门槛">
-                  <input
-                    inputMode="decimal"
+                  <AmountInput
                     value={minSpend}
-                    onChange={(event) => setMinSpend(event.target.value)}
+                    onValueChange={setMinSpend}
                   />
                 </Field>
                 <Field label="适用服务">

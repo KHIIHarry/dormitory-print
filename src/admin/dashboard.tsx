@@ -40,6 +40,7 @@ export function Dashboard() {
   const { data, resources, refresh } = useStore();
   const summary = useGrowthResource<DashboardSummary>(
     DEMO ? null : "/admin/dashboard",
+    10_000,
   );
   let stats: DashboardSummary | null = null;
   let summaryError = summary.error;

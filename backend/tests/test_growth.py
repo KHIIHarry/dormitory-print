@@ -774,6 +774,16 @@ def test_admin_routes_require_admin_capability(client, api):
     assert response.status_code in (401, 403)
 
 
+def test_customer_search_caps_suggestions_without_limiting_the_directory(admin_client, account_factory, api):
+    for index in range(3):
+        account_factory(email=f'bounded-client-{index}@example.invalid', invite_code=uid('i'))
+    response = api(admin_client, '/admin/customers?q=bounded-client&limit=2', method='GET')
+    assert response.status_code == 200, response.text
+    assert len(response.json()['data']['items']) == 2
+    full = api(admin_client, '/admin/customers?q=bounded-client', method='GET')
+    assert len(full.json()['data']['items']) == 3
+
+
 @pytest.mark.parametrize('role,capabilities', [('ADMIN', ['orders.view']), ('COURIER', ['customer.manage'])])
 def test_customer_email_is_restricted_to_customer_management(
     customer_client, staff_factory, account_factory, api, role, capabilities,

@@ -629,6 +629,7 @@ test("admin customer search submits an email and shows it on list and detail", a
   const email = "averylongcustomeremailaddressfortesting@school-print.example.test";
   const customer = {
     ...customerSession.account,
+    id: "a1b2c3d4-1234-4abc-8def-123456789abc",
     email,
     createdAt: "2026-10-30T04:00:00Z",
     orderCount: 2,
@@ -649,13 +650,20 @@ test("admin customer search submits an email and shows it on list and detail", a
     return route.fulfill({ json: envelope(customer) });
   });
   await page.goto(appUrl("/manage/customers"));
-  const search = page.getByRole("searchbox", { name: "客户搜索" });
+  const search = page.getByRole("combobox", { name: "客户搜索" });
   const submit = page.getByRole("button", { name: "筛选客户" });
   const more = page.getByRole("button", { name: /更多筛选/ });
   const verified = page.getByLabel("邮箱验证");
   await expect(more).toHaveAttribute("aria-expanded", "false");
   await expect(verified).toBeHidden();
   await expect(search).toHaveAttribute("placeholder", "客户名称、编号或邮箱");
+  await search.fill("AVERYLONGCUSTOMER");
+  await expect(page.getByRole("option", { name: new RegExp(email) })).toBeVisible();
+  await search.press("ArrowDown");
+  await expect(search).toHaveAttribute("aria-activedescendant", /-options-0$/);
+  await search.press("Enter");
+  await expect(search).toHaveValue(email);
+  await expect(page.getByRole("listbox")).toBeHidden();
   await search.fill("SCHOOL-PRINT.EXAMPLE.TEST");
   await submit.click();
   await expect.poll(() => searches.at(-1)?.get("q")).toBe("SCHOOL-PRINT.EXAMPLE.TEST");
@@ -735,11 +743,24 @@ test("admin customer search submits an email and shows it on list and detail", a
   await table.getByRole("link", { name: "查看详情" }).click();
   const details = page.locator(".growth-facts").filter({ hasText: email });
   await expect(details.getByText(email, { exact: true })).toBeVisible();
+  const accountId = details.locator(":scope > div:last-child > dd");
+  await expect(details.locator(":scope > div:nth-last-child(2) > dt")).toHaveText("邀请码");
+  await expect(details.locator(":scope > div:last-child > dt")).toHaveText("客户账号 ID");
+  await expect(accountId).toHaveText(customer.id);
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    const fits = await accountId.evaluate((value) => {
+      const facts = value.closest("dl")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(value);
+      return [...range.getClientRects()].every(
+        (line) => line.left >= facts.left - 1 && line.right <= facts.right + 1,
+      );
+    });
+    expect(fits).toBe(true);
     if (width === 390 || width === 1440)
-      await details.screenshot({ path: info.outputPath(`customer-email-${width}.png`), scale: "css" });
+      await details.screenshot({ path: info.outputPath(`customer-details-${width}.png`), scale: "css" });
   }
 });
 

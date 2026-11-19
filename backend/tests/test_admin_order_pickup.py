@@ -56,12 +56,12 @@ def test_registered_order_pickup_respects_customer_management_capability(db):
             'placedWithAccount': True,
             'customerDetailId': expected,
         }
-    # An order's original guest source remains visible after account association.
+    # Account association updates the shared icon without changing the checkout source.
     seed.order.checkout_account_id = None
     db.flush()
     task = production.list_print_tasks(db=db, actor=seed.actor)['data']['tasks'][0]
-    assert task['adminPickup']['placedWithAccount'] is False
-    assert task['adminPickup']['customerDetailId'] is None
+    assert task['adminPickup']['placedWithAccount'] is True
+    assert task['adminPickup']['customerDetailId'] == account.id
 
 
 def test_customer_management_order_summary_contains_pickup_origin(db):

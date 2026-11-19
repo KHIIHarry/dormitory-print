@@ -1,3 +1,4 @@
+import { SearchSuggestions, useSearchTerm } from "../../components/search-suggestions";
 import { OrderPickupCode, adminPickupOf } from "../order-pickup-code";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Filter } from "lucide-react";
@@ -63,6 +64,11 @@ const customerActions: Record<string, string> = {
 export function CustomersPage() {
   const access = useAdminAccess("customer.manage");
   const [query, setQuery] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const customerTerm = useSearchTerm(customerSearch);
+  const suggestions = useGrowthResource<{items: CustomerRecord[]}>(
+    access.allowed && customerTerm ? `/admin/customers?${new URLSearchParams({ q: customerTerm, limit: "12" })}` : null,
+  );
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
   const activeFilters = new URLSearchParams(query);
@@ -98,13 +104,21 @@ export function CustomersPage() {
           }}
         >
           <div className="customer-search-row">
-            <Field label="客户搜索">
-              <input
-                type="search"
-                name="q"
-                placeholder="客户名称、编号或邮箱"
-              />
-            </Field>
+            <SearchSuggestions
+              label="客户搜索"
+              name="q"
+              placeholder="客户名称、编号或邮箱"
+              value={customerSearch}
+              onValueChange={setCustomerSearch}
+              minimum={2}
+              pending={suggestions.loading}
+              options={(suggestions.data?.items ?? []).map((customer) => ({
+                value: customer.email || customer.id,
+                label: customer.displayName,
+                detail: customer.email || customer.emailMasked,
+                keywords: `${customer.id} ${customer.inviteCode}`,
+              }))}
+            />
             <div className="customer-search-actions">
               <Button
                 variant="secondary"
@@ -280,6 +294,10 @@ export function CustomerDetailPage() {
               <div>
                 <dt>邀请码</dt>
                 <dd>{customer.inviteCode || "—"}</dd>
+              </div>
+              <div>
+                <dt>客户账号 ID</dt>
+                <dd>{customer.id}</dd>
               </div>
             </dl>
             <Notice>

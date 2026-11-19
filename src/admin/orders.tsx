@@ -1,3 +1,5 @@
+import { AmountInput } from "../components/amount-input";
+import { SearchSuggestions } from "../components/search-suggestions";
 import { growthRequest } from "../growth/client";
 import { formatDisplayTime } from "../lib/display-format";
 import { deliveryWindowOf, slotBlockLabel } from "../v1/customer";
@@ -8,7 +10,7 @@ import {
   settlementWithReceipt,
 } from "../growth/pricing";
 import { AdminOrderAccess } from "./order-access";
-import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
+import { OrderCustomerIdentity, OrderPickupCode, adminPickupOf } from "./order-pickup-code";
 import { useIdentity } from "../growth/identity";
 import { useEffect, useState } from "react";
 import {
@@ -105,17 +107,22 @@ export function AdminOrders() {
       />
       <Panel className="filter-panel">
         <div className="filter-row">
-          <div className="search-input grow">
-            <Search size={18} />
-            <input
-              placeholder="搜索提取码、昵称、手机号或文件名"
-              value={q}
-              onChange={(e) => {
-                patch("q", e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
+          <SearchSuggestions
+            wrapperClassName="search-input grow"
+            icon={<Search size={18} aria-hidden="true" />}
+            aria-label="搜索订单"
+            placeholder="搜索提取码、昵称、手机号或文件名"
+            value={q}
+            options={filtered.map((order) => ({
+              value: order.pickupCode,
+              detail: [order.nickname, order.files[0]?.name].filter(Boolean).join(" · "),
+              keywords: `${order.phone} ${order.files.map((file) => file.name).join(" ")}`,
+            }))}
+            onValueChange={(value) => {
+              patch("q", value);
+              setPage(1);
+            }}
+          />
           <select
             aria-label="订单状态"
             value={status}
@@ -620,7 +627,7 @@ export function AdminOrderDetail() {
           </div>
         }
       />
-      <OrderPickupCode pickup={adminPickupOf(order)} href={`${ADMIN}/orders/${order.id}`} />
+      <OrderCustomerIdentity order={order} />
       <div className="admin-detail-banner">
         <Badge status={order.status} />
         {order.identificationProgress?.enabled && (
@@ -1029,15 +1036,11 @@ export function AdminOrderDetail() {
               </select>
             </Field>
           )}
-          <Field label="实际收到金额（元）">
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              max="21474836.47"
+          <Field label="实际收到金额（元）" hint="仅支持数字，最多两位小数。">
+            <AmountInput
               value={received}
-              onChange={(e) => {
-                setReceived(e.target.value);
+              onValueChange={(value) => {
+                setReceived(value);
                 setPaymentDifferenceAccepted(false);
               }}
             />

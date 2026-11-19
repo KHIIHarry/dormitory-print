@@ -1,0 +1,84 @@
+.search-combobox {
+  position: relative;
+  min-width: 0;
+}
+
+.search-combobox input[role="combobox"],
+.search-combobox.field input[role="combobox"][aria-autocomplete="list"] {
+  min-width: 0;
+  min-height: 44px;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.search-combobox input[role="combobox"]:focus-visible {
+  outline: 2px solid var(--primary-dark);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.search-input.search-combobox:focus-within,
+.map-search:has(.map-search-field:focus-within) {
+  outline: 2px solid var(--primary-dark);
+  outline-offset: -1px;
+}
+
+.search-input.search-combobox input[role="combobox"]:focus-visible,
+.map-search-field input[role="combobox"]:focus-visible {
+  outline: none;
+}
+
+.search-suggestion-popover {
+  position: absolute;
+  z-index: 12;
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  max-height: min(264px, 42dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.search-combobox-inline > .search-suggestion-popover {
+  position: relative;
+  top: auto;
+}
+
+.search-suggestion-option,
+.search-suggestion-status {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 9px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.search-suggestion-option {
+  cursor: pointer;
+}
+
+.search-suggestion-option + .search-suggestion-option {
+  border-top: 1px solid var(--line);
+}
+
+.search-suggestion-option:hover,
+.search-suggestion-option[aria-selected="true"] {
+  background: var(--cream);
+}
+
+.search-suggestion-option small {
+  color: #735c49;
+  font-size: 12px;
+}
+
+.map-search-field {
+  min-width: 0;
+  flex: 1;
+}

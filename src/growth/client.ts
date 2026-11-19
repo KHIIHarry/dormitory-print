@@ -41,7 +41,10 @@ export async function growthRequest<T>(
     );
   return result;
 }
-export function useGrowthResource<T>(path: string | null) {
+export function useGrowthResource<T>(
+  path: string | null,
+  refreshInterval?: number,
+) {
   const [snapshot, setSnapshot] = useState<{
     path: string | null;
     generation: number;
@@ -153,15 +156,20 @@ export function useGrowthResource<T>(path: string | null) {
       if (document.visibilityState === "visible" && navigator.onLine)
         void reload();
     };
+    const timer =
+      path && refreshInterval
+        ? window.setInterval(verify, refreshInterval)
+        : undefined;
     window.addEventListener("online", verify);
     document.addEventListener("visibilitychange", verify);
     return () => {
       sequence.current++;
       active.current?.abort();
+      window.clearInterval(timer);
       window.removeEventListener("online", verify);
       document.removeEventListener("visibilitychange", verify);
     };
-  }, [path, generation]);
+  }, [path, generation, refreshInterval]);
   const valid =
     snapshot.path === path && snapshot.generation === identityGeneration;
   const data = valid ? snapshot.data : null,

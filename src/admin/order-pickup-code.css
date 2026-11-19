@@ -72,16 +72,22 @@ table th.order-pickup-heading {
   outline: 2px solid #a65c31;
   outline-offset: 2px;
 }
-.admin-order-access .growth-facts dd {
+.order-customer-identity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 16px;
+  color: #6f5742;
+  font-size: 14px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
-  min-width: 0;
 }
-.admin-order-access .button-row {
-  flex-wrap: wrap;
+
+.order-customer-identity > .order-pickup-origin {
+  flex: 0 0 44px;
 }
-.admin-order-access .form-stack {
-  min-width: 0;
-}
+
 .print-order-pickup {
   display: flex;
   align-items: center;

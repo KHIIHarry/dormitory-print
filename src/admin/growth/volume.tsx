@@ -1,3 +1,4 @@
+import { AmountInput } from "../../components/amount-input";
 import { useEffect, useState } from "react";
 import {
   Button,
@@ -262,12 +263,11 @@ export function VolumeDiscountsPage() {
                   />
                 </Field>
                 <Field label="A4 打印小计（元）">
-                  <input
+                  <AmountInput
                     required
-                    inputMode="decimal"
                     value={subtotal}
-                    onChange={(e) => {
-                      setSubtotal(e.target.value);
+                    onValueChange={(value) => {
+                      setSubtotal(value);
                       setPreview(undefined);
                     }}
                   />

@@ -1,3 +1,4 @@
+import { AmountInput } from "../components/amount-input";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
@@ -288,12 +289,9 @@ function PolicyEditor({
               label="每单工资（元）"
               hint="每笔成功交付的订单按此金额计薪。"
             >
-              <input
-                type="number"
-                min={0}
-                step="0.01"
+              <AmountInput
                 value={fixedCents}
-                onChange={(event) => setFixedCents(event.target.value)}
+                onValueChange={setFixedCents}
               />
             </Field>
           ) : (
