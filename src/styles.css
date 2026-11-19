@@ -5088,6 +5088,18 @@ select.campus-filter:focus {
   font-size: 11px;
   color: #b5997c;
 }
+.courier-order-recipient {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 12px 0;
+}
+.courier-order .courier-order-recipient p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .courier-order-bottom {
   display: flex;
   justify-content: space-between;
@@ -5147,6 +5159,8 @@ select.campus-filter:focus {
 }
 .courier-recipient > div {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .courier-recipient b {
   font-size: 13px;
@@ -5159,8 +5173,9 @@ select.campus-filter:focus {
   margin: 7px 0 0;
 }
 .call-button {
-  height: 43px;
-  width: 43px;
+  height: 44px;
+  width: 44px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   border: 1px solid #eadbce;

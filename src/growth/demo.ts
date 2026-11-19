@@ -476,6 +476,7 @@ export function visibleDemoOrders(
       };
     });
   }
+  if (view === "courier") return all.map(order => ({ ...order, accountOwned: !!order.ownerAccountId }));
   if (view !== "customer") return all;
   return all.flatMap((order) => {
     const owned =

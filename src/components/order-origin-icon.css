@@ -1,0 +1,24 @@
+.order-origin-indicator {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  color: #a65c31;
+  cursor: default;
+}
+.order-pickup-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f9f2ed;
+}
+.order-guest-icon {
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  user-select: none;
+}

@@ -5725,6 +5725,8 @@ export interface components {
         };
         /** DeliveryOrderView */
         DeliveryOrderView: {
+            /** Accountowned */
+            accountOwned: boolean;
             /** Actualstartedat */
             actualStartedAt?: string | null;
             /**

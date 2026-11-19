@@ -1610,3 +1610,32 @@ def test_mixed_campus_batch_is_blocked_from_start(db, api, client, act_as,
         for blocker in _start_blockers(db, batch, assignments, orders)
     }
     assert 'CAMPUS_MIXED' in codes, codes
+
+
+def test_courier_identity_tracks_current_owner_without_customer_data(
+        db, api, admin_client, client_factory, staff_factory, account_factory):
+    courier = make_courier(staff_factory)
+    order = make_ready_order(db)
+    batch = create_batch(api, admin_client, courier)
+    add_orders(api, admin_client, batch, [order.id])
+    publish_batch(api, admin_client, batch['id'])
+    assigned = courier_client(client_factory, db, courier)
+
+    def views():
+        detail = api(assigned, f'/courier/orders/{order.id}', None, method='GET')
+        batch_detail = api(assigned, f'/courier/batches/{batch["id"]}', None, method='GET')
+        assert detail.status_code == batch_detail.status_code == 200
+        return [detail.json()['data'], batch_detail.json()['data']['orders'][0]]
+
+    def check(expected):
+        for view in views():
+            assert view['accountOwned'] is expected
+            assert not {'ownerAccountId', 'checkoutAccountId', 'customerSummary',
+                        'adminPickup', 'customerDetailId', 'email'} & view.keys()
+
+    check(False)
+    account = account_factory()
+    order.owner_account_id = account.id
+    assert order.checkout_account_id is None
+    db.commit()
+    check(True)

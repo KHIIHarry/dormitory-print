@@ -3247,6 +3247,7 @@ def delivery_order_view(db, order: Order, actor: Actor, *, assignment: DeliveryA
         if order.status == 'DELIVERED':
             allowed.append('VIEW_PROOF')
     view = {
+        'accountOwned': bool(order.owner_account_id),
         'id': order.id,
         'version': order.version,
         'pickupCode': order.pickup_code,

@@ -278,3 +278,13 @@ it("admin demo projections expose registered pickup origins only with customer c
   expect(allowed.adminPickup?.customerDetailId).toBe(db.account.id);
   expect(allowed.customerSummary?.email).toBe(db.accounts[0].email);
 });
+
+
+it("courier demo identity follows account association instead of the checkout snapshot", () => {
+  const order = { id: "courier-identity", pickupCode: "AB123", files: [] } as unknown as Order;
+  db.orders.set(order.id, order);
+  expect(visibleDemoOrders("courier", db.customer, null)[0].accountOwned).toBe(false);
+  order.ownerAccountId = db.account.id;
+  expect(order.checkoutAccountId).toBeUndefined();
+  expect(visibleDemoOrders("courier", db.customer, null)[0].accountOwned).toBe(true);
+});

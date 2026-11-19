@@ -5619,6 +5619,10 @@
       "DeliveryOrderView": {
         "additionalProperties": false,
         "properties": {
+          "accountOwned": {
+            "title": "Accountowned",
+            "type": "boolean"
+          },
           "actualStartedAt": {
             "anyOf": [
               {
@@ -5946,6 +5950,7 @@
           }
         },
         "required": [
+          "accountOwned",
           "id",
           "version",
           "pickupCode",

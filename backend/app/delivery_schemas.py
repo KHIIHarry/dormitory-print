@@ -819,6 +819,7 @@ class LocationExceptionApprovalView(DTO):
 
 
 class DeliveryOrderView(DTO):
+    account_owned: bool
     id: str
     version: int
     pickup_code: str

@@ -939,3 +939,103 @@ test("single proof waits for the server DTO and uses the real assignment id", as
   await expect(page.getByText("门口鞋柜", { exact: true })).toBeVisible();
   await expect(page.locator(".app-error")).toHaveCount(0);
 });
+
+
+test("courier identity icons are shared, inert and update after account association", async ({
+  page,
+}, info) => {
+  const state = initialState();
+  state.orders[0].accountOwned = false;
+  state.orders[1].accountOwned = true;
+  await boot(page, state);
+  await expect(page.locator(".courier-app")).toHaveCount(1);
+  const guestCard = page.locator(".courier-order").filter({ hasText: "A1001" });
+  const accountCard = page
+    .locator(".courier-order")
+    .filter({ hasText: "A1002" });
+  const guest = guestCard.getByRole("img", { name: "游客订单", exact: true });
+  const account = accountCard.getByRole("img", {
+    name: "账号订单",
+    exact: true,
+  });
+  await expect(guest.locator(".order-guest-icon")).toBeVisible();
+  await expect(account.locator("svg")).toBeVisible();
+  await guest.click();
+  await account.click();
+  await expect(page).toHaveURL(appUrl("/courier/batches/batch-1"));
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const icon of [guest, account]) {
+      const box = (await icon.boundingBox())!;
+      expect(box.width).toBe(44);
+      expect(box.height).toBe(44);
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - innerWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+    await page.evaluate(async () => {
+      window.scrollTo(0, 0);
+      await document.fonts.ready;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    if (width === 390 || width === 1440)
+      await page.screenshot({
+        path: info.outputPath(`courier-identity-list-${width}.png`),
+        fullPage: true,
+      });
+  }
+  await guestCard.locator("strong").click();
+  await expect(page).toHaveURL(appUrl("/courier/orders/ORD-1"));
+  const recipient = page.locator(".courier-recipient");
+  await expect(
+    recipient.getByRole("img", { name: "游客订单", exact: true }),
+  ).toBeVisible();
+  await recipient.getByRole("img").click();
+  await expect(page).toHaveURL(appUrl("/courier/orders/ORD-1"));
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const fits = await recipient.evaluate((row) => {
+      const bounds = row.getBoundingClientRect();
+      return [...row.children].every((child) => {
+        const box = child.getBoundingClientRect();
+        return box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
+      });
+    });
+    expect(fits).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - innerWidth,
+      ),
+    ).toBeLessThanOrEqual(1);
+    await page.evaluate(async () => {
+      window.scrollTo(0, 0);
+      await document.fonts.ready;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    if (width === 390 || width === 1440)
+      await page.screenshot({
+        path: info.outputPath(`courier-identity-detail-${width}.png`),
+        fullPage: true,
+      });
+  }
+  state.orders[0].accountOwned = true;
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange")),
+  );
+  await expect(
+    recipient.getByRole("img", { name: "账号订单", exact: true }),
+  ).toBeVisible();
+  await expect(recipient.locator(".order-guest-icon")).toHaveCount(0);
+  await recipient.getByRole("img").click();
+  await expect(page).toHaveURL(appUrl("/courier/orders/ORD-1"));
+  await expect(page.locator('a[href*="/customers/"]')).toHaveCount(0);
+  expect(state.calls.some((call) => call.path.includes("/customers"))).toBe(
+    false,
+  );
+});

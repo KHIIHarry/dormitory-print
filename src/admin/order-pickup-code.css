@@ -14,24 +14,6 @@
   border-radius: 12px;
   color: #a65c31;
 }
-.order-pickup-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 50%;
-  background: #f9f2ed;
-}
-.order-guest-icon {
-  display: block;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  user-select: none;
-}
-span.order-pickup-origin {
-  cursor: default;
-}
 a.order-pickup-origin:hover .order-pickup-icon {
   background: #edd6c8;
 }

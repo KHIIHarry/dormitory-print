@@ -42,6 +42,7 @@ import {
   Panel,
 } from "../components/ui";
 import { Progress, RefreshStatus, ResourceSkeleton } from "../components/feedback";
+import { OrderOriginIndicator } from "../components/order-origin-icon";
 import { DeliveryDateField } from "../components/delivery-date-field";
 import { useIdentity } from "../growth/identity";
 import {
@@ -405,10 +406,13 @@ export function CourierBatch() {
                   <strong>{o.pickupCode}</strong>
                   <Badge status={o.status} />
                 </div>
-                <p>
-                  {o.nickname}
-                  <span>{o.phone}</span>
-                </p>
+                <div className="courier-order-recipient">
+                  <OrderOriginIndicator accountOwned={!!o.accountOwned} />
+                  <p>
+                    {o.nickname}
+                    <span>{o.phone}</span>
+                  </p>
+                </div>
                 <div className="courier-order-bottom">
                   <span>
                     {o.packingStatus === "PACKED" ? "资料已装袋" : "尚未装袋"}
@@ -481,9 +485,7 @@ export function CourierOrder() {
           </div>
         </div>
         <div className="courier-recipient">
-          <span className="avatar">
-            <User size={22} />
-          </span>
+          <OrderOriginIndicator accountOwned={!!order.accountOwned} />
           <div>
             <b>{order.nickname}</b>
             <p>{order.phone}</p>
