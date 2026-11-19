@@ -1,6 +1,10 @@
 import { SearchSuggestions } from "../components/search-suggestions";
 import "./production.css";
-import { OrderPickupCode, adminPickupOf } from "./order-pickup-code";
+import {
+  OrderCustomerIdentity,
+  OrderPickupCode,
+  adminPickupOf,
+} from "./order-pickup-code";
 import { taskStatus, aggregatePrintStatus } from "../lib/print-state";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -41,7 +45,7 @@ import {
 } from "../components/ui";
 import { DocPreview } from "../components/doc-preview";
 import { BindingCard } from "../customer/settings";
-import { growthRequest } from "../growth/client";
+import { growthRequest, useGrowthResource } from "../growth/client";
 import { errorText } from "./growth/common";
 import { campusOfOrder } from "../lib/campus";
 import { CampusFilter, CampusTag } from "./campus-filter";
@@ -410,7 +414,7 @@ function DemoPrintTask() {
         description={file.name}
         action={<Badge status={status || "PENDING"} />}
       />
-      <OrderPickupCode pickup={adminPickupOf(order)} href={`${ADMIN}/orders/${order.id}`} />
+      <OrderCustomerIdentity order={order} />
       <div className="print-view-layout">
         <Panel>
           <div className="panel-heading">
@@ -1403,10 +1407,16 @@ function ServerPrintTask() {
     : undefined;
   // Production endpoints use the order optimistic version as the task lock.
   const orderVersion = task?.orderVersion ?? 0;
-  const refundLocked =
-    order && order.version >= orderVersion
-      ? (order.refundLocked ?? task?.refundLocked)
-      : task?.refundLocked;
+  const currentOrder =
+    order && order.version >= orderVersion ? order : undefined;
+  const refundLocked = currentOrder?.refundLocked ?? task?.refundLocked;
+  // The matching order may be outside the store's first page.
+  const { data: orderDetail } = useGrowthResource<Order>(
+    task && !currentOrder
+      ? `/admin/orders/${encodeURIComponent(task.orderId)}`
+      : null,
+    10_000,
+  );
   const [startReason, setStartReason] = useState("");
   const [startDialog, setStartDialog] = useState(false);
   const [startIssue, setStartIssue] = useState("");
@@ -1621,7 +1631,7 @@ function ServerPrintTask() {
           action={<Badge status={task.status} />}
         />
       </div>
-      <OrderPickupCode pickup={adminPickupOf(task)} href={`${ADMIN}/orders/${task.orderId}`} />
+      <OrderCustomerIdentity order={currentOrder ?? orderDetail ?? task} />
       {refundLocked && (
         <Notice type="error">
           退款审核期间暂停新的打印和补打。已有尝试仍可核实开印和打印结果。

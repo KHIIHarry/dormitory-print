@@ -607,6 +607,219 @@
         "title": "AdminOrderPickup",
         "type": "object"
       },
+      "AdminSlotListView": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSlotView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminSlotListView",
+        "type": "object"
+      },
+      "AdminSlotView": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptanceStatus": {
+            "default": "OPEN",
+            "title": "Acceptancestatus",
+            "type": "string"
+          },
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "autoPublish": {
+            "default": false,
+            "title": "Autopublish",
+            "type": "boolean"
+          },
+          "batchCount": {
+            "default": 0,
+            "title": "Batchcount",
+            "type": "integer"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/BlockerView"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "campusId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusid"
+          },
+          "campusName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campusname"
+          },
+          "capacity": {
+            "title": "Capacity",
+            "type": "integer"
+          },
+          "cutoffAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoffat"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "editConstraints": {
+            "$ref": "#/components/schemas/SlotEditConstraints"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "endsAt": {
+            "format": "date-time",
+            "title": "Endsat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lateRescheduleSelectable": {
+            "default": false,
+            "title": "Laterescheduleselectable",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "occupied": {
+            "title": "Occupied",
+            "type": "integer"
+          },
+          "openAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openat"
+          },
+          "pendingApplicationCount": {
+            "default": 0,
+            "title": "Pendingapplicationcount",
+            "type": "integer"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "sealReason": {
+            "default": "",
+            "title": "Sealreason",
+            "type": "string"
+          },
+          "sealedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedat"
+          },
+          "sealedByName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealedbyname"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "startsAt": {
+            "format": "date-time",
+            "title": "Startsat",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "weekday": {
+            "title": "Weekday",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "weekday",
+          "name",
+          "start",
+          "end",
+          "startsAt",
+          "endsAt",
+          "capacity",
+          "occupied",
+          "remaining",
+          "enabled",
+          "selectable",
+          "version",
+          "editConstraints"
+        ],
+        "title": "AdminSlotView",
+        "type": "object"
+      },
       "AffectedItem": {
         "additionalProperties": false,
         "properties": {
@@ -6202,6 +6415,42 @@
         "title": "Envelope[AdminMapView]",
         "type": "object"
       },
+      "Envelope_AdminSlotListView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminSlotListView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[AdminSlotListView]",
+        "type": "object"
+      },
+      "Envelope_AdminSlotView_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminSlotView"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[AdminSlotView]",
+        "type": "object"
+      },
       "Envelope_AnnouncementConfigView_": {
         "additionalProperties": false,
         "properties": {
@@ -7856,24 +8105,6 @@
           "requestId"
         ],
         "title": "Envelope[SlotSealResultView]",
-        "type": "object"
-      },
-      "Envelope_SlotView_": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/SlotView"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "data",
-          "requestId"
-        ],
-        "title": "Envelope[SlotView]",
         "type": "object"
       },
       "Envelope_StaffActionResult_": {
@@ -16040,6 +16271,38 @@
         "title": "SlotDeleteInput",
         "type": "object"
       },
+      "SlotEditConstraints": {
+        "additionalProperties": false,
+        "properties": {
+          "campusLocked": {
+            "title": "Campuslocked",
+            "type": "boolean"
+          },
+          "timeLock": {
+            "anyOf": [
+              {
+                "enum": [
+                  "SEALED",
+                  "BATCH",
+                  "ORDER",
+                  "OCCUPIED"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timelock"
+          }
+        },
+        "required": [
+          "campusLocked",
+          "timeLock"
+        ],
+        "title": "SlotEditConstraints",
+        "type": "object"
+      },
       "SlotInput": {
         "additionalProperties": false,
         "properties": {
@@ -16253,7 +16516,7 @@
             "type": "string"
           },
           "slot": {
-            "$ref": "#/components/schemas/SlotView"
+            "$ref": "#/components/schemas/AdminSlotView"
           }
         },
         "required": [
@@ -16326,7 +16589,7 @@
             "title": "Sealedbyname"
           },
           "slot": {
-            "$ref": "#/components/schemas/SlotView"
+            "$ref": "#/components/schemas/AdminSlotView"
           }
         },
         "required": [
@@ -30123,7 +30386,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_SlotListView_"
+                  "$ref": "#/components/schemas/Envelope_AdminSlotListView_"
                 }
               }
             },
@@ -30169,7 +30432,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_SlotView_"
+                  "$ref": "#/components/schemas/Envelope_AdminSlotView_"
                 }
               }
             },
@@ -30398,7 +30661,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_SlotView_"
+                  "$ref": "#/components/schemas/Envelope_AdminSlotView_"
                 }
               }
             },

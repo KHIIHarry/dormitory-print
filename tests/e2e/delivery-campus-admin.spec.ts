@@ -225,6 +225,134 @@ test("blocked slot save keeps the input and shows the error next to save", async
   );
 });
 
+test("slot editor locks batched fields and saves only editable changes", async ({
+  page,
+}, info) => {
+  await fixture(page, "slots");
+  await page.evaluate(() => {
+    Object.assign((window as any).fixture.slots[0], {
+      editConstraints: { campusLocked: true, timeLock: "BATCH" },
+      batchCount: 1,
+      openAt: "2030-11-01T03:00:00Z",
+      cutoffAt: "2030-11-01T05:00:00Z",
+      occupied: 3,
+    });
+  });
+  await page.getByRole("row").filter({ hasText: "东时段" })
+    .getByRole("button", { name: "编辑" }).click();
+  const dialog = page.getByRole("dialog");
+  for (const label of [
+    "配送校区", "配送日期", "预计配送开始", "预计配送结束", "开放下单时间", "截单时间",
+  ]) await expect(dialog.getByLabel(label, { exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("link", { name: "前往配送调度" }))
+    .toHaveAttribute("href", "/admin/batches");
+  const autoPublish = dialog.getByRole("checkbox", { name: "截单后自动发布" });
+  await expect(autoPublish).toBeEnabled();
+  await expect(dialog.getByRole("checkbox", { name: /人工开启接单/ })).toBeEnabled();
+  const save = dialog.getByRole("button", { name: "保存时段" });
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const metrics = await dialog.evaluate((panel) => {
+      const bounds = panel.getBoundingClientRect();
+      const style = getComputedStyle(panel);
+      return {
+        overflow: panel.scrollWidth - panel.clientWidth,
+        documentOverflow: document.documentElement.scrollWidth - innerWidth,
+        controls: [...panel.querySelectorAll(".field input,.field select")].map((control) => {
+          const box = control.getBoundingClientRect();
+          return {
+            fits: box.left >= bounds.left + parseFloat(style.paddingLeft) - 1 &&
+              box.right <= bounds.right - parseFloat(style.paddingRight) + 1,
+            height: box.height,
+            font: parseFloat(getComputedStyle(control).fontSize),
+          };
+        }),
+      };
+    });
+    expect(metrics.overflow).toBeLessThanOrEqual(1);
+    expect(metrics.documentOverflow).toBeLessThanOrEqual(1);
+    for (const control of metrics.controls) {
+      expect(control.fits).toBe(true);
+      expect(control.height).toBeGreaterThanOrEqual(44);
+      if (width <= 430) expect(control.font).toBeGreaterThanOrEqual(16);
+    }
+    if (width === 390 || width === 1440) {
+      await dialog.evaluate((panel) => { panel.scrollTop = 0; });
+      await dialog.screenshot({ path: info.outputPath(`slot-lock-${width}.png`) });
+      await save.scrollIntoViewIfNeeded();
+      await dialog.screenshot({ path: info.outputPath(`slot-actions-${width}.png`) });
+    }
+  }
+  await page.clock.fastForward(3_600_001);
+  await expect(autoPublish).toBeDisabled();
+  await dialog.getByLabel("时段名称").fill("更新显示名称");
+  const capacity = dialog.getByLabel("预约容量（单）");
+  await capacity.fill("2");
+  await save.click();
+  await expect(dialog.getByRole("alert")).toHaveText("容量不能小于已占用数量");
+  await capacity.fill("4");
+  await save.click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixture.calls[0]?.body)).toEqual({
+    expectedVersion: 1, name: "更新显示名称", capacity: 4, reason: "",
+  });
+});
+
+test("slot editor allows only missing booking rules on legacy batched slots", async ({ page }) => {
+  await fixture(page, "slots");
+  await page.evaluate(() => {
+    Object.assign((window as any).fixture.slots[0], {
+      editConstraints: { campusLocked: true, timeLock: "BATCH" },
+      batchCount: 1,
+      cutoffAt: "2030-11-01T03:00:21Z",
+      autoPublish: true,
+    });
+  });
+  await page.getByRole("row").filter({ hasText: "东时段" })
+    .getByRole("button", { name: "编辑" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("预计配送开始")).toBeDisabled();
+  await expect(dialog.getByLabel("截单时间", { exact: true })).toBeDisabled();
+  await dialog.getByLabel("开放下单时间").fill("2030-11-01T10:00");
+  const autoPublish = dialog.getByRole("checkbox", { name: "截单后自动发布" });
+  await autoPublish.uncheck();
+  await expect(autoPublish).toBeDisabled();
+  await dialog.getByRole("button", { name: "保存时段" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixture.calls[0]?.body)).toEqual({
+    expectedVersion: 1, openAt: "2030-11-01T10:00", cutoffAt: "2030-11-01T03:00:21Z",
+    autoPublish: false, reason: "",
+  });
+});
+
+test("slot editor updates locks when a batch is generated while open", async ({ page }) => {
+  await fixture(page, "slots");
+  await page.getByRole("row").filter({ hasText: "东时段" })
+    .getByRole("button", { name: "编辑" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("预计配送开始").fill("12:15");
+  await dialog.getByLabel("时段名称").fill("保留名称");
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.slots = fixture.slots.map((slot: any) => slot.id === "e1" ? {
+      ...slot, version: 2, occupied: 1, batchCount: 1,
+      openAt: "2030-11-01T03:00:00Z", cutoffAt: "2030-11-01T05:00:00Z",
+      editConstraints: { campusLocked: true, timeLock: "BATCH" },
+    } : slot);
+    fixture.data.slots = fixture.slots;
+    fixture.refresh();
+  });
+  const start = dialog.getByLabel("预计配送开始");
+  await expect(start).toBeDisabled();
+  await expect(start).toHaveValue("12:00");
+  await expect(dialog.getByLabel("时段名称")).toHaveValue("保留名称");
+  await dialog.getByRole("button", { name: "保存时段" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).fixture.calls[0]?.body)).toEqual({
+    expectedVersion: 2, name: "保留名称", reason: "",
+  });
+});
+
 test("dispatch hides emptied automatic batches and shows them again after new orders", async ({
   page,
 }) => {
@@ -444,6 +572,101 @@ test("batch membership refresh invalidates an open operation preview", async ({
     page.getByRole("button", { name: "确认执行移出订单" }),
   ).toHaveCount(0);
   await expect(dialog.getByText("没有可选择的订单")).toBeVisible();
+});
+
+test("batch order codes leave space for contact and destination fields", async ({
+  page,
+}, info) => {
+  await fixture(page, "detail");
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    const [original] = fixture.data.orders;
+    fixture.data.orders = [
+      {
+        ...original,
+        pickupCode: "W8WMW",
+        status: "READY_FOR_DELIVERY",
+        nickname: "同学甲",
+        phone: "13800000001",
+        slotId: "e1",
+      },
+      {
+        ...original,
+        id: "o2",
+        pickupCode: "7ZXVT",
+        status: "READY_FOR_DELIVERY",
+        nickname: "用于检查换行的较长客户昵称",
+        phone: "13800000002",
+        slotId: "e1",
+        adminPickup: {
+          pickupCode: "7ZXVT",
+          placedWithAccount: true,
+          customerDetailId: "customer-1",
+        },
+      },
+    ];
+    fixture.data.campuses = fixture.campuses;
+    fixture.data.batches[0].orderIds = ["o1", "o2"];
+    fixture.refresh();
+  });
+  const panel = page
+    .locator(".panel")
+    .filter({
+      has: page.getByRole("heading", { name: "批次订单", exact: true }),
+    });
+  await expect(
+    panel.getByRole("link", { name: "W8WMW", exact: true }),
+  ).toBeVisible();
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await panel.evaluate((element) => {
+      const table = element.querySelector("table")!;
+      const wrapper = table.parentElement!.getBoundingClientRect();
+      const card = element.getBoundingClientRect();
+      const padding = getComputedStyle(element);
+      const heading = table.querySelector("th")!;
+      const range = document.createRange();
+      range.selectNodeContents(heading);
+      const title = range.getBoundingClientRect();
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        wrapperFits:
+          wrapper.left >= card.left + parseFloat(padding.paddingLeft) - 2 &&
+          wrapper.right <= card.right - parseFloat(padding.paddingRight) + 2,
+        rows: Array.from(table.querySelectorAll("tbody tr"), (row) => {
+          const [pickup, contact, destination] = row.querySelectorAll("td");
+          const code = pickup.querySelector("strong")!.getBoundingClientRect();
+          const link = pickup
+            .querySelector(".order-pickup-value")!
+            .getBoundingClientRect();
+          const contentLeft = (cell: HTMLElement) =>
+            cell.getBoundingClientRect().left +
+            parseFloat(getComputedStyle(cell).paddingLeft);
+          const phone = contact.querySelector("small")!.getBoundingClientRect();
+          return {
+            codeToContact: contentLeft(contact) - code.right,
+            contactToDestination: contentLeft(destination) - phone.right,
+            headingOffset: Math.abs(code.left - title.left),
+            targetHeight: link.height,
+          };
+        }),
+      };
+    });
+    expect(layout.pageWidth).toBeLessThanOrEqual(width + 1);
+    expect(layout.rows).toHaveLength(2);
+    for (const row of layout.rows) {
+      expect(row.codeToContact).toBeGreaterThanOrEqual(24);
+      expect(row.headingOffset).toBeLessThanOrEqual(1);
+      expect(row.contactToDestination).toBeGreaterThanOrEqual(24);
+      expect(row.targetHeight).toBeGreaterThanOrEqual(44);
+    }
+    expect(layout.wrapperFits).toBe(true);
+    if (width === 390 || width === 1440)
+      await panel.screenshot({
+        path: info.outputPath(`batch-order-spacing-${width}.png`),
+        scale: "css",
+      });
+  }
 });
 
 test("first courier assignment omits the reason unless other fields change", async ({

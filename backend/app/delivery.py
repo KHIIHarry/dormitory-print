@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import get_args
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import object_session
 
@@ -65,6 +65,8 @@ from .delivery_plan import (
 )
 from .delivery_schemas import (
     AdminMapView,
+    AdminSlotListView,
+    AdminSlotView,
     AddressReviewInput,
     BatchCreate,
     BatchDeliveryProofInput,
@@ -108,7 +110,6 @@ from .delivery_schemas import (
     SlotSealPreview,
     SlotSealResultView,
     SlotUpdate,
-    SlotView,
     batch_window,
     normalize_exception_type,
     position_errors,
@@ -262,6 +263,49 @@ def _order_effective_slot_id(order: Order) -> str | None:
     return order.confirmed_slot_id or order.requested_slot_id
 
 
+def _slot_campus_referenced(db, slot_id: str) -> bool:
+    """Historical references keep the campus immutable, including trashed records."""
+    batch_slot = func.coalesce(
+        func.nullif(DeliveryBatch.slot_id, ''),
+        func.nullif(DeliveryBatch.data['slotId'].as_string(), ''),
+        func.nullif(DeliveryBatch.data['slot_id'].as_string(), ''),
+        DeliveryBatch.data['slotSnapshot']['id'].as_string())
+    return bool(db.scalar(select(or_(
+        select(Order.id).where(
+            (Order.requested_slot_id == slot_id) | (Order.confirmed_slot_id == slot_id)
+            # Legacy slot proposals and snapshots also live in order JSON.
+            | cast(Order.data, String).contains(slot_id, autoescape=True)).exists(),
+        select(DeliveryGroup.id).where(DeliveryGroup.slot_id == slot_id).exists(),
+        select(DeliveryChange.id).where(
+            (DeliveryChange.slot_id == slot_id)
+            | (DeliveryChange.original['slotId'].as_string() == slot_id)
+            | (DeliveryChange.original['id'].as_string() == slot_id)
+            | (DeliveryChange.proposed['slotId'].as_string() == slot_id)
+            | (DeliveryChange.proposed['id'].as_string() == slot_id)).exists(),
+        select(DeliveryBatch.id).where(batch_slot == slot_id).exists(),
+    ))))
+
+
+def _slot_order_count(db, slot_id: str) -> int:
+    return db.scalar(select(func.count()).select_from(current_slot_orders(slot_id).subquery())) or 0
+
+
+def _slot_batch_count(db, slot_id: str) -> int:
+    return db.scalar(select(func.count()).select_from(operational_slot_batches(slot_id).subquery())) or 0
+
+
+def _slot_time_lock(slot: DeliverySlot, order_count: int, batch_count: int) -> str | None:
+    if slot.sealed_at is not None:
+        return 'SEALED'
+    if batch_count:
+        return 'BATCH'
+    if order_count:
+        return 'ORDER'
+    if slot.occupied:
+        return 'OCCUPIED'
+    return None
+
+
 def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
                admin: bool = False) -> dict:
     remaining = max(0, slot.capacity - slot.occupied)
@@ -269,9 +313,15 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
     state = slot_acceptance(db, slot, now, service_open=True if admin else None)
     pending = 0
     batches = 0
+    admin_fields = {}
     if admin:
         pending = db.scalar(select(func.count()).select_from(pending_slot_orders(slot.id).subquery())) or 0
-        batches = db.scalar(select(func.count()).select_from(operational_slot_batches(slot.id).subquery())) or 0
+        batches = _slot_batch_count(db, slot.id)
+        active_orders = (pending or _slot_order_count(db, slot.id)) if not batches and not slot.sealed_at else 0
+        admin_fields['editConstraints'] = {
+            'campusLocked': bool(pending or active_orders or batches) or _slot_campus_referenced(db, slot.id),
+            'timeLock': _slot_time_lock(slot, active_orders, batches),
+        }
     return {
         'id': slot.id,
         'campusId': slot.campus_id,
@@ -302,6 +352,7 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
         'sealReason': slot.seal_reason or '',
         'archived': archived,
         'version': slot.version,
+        **admin_fields,
     }
 
 
@@ -956,7 +1007,7 @@ def admin_delivery_staff(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     return ok({'items': items})
 
 
-@router.get('/admin/slots', response_model=Envelope[SlotListView])
+@router.get('/admin/slots', response_model=Envelope[AdminSlotListView])
 def admin_slots(date: str | None = None, include_archived: bool = False,
                 campus_id: str | None = Query(default=None, alias='campusId'),
                 db=Depends(get_db), actor: Actor = Depends(actor_dep)):
@@ -986,7 +1037,7 @@ def _require_future_auto_publish_cutoff(cutoff: datetime | None) -> None:
                           field_errors={'autoPublish': [message]})
 
 
-@router.post('/admin/slots', response_model=Envelope[SlotView])
+@router.post('/admin/slots', response_model=Envelope[AdminSlotView])
 def admin_slot_create(payload: SlotInput, db=Depends(get_db),
                       actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
@@ -1016,7 +1067,7 @@ def admin_slot_create(payload: SlotInput, db=Depends(get_db),
     return ok(_slot_view(db, slot, utcnow(), admin=True))
 
 
-@router.patch('/admin/slots/{slot_id}', response_model=Envelope[SlotView])
+@router.patch('/admin/slots/{slot_id}', response_model=Envelope[AdminSlotView])
 def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
                       actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
@@ -1028,20 +1079,7 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
     if payload.campus_id is not None and payload.campus_id != slot.campus_id:
         if db.get(Campus, payload.campus_id) is None:
             raise DomainError('CAMPUS_CONFIG_MISSING', '校区不存在', 409)
-        referenced = (db.scalar(select(Order.id).where(
-            (Order.requested_slot_id == slot.id) | (Order.confirmed_slot_id == slot.id)).limit(1))
-            or db.scalar(select(DeliveryGroup.id).where(DeliveryGroup.slot_id == slot.id).limit(1))
-            or db.scalar(select(DeliveryChange.id).where(
-                (DeliveryChange.slot_id == slot.id)
-                | (DeliveryChange.original['slotId'].as_string() == slot.id)
-                | (DeliveryChange.original['id'].as_string() == slot.id)
-                | (DeliveryChange.proposed['slotId'].as_string() == slot.id)
-                | (DeliveryChange.proposed['id'].as_string() == slot.id)).limit(1))
-            or any(_batch_slot_id(batch) == slot.id for batch in db.scalars(select(DeliveryBatch))))
-        # Proposals live in order JSON, including orders in trash.
-        if not referenced:
-            referenced = any(slot.id in str(order.data or {}) for order in db.scalars(select(Order)))
-        if referenced:
+        if _slot_campus_referenced(db, slot.id):
             raise DomainError('SLOT_CAMPUS_LOCKED', '时段已被业务引用，不能更换校区', 409)
         slot.campus_id = payload.campus_id
     data = deepcopy(slot.data or {})
@@ -1073,13 +1111,13 @@ def admin_slot_update(slot_id: str, payload: SlotUpdate, db=Depends(get_db),
         if slot.sealed_at is not None:
             raise DomainError('SLOT_SEALED', '时段已封批，不能再调整配送或接单时间', 409,
                               {'slotId': slot.id})
-        live_orders = db.scalar(select(func.count()).select_from(current_slot_orders(slot.id).subquery())) or 0
-        live_batches = db.scalar(select(func.count()).select_from(operational_slot_batches(slot.id).subquery())) or 0
+        live_orders = _slot_order_count(db, slot.id)
+        live_batches = _slot_batch_count(db, slot.id)
         filling_rules = (not window_changed and acceptance_changed
                          and (slot.open_at is None or slot.cutoff_at is None)
                          and (slot.open_at is None or payload.open_at == slot.open_at)
                          and (slot.cutoff_at is None or payload.cutoff_at == slot.cutoff_at))
-        if (live_orders or live_batches or slot.occupied) and not filling_rules:
+        if _slot_time_lock(slot, live_orders, live_batches) and not filling_rules:
             message = ('该时段仍有有效预约，请通过订单调整配送时段' if live_orders else
                        '该时段已有配送批次或履约记录，不能修改原时间')
             raise DomainError('SLOT_TIME_LOCKED', message, 409,

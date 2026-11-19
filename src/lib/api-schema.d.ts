@@ -3943,6 +3943,98 @@ export interface components {
             /** Placedwithaccount */
             placedWithAccount: boolean;
         };
+        /** AdminSlotListView */
+        AdminSlotListView: {
+            /** Items */
+            items: components["schemas"]["AdminSlotView"][];
+        };
+        /** AdminSlotView */
+        AdminSlotView: {
+            /**
+             * Acceptancestatus
+             * @default OPEN
+             */
+            acceptanceStatus: string;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+            /**
+             * Autopublish
+             * @default false
+             */
+            autoPublish: boolean;
+            /**
+             * Batchcount
+             * @default 0
+             */
+            batchCount: number;
+            /** Blockers */
+            blockers?: components["schemas"]["BlockerView"][];
+            /** Campusid */
+            campusId?: string | null;
+            /** Campusname */
+            campusName?: string | null;
+            /** Capacity */
+            capacity: number;
+            /** Cutoffat */
+            cutoffAt?: string | null;
+            /** Date */
+            date: string;
+            editConstraints: components["schemas"]["SlotEditConstraints"];
+            /** Enabled */
+            enabled: boolean;
+            /** End */
+            end: string;
+            /**
+             * Endsat
+             * Format: date-time
+             */
+            endsAt: string;
+            /** Id */
+            id: string;
+            /**
+             * Laterescheduleselectable
+             * @default false
+             */
+            lateRescheduleSelectable: boolean;
+            /** Name */
+            name: string;
+            /** Occupied */
+            occupied: number;
+            /** Openat */
+            openAt?: string | null;
+            /**
+             * Pendingapplicationcount
+             * @default 0
+             */
+            pendingApplicationCount: number;
+            /** Remaining */
+            remaining: number;
+            /**
+             * Sealreason
+             * @default
+             */
+            sealReason: string;
+            /** Sealedat */
+            sealedAt?: string | null;
+            /** Sealedbyname */
+            sealedByName?: string | null;
+            /** Selectable */
+            selectable: boolean;
+            /** Start */
+            start: string;
+            /**
+             * Startsat
+             * Format: date-time
+             */
+            startsAt: string;
+            /** Version */
+            version: number;
+            /** Weekday */
+            weekday: string;
+        };
         /** AffectedItem */
         AffectedItem: {
             /** Linekey */
@@ -5860,6 +5952,18 @@ export interface components {
             /** Requestid */
             requestId: string;
         };
+        /** Envelope[AdminSlotListView] */
+        Envelope_AdminSlotListView_: {
+            data: components["schemas"]["AdminSlotListView"];
+            /** Requestid */
+            requestId: string;
+        };
+        /** Envelope[AdminSlotView] */
+        Envelope_AdminSlotView_: {
+            data: components["schemas"]["AdminSlotView"];
+            /** Requestid */
+            requestId: string;
+        };
         /** Envelope[AnnouncementConfigView] */
         Envelope_AnnouncementConfigView_: {
             data: components["schemas"]["AnnouncementConfigView"];
@@ -6409,12 +6513,6 @@ export interface components {
         /** Envelope[SlotSealResultView] */
         Envelope_SlotSealResultView_: {
             data: components["schemas"]["SlotSealResultView"];
-            /** Requestid */
-            requestId: string;
-        };
-        /** Envelope[SlotView] */
-        Envelope_SlotView_: {
-            data: components["schemas"]["SlotView"];
             /** Requestid */
             requestId: string;
         };
@@ -9331,6 +9429,13 @@ export interface components {
              */
             reason: string;
         };
+        /** SlotEditConstraints */
+        SlotEditConstraints: {
+            /** Campuslocked */
+            campusLocked: boolean;
+            /** Timelock */
+            timeLock: ("SEALED" | "BATCH" | "ORDER" | "OCCUPIED") | null;
+        };
         /** SlotInput */
         SlotInput: {
             /**
@@ -9406,7 +9511,7 @@ export interface components {
             };
             /** Planid */
             planId: string;
-            slot: components["schemas"]["SlotView"];
+            slot: components["schemas"]["AdminSlotView"];
         };
         /** SlotSealPreview */
         SlotSealPreview: {
@@ -9431,7 +9536,7 @@ export interface components {
             sealedAt: string;
             /** Sealedbyname */
             sealedByName?: string | null;
-            slot: components["schemas"]["SlotView"];
+            slot: components["schemas"]["AdminSlotView"];
         };
         /** SlotUpdate */
         SlotUpdate: {
@@ -17137,7 +17242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_SlotListView_"];
+                    "application/json": components["schemas"]["Envelope_AdminSlotListView_"];
                 };
             };
             /** @description 输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。 */
@@ -17186,7 +17291,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_SlotView_"];
+                    "application/json": components["schemas"]["Envelope_AdminSlotView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */
@@ -17306,7 +17411,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Envelope_SlotView_"];
+                    "application/json": components["schemas"]["Envelope_AdminSlotView_"];
                 };
             };
             /** @description 事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。 */

@@ -4364,6 +4364,44 @@ select.campus-filter:focus {
   color: #9c6c47;
   margin-left: 5px;
 }
+.batch-orders {
+  --batch-order-cell-inset: 14px;
+}
+.batch-orders .table-scroll {
+  margin-inline: 0;
+  width: 100%;
+}
+.batch-orders :is(th, td) {
+  padding-inline: var(--batch-order-cell-inset);
+}
+.batch-orders th.order-pickup-heading {
+  padding-inline-start: calc(var(--batch-order-cell-inset) + 48px);
+}
+.batch-orders .order-pickup-code {
+  grid-template-columns: 44px max-content;
+}
+.batch-order-facts {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  width: max-content;
+  max-width: 14rem;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.batch-order-contact {
+  max-width: 9rem;
+}
+.batch-order-facts > small {
+  margin: 0;
+  color: #755f4d;
+  font-size: 12px;
+}
+.batch-order-contact > small {
+  white-space: nowrap;
+}
 .batch-actions {
   display: flex;
   flex-wrap: wrap;
@@ -8631,8 +8669,40 @@ button.session-action svg { stroke-width: 1.7; }
 .slot-editor-form .slot-booking-window {
   grid-template-columns: minmax(0, 1fr);
 }
+.slot-editor-lock { margin-bottom: 16px; }
+.slot-editor-lock .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.slot-editor-form .field :is(input, select):disabled {
+  background: #f1efed;
+  color: #6d6660;
+  -webkit-text-fill-color: currentColor;
+  opacity: 1;
+  cursor: default;
+}
+.slot-editor-form .field input:disabled::-webkit-date-and-time-value {
+  color: #6d6660;
+  -webkit-text-fill-color: #6d6660;
+  opacity: 1;
+}
+.slot-editor-form .field input:disabled::-webkit-datetime-edit {
+  color: #6d6660;
+  -webkit-text-fill-color: #6d6660;
+  opacity: 1;
+}
 .slot-editor-form > .checkbox-label {
   margin-bottom: 12px;
+}
+.slot-editor-form > .checkbox-label small {
+  display: block;
+  color: var(--muted);
+}
+.slot-editor-form > .checkbox-label:has(input:disabled) {
+  color: #6d6660;
+  cursor: default;
 }
 @media (max-width: 767px) {
   .slot-editor-actions > .btn { width: 100%; }

@@ -682,17 +682,30 @@ class SlotListView(DTO):
     items: list[SlotView]
 
 
+class SlotEditConstraints(DTO):
+    campus_locked: bool
+    time_lock: Literal['SEALED', 'BATCH', 'ORDER', 'OCCUPIED'] | None
+
+
+class AdminSlotView(SlotView):
+    edit_constraints: SlotEditConstraints
+
+
+class AdminSlotListView(DTO):
+    items: list[AdminSlotView]
+
+
 class SlotSealPlanView(DTO):
     plan_id: str
     action: str
-    slot: SlotView
+    slot: AdminSlotView
     blockers: list[BlockerView]
     impact: dict
     expires_at: datetime
 
 
 class SlotSealResultView(DTO):
-    slot: SlotView
+    slot: AdminSlotView
     plan_id: str | None = None
     sealed_at: datetime
     sealed_by_name: str | None = None

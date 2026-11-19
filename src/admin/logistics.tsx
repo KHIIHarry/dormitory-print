@@ -1066,6 +1066,7 @@ export function BatchDetail() {
         </Notice>
       )}
       <Panel
+        className="batch-orders"
         title="批次订单"
         action={
           <Button
@@ -1102,15 +1103,19 @@ export function BatchDetail() {
                     <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
                   </td>
                   <td>
-                    {o.nickname}
-                    <small>{o.phone}</small>
+                    <div className="batch-order-facts batch-order-contact">
+                      <span>{o.nickname}</span>
+                      <small>{o.phone}</small>
+                    </div>
                   </td>
                   <td>
-                    <CampusTag
-                      campus={campusOfOrder(data.campuses, data.buildings, o)}
-                    />
-                    <div>
-                      {data.buildings.find((b) => b.id === o.locationId)?.name}
+                    <div className="batch-order-facts">
+                      <CampusTag
+                        campus={campusOfOrder(data.campuses, data.buildings, o)}
+                      />
+                      <span>
+                        {data.buildings.find((b) => b.id === o.locationId)?.name}
+                      </span>
                     </div>
                   </td>
                   <td>
@@ -1126,14 +1131,14 @@ export function BatchDetail() {
                             (o as Record<string, any>).confirmedSlotId,
                         );
                       return (
-                        <>
-                          {requested?.name || "未记录申请"}
+                        <div className="batch-order-facts">
+                          <span>{requested?.name || "未记录申请"}</span>
                           <small>
                             {confirmed
                               ? `已确认：${confirmed.name}`
                               : "未确认名额"}
                           </small>
-                        </>
+                        </div>
                       );
                     })()}
                   </td>
@@ -1488,10 +1493,33 @@ function localInputLabel(value?: string | null) {
   }).format(date);
 }
 
+const SLOT_TIME_LOCK_MESSAGES = {
+  SEALED: "时段已封批，配送时间和接单窗口已锁定。",
+  BATCH: "已生成配送批次，原配送时间和接单窗口已锁定。",
+  ORDER: "时段已有有效预约，配送时间和接单窗口已锁定。已有预约可通过订单改期。",
+  OCCUPIED: "时段仍有预约占用，配送时间和接单窗口已锁定。",
+};
+
+function slotTimeLock(slot?: Slot) {
+  if (slot?.editConstraints) return slot.editConstraints.timeLock;
+  if (slot?.sealedAt) return "SEALED";
+  if (slot?.batchCount) return "BATCH";
+  if (slot?.pendingApplicationCount) return "ORDER";
+  if (slot?.occupied) return "OCCUPIED";
+  return null;
+}
+
+function slotEditorInstant(value?: string | null, saved?: string | null) {
+  // Keep the original seconds and offset when the displayed minute is unchanged.
+  return value && value === toShanghaiInput(saved)
+    ? Date.parse(saved ?? "")
+    : Date.parse(value ? `${value}+08:00` : "");
+}
+
 export function Slots() {
   const { data, act, toast, pendingActions } = useStore();
-  const [edit, setEdit] = useState<
-    (Partial<Slot> & Record<string, any>) | null
+  const [editor, setEditor] = useState<
+    { original?: Slot; changes: Partial<Slot> } | null
   >(null);
   const [slots, setSlots] = useState<Slot[]>(data.slots);
   const [slotError, setSlotError] = useState("");
@@ -1563,78 +1591,104 @@ export function Slots() {
     toast("配送时段已更新");
     void reload().catch((error) => setSlotError((error as Error).message));
   };
-  const originalSlot = useRef<Slot | null>(null);
   const submitActions = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (formErrors.submit)
       submitActions.current?.scrollIntoView({ block: "nearest" });
   }, [formErrors.submit]);
 
+  const original = editor?.original;
+  const current =
+    original && (slots.find((slot) => slot.id === original.id) ?? original);
+  const timeLock = slotTimeLock(current);
+  const campusLocked = current?.editConstraints?.campusLocked ??
+    !!(current?.batchCount || current?.pendingApplicationCount || current?.occupied);
+  const fillingRules = !!(
+    current && timeLock && timeLock !== "SEALED" &&
+    (!current.openAt || !current.cutoffAt)
+  );
+  const openAtLocked = !!timeLock && (!fillingRules || !!current?.openAt);
+  const cutoffAtLocked = !!timeLock && (!fillingRules || !!current?.cutoffAt);
+  const openAt = toShanghaiInput(current?.openAt);
+  const cutoffAt = toShanghaiInput(current?.cutoffAt);
+  const edit = editor && {
+    ...current,
+    openAt,
+    cutoffAt,
+    ...editor.changes,
+    ...(campusLocked && { campusId: current?.campusId }),
+    ...(timeLock && { date: current?.date, start: current?.start, end: current?.end }),
+    ...(openAtLocked && { openAt }),
+    ...(cutoffAtLocked && { cutoffAt }),
+  };
+  const cutoffMs = slotEditorInstant(edit?.cutoffAt, current?.cutoffAt);
+  const [, refreshCutoff] = useState(0);
+  useEffect(() => {
+    const delay = cutoffMs - Date.now();
+    if (delay > 0 && delay <= 2_147_483_647) {
+      const timer = window.setTimeout(
+        () => refreshCutoff((value) => value + 1),
+        delay,
+      );
+      return () => window.clearTimeout(timer);
+    }
+  }, [cutoffMs]);
+  const canEnableAutoPublish = cutoffMs > Date.now();
+
+  const changeDraft = (changes: Partial<Slot>) =>
+    setEditor((previous) => previous && {
+      ...previous, changes: { ...previous.changes, ...changes },
+    });
+
   const openEditor = (slot?: Slot) => {
-    originalSlot.current = slot || null;
     setFormErrors({});
-    if (!slot) {
-      setEdit({
+    setEditor({
+      original: slot,
+      changes: slot ? {} : {
         enabled: true,
         capacity: 30,
         campusId:
           campuses.filter((c) => c.selectionEnabled).length === 1
             ? campuses.find((c) => c.selectionEnabled)?.id
             : "",
-      });
-      return;
-    }
-    setEdit({
-      ...slot,
-      openAt: toShanghaiInput((slot as any).openAt),
-      cutoffAt: toShanghaiInput((slot as any).cutoffAt),
+      },
     });
   };
 
   const save = async () => {
     if (!edit) return;
     const errors: Record<string, string> = {};
-    if (!edit.campusId) errors.campusId = "请选择配送校区";
-    if (!edit.date) errors.date = "请选择配送日期";
+    const windowChanged = !current || edit.date !== current.date ||
+      edit.start !== current.start || edit.end !== current.end;
+    const bookingChanged =
+      !current || edit.openAt !== openAt || edit.cutoffAt !== cutoffAt;
+    const campusChanged = !campusLocked && (!current || edit.campusId !== current.campusId);
+    if (campusChanged && !edit.campusId)
+      errors.campusId = "请选择配送校区";
     if (!edit.name?.trim()) errors.name = "请填写时段名称";
-    if (!edit.start) errors.start = "请选择预计配送开始时间";
-    if (!edit.end) errors.end = "请选择预计配送结束时间";
-    if (edit.start && edit.end && edit.start >= edit.end)
-      errors.end = "预计配送结束时间必须晚于开始时间";
-    if (!edit.openAt) errors.openAt = "请选择开放下单时间";
-    if (!edit.cutoffAt) errors.cutoffAt = "请选择截单时间";
-    if (edit.date && edit.start && edit.openAt) {
-      const open = new Date(`${edit.openAt}+08:00`);
-      const start = new Date(`${edit.date}T${edit.start}:00+08:00`);
-      if (
-        Number.isFinite(open.getTime()) &&
-        Number.isFinite(start.getTime()) &&
-        open >= start
-      )
-        errors.openAt = "开放下单时间必须早于预计配送开始时间";
+    if (windowChanged) {
+      if (!edit.date) errors.date = "请选择配送日期";
+      if (!edit.start) errors.start = "请选择预计配送开始时间";
+      if (!edit.end) errors.end = "请选择预计配送结束时间";
+      if (edit.start && edit.end && edit.start >= edit.end)
+        errors.end = "预计配送结束时间必须晚于开始时间";
     }
-    if (edit.cutoffAt) {
-      const cutoff = new Date(`${edit.cutoffAt}+08:00`);
-      const open = edit.openAt ? new Date(`${edit.openAt}+08:00`) : null;
-      const start =
-        edit.date && edit.start
-          ? new Date(`${edit.date}T${edit.start}:00+08:00`)
-          : null;
-      if (
-        open &&
-        Number.isFinite(cutoff.getTime()) &&
-        Number.isFinite(open.getTime()) &&
-        cutoff <= open
-      )
+    const savedOpenAt = current && edit.openAt === openAt ? current.openAt : edit.openAt;
+    const savedCutoffAt = current && edit.cutoffAt === cutoffAt ? current.cutoffAt : edit.cutoffAt;
+    if (windowChanged || bookingChanged) {
+      if (!edit.openAt) errors.openAt = "请选择开放下单时间";
+      if (!edit.cutoffAt) errors.cutoffAt = "请选择截单时间";
+      const openMs = slotEditorInstant(edit.openAt, current?.openAt);
+      const startMs = Date.parse(`${edit.date}T${edit.start}:00+08:00`);
+      if (openMs >= startMs)
+        errors.openAt = "开放下单时间必须早于预计配送开始时间";
+      if (cutoffMs <= openMs)
         errors.cutoffAt = "截单时间必须晚于开放下单时间";
-      if (
-        start &&
-        Number.isFinite(cutoff.getTime()) &&
-        Number.isFinite(start.getTime()) &&
-        cutoff >= start
-      )
+      if (cutoffMs >= startMs)
         errors.cutoffAt = "截单时间必须早于预计配送开始时间";
     }
+    if (edit.autoPublish && (!current?.autoPublish || bookingChanged) && !(cutoffMs > Date.now()))
+      errors.autoPublish = "自动发布需要未来的截单时间。";
     if (
       edit.capacity == null ||
       !Number.isSafeInteger(edit.capacity) ||
@@ -1642,13 +1696,37 @@ export function Slots() {
       edit.capacity > 100000
     )
       errors.capacity = "预约容量必须是 1 到 100000 之间的整数";
-    else if (edit.capacity < Number((edit as any).occupied || 0))
+    else if (edit.capacity < (current?.occupied ?? 0))
       errors.capacity = "容量不能小于已占用数量";
     setFormErrors(errors);
     const first = Object.keys(errors)[0];
     if (first) {
       const target = document.querySelector(`[data-slot-field="${first}"]`);
       (target as HTMLElement | null)?.focus();
+      return;
+    }
+    const enabled = edit.enabled ?? true;
+    const autoPublish = edit.autoPublish ?? false;
+    const changes: Partial<Slot> = {};
+    if (campusChanged) changes.campusId = edit.campusId;
+    if (windowChanged)
+      Object.assign(changes, { date: edit.date, start: edit.start, end: edit.end });
+    if (bookingChanged)
+      Object.assign(changes, { openAt: savedOpenAt, cutoffAt: savedCutoffAt });
+    if (!current || edit.name !== current.name) changes.name = edit.name;
+    if (!current || edit.capacity !== current.capacity) changes.capacity = edit.capacity;
+    if (!current || enabled !== current.enabled) changes.enabled = enabled;
+    if (!current || autoPublish !== !!current.autoPublish) changes.autoPublish = autoPublish;
+    const fields = Object.keys(changes) as (keyof Slot)[];
+    // Background refresh can advance the version without touching the fields being saved.
+    if (original && current && fields.some((field) => original[field] !== current[field])) {
+      setFormErrors({
+        submit: "其他操作已修改同一字段。请关闭后重新打开，核对最新值后再编辑。",
+      });
+      return;
+    }
+    if (current && fields.length === 0) {
+      setEditor(null);
       return;
     }
     const id = edit.id || crypto.randomUUID();
@@ -1659,61 +1737,35 @@ export function Slots() {
         weekday: "long",
         timeZone: "Asia/Shanghai",
       }).format(new Date(edit.date + "T12:00:00+08:00")),
-      enabled: edit.enabled ?? true,
-      autoPublish: edit.autoPublish ?? false,
-      capacity: edit.capacity,
+      enabled,
+      autoPublish,
+      openAt: edit.openAt ? new Date(slotEditorInstant(edit.openAt, current?.openAt)).toISOString() : null,
+      cutoffAt: edit.cutoffAt ? new Date(cutoffMs).toISOString() : null,
     } as Slot;
-    const payload: Record<string, unknown> = {
-      campusId: edit.campusId,
-      date: edit.date,
-      name: edit.name,
-      start: edit.start,
-      end: edit.end,
-      openAt: edit.openAt,
-      cutoffAt: edit.cutoffAt,
-      capacity: edit.capacity,
-      enabled: edit.enabled ?? true,
-      autoPublish: edit.autoPublish ?? false,
-      reason: (edit as any).reason || "",
-    };
-    if (edit.id) {
-      payload.expectedVersion = edit.version;
-      const original = originalSlot.current;
-      if (
-        original &&
-        edit.openAt === toShanghaiInput(original.openAt) &&
-        edit.cutoffAt === toShanghaiInput(original.cutoffAt)
-      ) {
-        delete payload.openAt;
-        delete payload.cutoffAt;
-      } else if (original) {
-        if (edit.openAt === toShanghaiInput(original.openAt))
-          payload.openAt = original.openAt;
-        if (edit.cutoffAt === toShanghaiInput(original.cutoffAt))
-          payload.cutoffAt = original.cutoffAt;
-      }
-    }
+    let savedSlot = slot;
     if (
       await act(
         edit.id ? `/admin/slots/${id}` : "/admin/slots",
-        payload,
+        { ...changes, expectedVersion: current?.version, reason: "" },
         (state) => ({
           ...state,
           slots: edit.id
-            ? state.slots.map((x) => (x.id === id ? slot : x))
-            : [...state.slots, slot],
+            ? state.slots.map((x) => (x.id === id ? savedSlot : x))
+            : [...state.slots, savedSlot],
         }),
         edit.id ? "PATCH" : "POST",
-        undefined,
+        (response) => {
+          savedSlot = response as Slot;
+        },
         (_error, message) => {
           setFormErrors((current) => ({ ...current, submit: message }));
           return true;
         },
       )
     ) {
-      setEdit(null);
+      setEditor(null);
       toast("配送时段已保存");
-      if (!DEMO) await reload();
+      if (!DEMO) await reload().catch((error) => setSlotError((error as Error).message));
     }
   };
 
@@ -2042,29 +2094,40 @@ export function Slots() {
       {edit && (
         <Modal
           title={edit.id ? "编辑配送时段" : "新建配送时段"}
-          onClose={() => setEdit(null)}
+          onClose={() => setEditor(null)}
         >
           <div className="slot-editor-form">
+            {timeLock && (
+              <div className="slot-editor-lock">
+                <Notice>
+                  <div role="status">
+                    {fillingRules
+                      ? "原配送时间和已配置的接单时间已锁定，可补齐缺失的接单时间。"
+                      : SLOT_TIME_LOCK_MESSAGES[timeLock]}
+                  </div>
+                  {current?.batchCount ? (
+                    <Link className="text-button" to={`${ADMIN}/batches`}>
+                      前往配送调度 <ArrowRight size={16} aria-hidden="true" />
+                    </Link>
+                  ) : null}
+                </Notice>
+              </div>
+            )}
             <Field
               label="配送校区"
-              error={formErrors.campusId}
+              error={campusLocked ? undefined : formErrors.campusId}
               hint={
-                edit.id
-                  ? "已有业务引用的时段不能更换校区，保存时由服务器校验。"
+                campusLocked
+                  ? "该时段已有业务记录，配送校区已锁定。"
                   : "每个时段只属于一个校区。"
               }
             >
               <select
                 data-slot-field="campusId"
                 value={edit.campusId || ""}
-                disabled={
-                  !!edit.id &&
-                  ((edit.occupied || 0) > 0 ||
-                    (edit.batchCount || 0) > 0 ||
-                    (edit.pendingApplicationCount || 0) > 0)
-                }
+                disabled={campusLocked}
                 onChange={(event) =>
-                  setEdit({ ...edit, campusId: event.target.value })
+                  changeDraft({ campusId: event.target.value })
                 }
               >
                 <option value="">请选择配送校区</option>
@@ -2078,85 +2141,85 @@ export function Slots() {
                   ))}
               </select>
             </Field>
-            {((edit as any).occupied > 0 || (edit as any).batchCount > 0) && (
-              <Notice>
-                该时段已有订单或批次。修改预计配送时间会影响现有预约，需要调整配送安排；
-                截单后不能通过普通编辑延长接单。
-              </Notice>
-            )}
-            <Field label="配送日期" error={formErrors.date}>
+            <Field label="配送日期" error={timeLock ? undefined : formErrors.date}>
               <input
                 data-slot-field="date"
                 type="date"
                 value={edit.date || ""}
-                onChange={(e) => setEdit({ ...edit, date: e.target.value })}
+                disabled={!!timeLock}
+                onChange={(e) => changeDraft({ date: e.target.value })}
               />
             </Field>
             <Field label="时段名称" error={formErrors.name}>
               <input
                 data-slot-field="name"
                 value={edit.name || ""}
-                onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                onChange={(e) => changeDraft({ name: e.target.value })}
                 placeholder="例如 晚间配送"
               />
             </Field>
             <div className="form-grid">
-              <Field label="预计配送开始" error={formErrors.start}>
+              <Field label="预计配送开始" error={timeLock ? undefined : formErrors.start}>
                 <input
                   data-slot-field="start"
                   type="time"
                   value={edit.start || ""}
-                  onChange={(e) => setEdit({ ...edit, start: e.target.value })}
+                  disabled={!!timeLock}
+                  onChange={(e) => changeDraft({ start: e.target.value })}
                 />
               </Field>
-              <Field label="预计配送结束" error={formErrors.end}>
+              <Field label="预计配送结束" error={timeLock ? undefined : formErrors.end}>
                 <input
                   data-slot-field="end"
                   type="time"
                   value={edit.end || ""}
-                  onChange={(e) => setEdit({ ...edit, end: e.target.value })}
+                  disabled={!!timeLock}
+                  onChange={(e) => changeDraft({ end: e.target.value })}
                 />
               </Field>
             </div>
             <div className="form-grid slot-booking-window">
               <Field
                 label="开放下单时间"
-                error={formErrors.openAt}
-                hint="按北京时间填写，可跨天"
+                error={openAtLocked ? undefined : formErrors.openAt}
+                hint={openAtLocked ? undefined : "按北京时间填写，可跨天"}
               >
                 <input
                   data-slot-field="openAt"
                   type="datetime-local"
                   value={edit.openAt || ""}
-                  onChange={(e) => setEdit({ ...edit, openAt: e.target.value })}
+                  disabled={openAtLocked}
+                  onChange={(e) => changeDraft({ openAt: e.target.value })}
                 />
               </Field>
               <Field
                 label="截单时间"
-                error={formErrors.cutoffAt}
-                hint="截单后立即停止新申请与自动归批"
+                error={cutoffAtLocked ? undefined : formErrors.cutoffAt}
+                hint={cutoffAtLocked ? undefined : "截单后立即停止新申请与自动归批"}
               >
                 <input
                   data-slot-field="cutoffAt"
                   type="datetime-local"
                   value={edit.cutoffAt || ""}
-                  onChange={(e) =>
-                    setEdit({ ...edit, cutoffAt: e.target.value })
-                  }
+                  disabled={cutoffAtLocked}
+                  onChange={(e) => changeDraft({ cutoffAt: e.target.value })}
                 />
               </Field>
             </div>
             <Field
               label="预约容量（单）"
               error={formErrors.capacity}
-              hint="容量仅适用于该校区时段；拆分批次不会重复占用"
+              hint={current?.occupied
+                ? `已占用 ${current.occupied} 单，容量不得低于已占用数量。`
+                : "容量仅适用于该校区时段。"}
             >
               <NumberInput
-                min={1}
+                data-slot-field="capacity"
+                min={Math.max(1, current?.occupied ?? 0)}
                 max={100000}
                 value={edit.capacity}
                 onValueChange={(capacity) =>
-                  setEdit({ ...edit, capacity: capacity ?? undefined })
+                  changeDraft({ capacity: capacity ?? undefined })
                 }
               />
             </Field>
@@ -2164,24 +2227,37 @@ export function Slots() {
               <input
                 type="checkbox"
                 checked={edit.enabled ?? true}
-                onChange={(e) =>
-                  setEdit({ ...edit, enabled: e.target.checked })
-                }
+                onChange={(e) => changeDraft({ enabled: e.target.checked })}
               />
-              人工开启接单（关闭后停止该校区时段的新申请，不取消已有配送）
+              <span>
+                人工开启接单
+                <small>接单仍受时段开放、截单和封批规则约束。</small>
+              </span>
             </label>
             <label className="checkbox-label">
               <input
                 type="checkbox"
+                data-slot-field="autoPublish"
                 checked={edit.autoPublish ?? false}
+                disabled={!edit.autoPublish && !canEnableAutoPublish}
+                aria-describedby="slot-auto-publish-hint"
+                aria-invalid={!!formErrors.autoPublish}
                 onChange={(event) =>
-                  setEdit({ ...edit, autoPublish: event.target.checked })
+                  changeDraft({ autoPublish: event.target.checked })
                 }
               />
               截单后自动发布
             </label>
-            <p className="form-hint">
-              请在截单前开启并指派配送员。发布后仍由配送员确认开始。
+            <p className="form-hint" id="slot-auto-publish-hint">
+              {formErrors.autoPublish ? (
+                <span className="field-error" role="alert">{formErrors.autoPublish}</span>
+              ) : canEnableAutoPublish
+                ? "请在截单前开启并指派配送员。"
+                : edit.cutoffAt
+                  ? edit.autoPublish
+                    ? "截单后可关闭自动发布，批次可在配送调度中手动发布。"
+                    : "已截单，批次可在配送调度中手动发布。"
+                  : "设置未来的截单时间后可开启自动发布。"}
             </p>
             <div ref={submitActions} className="slot-editor-actions">
               {formErrors.submit && (

@@ -213,6 +213,7 @@ export type Slot = {
   remaining?: number;
   batchCount?: number;
   pendingApplicationCount?: number;
+  editConstraints?: import("./api-schema").components["schemas"]["SlotEditConstraints"];
   blockers?: { code: string; message: string }[];
   version?: number;
 };

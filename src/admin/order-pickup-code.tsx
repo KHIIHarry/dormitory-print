@@ -70,7 +70,14 @@ function OrderCustomerIcon({
   );
 }
 
-export function OrderCustomerIdentity({ order }: { order: Order }) {
+export function OrderCustomerIdentity({
+  order,
+}: {
+  order: Pick<
+    Order,
+    "pickupCode" | "adminPickup" | "accountOwned" | "customerSummary"
+  >;
+}) {
   const pickup = adminPickupOf(order);
   if (!(order.accountOwned ?? pickup.placedWithAccount))
     return <p className="order-customer-identity">游客订单</p>;

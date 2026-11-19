@@ -568,6 +568,74 @@ def test_slot_window_edit_is_locked_after_an_order_exists(db, api, client, act_a
     assert response.json()['error']['code'] == 'SLOT_TIME_LOCKED'
 
 
+def test_admin_slot_edit_constraints_follow_automatic_batch_and_legacy_rules(
+        db, api, client, act_as, staff_factory):
+    from app.core import Actor
+
+    world = make_world(db)
+    slot = world.slot
+    staff = act_as(staff_factory(role='ADMIN', capabilities=['delivery.manage', 'payment.manage']))
+    db.commit()
+
+    def current():
+        response = api(client, '/admin/slots', None, method='GET')
+        assert response.status_code == 200, response.text
+        return next(row for row in response.json()['data']['items'] if row['id'] == slot.id)
+
+    assert current()['editConstraints'] == {'campusLocked': False, 'timeLock': None}
+    public = api(client, '/public/slots', None, method='GET')
+    assert 'editConstraints' not in next(
+        row for row in public.json()['data']['items'] if row['id'] == slot.id)
+    order = submit(db, world)
+    assert current()['editConstraints'] == {'campusLocked': True, 'timeLock': 'ORDER'}
+
+    settle(db, order, Actor(staff_id=staff.id, staff_role='ADMIN', capabilities={'payment.manage'}))
+    batched = current()
+    assert batched['batchCount'] == 1
+    assert batched['editConstraints'] == {'campusLocked': True, 'timeLock': 'BATCH'}
+    saved = api(client, f'/admin/slots/{slot.id}', {
+        'expectedVersion': batched['version'], 'name': '更新显示名称', 'capacity': 6,
+        'enabled': False, 'autoPublish': True,
+    }, method='PATCH')
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['data']['name'] == '更新显示名称'
+    assert saved.json()['data']['autoPublish'] is True
+    assert saved.json()['data']['enabled'] is False
+    at_capacity = api(client, f'/admin/slots/{slot.id}', {
+        'expectedVersion': saved.json()['data']['version'], 'capacity': 1,
+    }, method='PATCH')
+    assert at_capacity.status_code == 200, at_capacity.text
+    db.refresh(slot)
+    assert slot.capacity == slot.occupied == 1
+    slot.open_at = None
+    db.commit()
+
+    legacy = current()
+    assert legacy['editConstraints']['timeLock'] == 'BATCH'
+    restored = api(client, f'/admin/slots/{slot.id}', {
+        'expectedVersion': legacy['version'], 'openAt': (utcnow() - timedelta(hours=2)).isoformat(),
+        'cutoffAt': legacy['cutoffAt'],
+    }, method='PATCH')
+    assert restored.status_code == 200, restored.text
+    assert restored.json()['data']['openAt']
+    db.refresh(slot)
+    slot.sealed_at = utcnow()
+    slot.cutoff_at = slot.sealed_at - timedelta(minutes=1)
+    db.commit()
+
+    sealed = current()
+    assert sealed['editConstraints'] == {'campusLocked': True, 'timeLock': 'SEALED'}
+    turned_off = api(client, f'/admin/slots/{slot.id}', {
+        'expectedVersion': sealed['version'], 'autoPublish': False,
+    }, method='PATCH')
+    assert turned_off.status_code == 200, turned_off.text
+    turned_back_on = api(client, f'/admin/slots/{slot.id}', {
+        'expectedVersion': turned_off.json()['data']['version'], 'autoPublish': True,
+    }, method='PATCH')
+    assert turned_back_on.status_code == 422, turned_back_on.text
+    assert turned_back_on.json()['error']['code'] == 'AUTO_PUBLISH_CUTOFF_PASSED'
+
+
 def test_concurrent_settlements_share_one_group_and_one_regular_batch(db, staff_factory):
     import threading
 
