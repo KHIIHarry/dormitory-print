@@ -1,110 +1,319 @@
-# DormPrint · 宿舍打印系统
+<p align="center">
+  <img src="public/assets/logo.svg" width="72" height="72" alt="DormPrint 标志" />
+</p>
 
-React/TypeScript统一应用，FastAPI + PostgreSQL + Redis/Celery后端，LibreOffice/PyMuPDF处理私有文件。V1已实现已确认业务范围，并提供真实后端、迁移、作业、前端与部署工具；本地验收记录和真实营业环境的上线检查分别列明。
+<h1 align="center">DormPrint · 宿舍打印</h1>
 
-## 当前业务范围
+<p align="center">从在线上传到楼栋交付，让校园打印成为简单的事。</p>
 
-权威规则：[V1定版稿](docs/superpowers/specs/2026-10-30-dormprint-v1-scope.md)、[本轮N/F增补](docs/superpowers/specs/2026-10-30-dormprint-v1-adjustments.md)、[功能交付矩阵](docs/2026-10-30-DormPrint-V1-功能交付矩阵.md)。原01—04 Prompt位于docs目录，已同步覆盖冲突规则。
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-C67C4E" alt="Apache 2.0 许可证" /></a>
+  <img src="https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white" alt="React 19" />
+  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5.9" />
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose" />
+</p>
 
-一个普通客户账号登录，超管向对应账号授权；个人页只为获权账号显示管理/配送入口，各工作区可返回用户端。使用唯一PWA身份和根Service Worker，保留/u、配置管理路径及/courier作为受保护深链接，取消三套独立安装/独立员工密码体系。后台路由可见不代表有权调用接口。
+<p align="center">
+  <a href="#产品预览">产品预览</a> ·
+  <a href="#核心功能">核心功能</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#生产部署">生产部署</a> ·
+  <a href="#本地开发">本地开发</a> ·
+  <a href="#文档导航">文档导航</a>
+</p>
 
-上传/断点续传→真实转换→最终PDF确认/报价→人工线下收款或零元结算→打印/装订/装袋→批次/同楼栋共照批量交付→售后重做/退款。包含本地链接二维码、1—6级员工整单折扣与超管原打印单免单、按定额或净实收比例统计配送工资、人工发放及退款调整。
+DormPrint 是面向校园打印服务的自托管系统，将**用户下单、后台生产与配送履约**放在同一套应用中。学生上传文件、确认最终 PDF 并预约配送；管理员核对线下收款、组织打印与装袋；配送员按校区、时段和楼栋完成交付。
 
-管理员可在原单下追加最终金额，每笔必须填用途并选择是否计入比例工资；原单付款/送达后仍可追加。追加费用即时生效、客户可提异议，独立应收/实收/退款/欠收，不重算原单优惠、不回滚履约。只有实际收到且勾选的追加费用参与比例工资，定额工资不随追加金额变化。
+一份订单可以包含多个文件和不同打印设置，以提取码贯穿整个流程。收款与实际打印结果由运营人员确认，系统保留对应的订单、任务及交付记录。
 
-“系统与团队 → 耗材与收支”提供简化的采购支出核算，独立校验 `finance.manage` 权限。录入纸张/墨水/其他支出的日期与金额，纸张另记张数；记录可填写原因作废，保留原始历史。按上海自然月或累计统计已确认实收、退款、采购额及已发工资；耗材后结余＝净实收−纸张采购−墨水采购，最终结余再扣已发工资和其他支出。纸张均价仅供参考，不重复扣成本；不做逐单墨耗和库存估值。收入按收款确认时间、退款按登记时间、工资按实际发放时间归月，未分配收款不作为收入。
+## 产品预览
 
-本轮新增 `f4a6b8c0d012` 数据库迁移，更新后端时执行既有 `python -m app.cli migrate`（Compose 启动流程沿用现有迁移机制）。新清理订单保留匿名收付日汇总；旧归档缺少日期的金额保留在累计，月份页明确提示，不推测收付日期。
+以下为当前界面的演示／验收数据截图，不包含真实用户资料。生产初始化不会写入这些示例订单或价目。
 
-配送时段按校区独立创建，客户选择校区后仅可预约该校区的楼栋与时段。容量、提前封批和批次均绑定该时段的校区；同一时间其他校区的独立时段不受影响。跨校区不能只修改楼栋，待确认订单需同时修订楼栋和时段，已结算订单须联系管理员协调。已有正常配送不会因为校区暂停新选点而自动取消。
+**用户端 · 服务首页**
 
-升级旧共享时段前先执行数据库迁移，并核对管理端时段页的只读配送归属诊断。能证明唯一归属的旧时段回填校区；校区不明或跨校区共享的时段停止新预约，历史记录继续保留。按校区分配旧共享容量、迁移有效引用的操作步骤见 [校区配送升级说明](docs/incremental/2026-11-03-campus-delivery.md)，不得将原总容量重复复制到每个校区。
+![DormPrint 用户端首页：文档打印、照片打印与校园配送](docs/images/home-desktop.webp)
 
-## 本机 Docker 一键运行
+**管理端 · 订单列表**
 
-安装并启动 Docker Desktop（Compose >=2.24.4），在项目根目录执行：
+![订单管理：游客与账号标识、校区筛选、订单状态与收款操作](docs/images/orders-desktop.webp)
 
-```sh
+**移动端 · 游客订单与配送交付**
+
+<p align="center">
+  <img src="docs/images/guest-order-mobile.webp" width="300" alt="游客订单页：访问期限、倒计时、账号关联引导与订单进度" />
+  <img src="docs/images/courier-mobile.webp" width="300" alt="配送订单页：身份标识、提取码、目标楼栋、电话与交付入口" />
+</p>
+
+## 核心功能
+
+| 工作区 | 能做什么 |
+| --- | --- |
+| 用户端 | 文档／照片上传、断点续传、转换与最终 PDF 预览、打印参数与报价、校区／楼栋／配送时段预约、订单查询与售后 |
+| 管理端 | 人工收款与零元结算、打印／装订／装袋任务、订单识别页、批次调度、客户管理、优惠与员工权限、邮件配置 |
+| 配送端 | 查看分配的批次、按楼栋交付、拨号联系、照片与定位凭证、同楼栋共照批量送达、配送异常与定位例外 |
+| 经营管理 | 追加费用及异议、退款与重做、配送工资核算与发放、纸张／墨水／其他采购支出、月度及累计收支 |
+
+- **一个账号，多个工作区**：普通账号统一登录，管理员按账号授予管理或配送权限；一个 PWA 按权限进入对应工作区。
+- **账号订单与游客订单**：账号订单按当前归属访问；游客每单仅有一个有效访问链接，默认 14 天，界面显示倒计时。管理员可关闭或重置为 1–14 天，重置使旧链接失效。游客可在满足身份校验后明确关联账号，后续从「我的订单」查看。
+- **一致的身份标识**：灰色「游」与账号小人按当前订单归属切换。后台有权限时可进入客户详情；配送端只显示图标。
+- **可核对的文件输出**：支持 PDF、Word、Excel、PowerPoint 及常见图片／HEIC；通过 LibreOffice、PyMuPDF 等处理，确认最终 PDF 后进入生产。订单识别页独立统计进度，预览支持首页／末页跳转。
+- **私有文件与后台作业**：原件、最终 PDF、交付照片和导出通过授权接口访问；文件转换与业务任务分别使用 Celery 队列，备份使用 restic 加密。
+
+## 快速开始
+
+### 用 Docker 在本机运行
+
+需要 **Git、已启动的 Docker Engine／Docker Desktop，以及 Docker Compose ≥ 2.24.4**。这一方式在容器内构建前后端，无需在本机安装 Node、Python 或 LibreOffice。
+
+```bash
+git clone https://github.com/KHIIHarry/dormitory-print.git
+cd dormitory-print
 bash deploy/local.sh up
 ```
 
-访问 http://localhost:8080。前端在 Docker 内编译，API、PostgreSQL、Redis、文件转换 worker、业务 worker 和定时任务全部在容器中运行，无需本机安装 Node、Python 或 LibreOffice。首次构建需要下载依赖；启动脚本会自动等待数据库/Redis、执行迁移并检查运行环境。
+打开 **[http://localhost:8080](http://localhost:8080)**。首次启动会构建镜像、等待数据库与 Redis、执行迁移并检查运行依赖。
 
-本地凭据首次生成在已忽略的 `deploy/.env.local`（权限 600），重复启动会复用；数据库和私有文件放在 `dormprint-local` 独立命名卷。保留该凭据文件，不要在保留旧数据卷时删除或替换它。此模式只监听本机回环地址，使用 HTTP，仅用于本机运行；正式部署参见部署手册。
+初始化管理员，邮箱请换成你实际控制并已核验的地址，密码按交互提示设置：
 
-首次使用，替换下面的邮箱为你的真实邮箱，再交互设置管理员密码（不提供默认账号密码）：
-
-```sh
-bash deploy/local.sh init-admin --username admin --email 你的真实邮箱
+```bash
+bash deploy/local.sh init-admin --username admin --email owner@example.com
 ```
 
-随后从 `/u/account` 登录。新注册需要另行配置 SMTP；未配置时可使用游客业务和已初始化的账号。
+从 `/u/account` 登录后进入管理工作区。没有默认管理员密码；新注册所需的 SMTP 要在部署及后台配置完成后才能使用，已有账号和游客业务可独立运行。
 
-```sh
+| 入口 | 地址 | 说明 |
+| --- | --- | --- |
+| 用户首页 | `/u/` | 上传、报价、预约与订单查询 |
+| 账号中心 | `/u/account` | 统一登录、个人信息与获授权的工作区入口 |
+| 管理工作区 | `/manage/` | 需要对应管理权限；路径可通过前端配置调整 |
+| 配送工作区 | `/courier/` | 需要配送工作区权限，仅查看允许访问的任务 |
+
+常用本机命令：
+
+```bash
 bash deploy/local.sh ps
 bash deploy/local.sh logs -f api file-worker business-worker
 bash deploy/local.sh doctor
-bash deploy/local.sh down   # 停止服务，保留数据卷
-bash deploy/local.sh up     # 再次启动，也可在更新代码后重建
+bash deploy/local.sh down
 ```
 
-本机默认不启动异地备份服务；上线备份和 HTTPS 配置参见 [部署手册](docs/DEPLOYMENT.md)。
+`down` 保留数据卷。再次执行 `up` 可启动或在更新代码后重建。本机凭据保存在已忽略的 `deploy/.env.local`，数据使用独立的 `dormprint-local` 命名卷；保留数据时也要保留原凭据和主密钥。本机模式仅监听回环地址、使用 HTTP，备份服务默认不启动。
 
-## 本地开发运行
+## 技术架构
 
-Node >=20.19、Python3.12、PostgreSQL、Redis，以及LibreOffice、Ghostscript和实际中文字体。真实模式没有自动mock回退。
+| 层次 | 技术 |
+| --- | --- |
+| 前端 | React 19、TypeScript、Vite、React Router、TanStack Query、PDF.js、PWA |
+| API | Python 3.12、FastAPI、Pydantic、SQLAlchemy、Alembic |
+| 数据与队列 | PostgreSQL 16、Redis 7、Celery |
+| 文件处理 | LibreOffice、PyMuPDF、Ghostscript、Pillow／HEIF、中文字体 |
+| 部署与备份 | Docker Compose、Nginx、restic |
 
-```sh
+```mermaid
+flowchart LR
+  UI[用户端 / 管理端 / 配送端] --> Nginx[Nginx · 同源入口]
+  Nginx --> API[FastAPI]
+  API --> PG[(PostgreSQL)]
+  API --> Redis[(Redis)]
+  Redis --> Files[文件 worker · 转换与 PDF]
+  Redis --> Business[业务 worker · 邮件与维护]
+  Files --> Storage[(私有文件卷)]
+  API --> Storage
+  Beat[Celery Beat] --> Redis
+  PG --> Backup[restic · 加密备份]
+  Storage --> Backup
+```
+
+API 不负责执行文件转换，文件 worker 无外网出口。Nginx 只提供前端静态产物并反代 API，不公开私有文件目录；数据库、Redis 和 API 的端口不对公网发布。
+
+## 生产部署
+
+下面是**首次部署**的最小流程。已有数据的环境请使用后面的升级说明；TLS、备份恢复和代理信任配置以 [完整部署手册](docs/DEPLOYMENT.md) 为准。
+
+### 1. 准备环境与配置
+
+准备 Linux 主机、Docker Compose、Node.js ≥ 20.19，以及指向该主机的域名和 HTTPS 入口。推荐由主机 Caddy／Nginx 或负载均衡终止 TLS，反代到本机 `127.0.0.1:8080`。
+
+```bash
+git clone https://github.com/KHIIHarry/dormitory-print.git
+cd dormitory-print
+cp deploy/.env.example deploy/.env
+chmod 600 deploy/.env
+```
+
+编辑 `deploy/.env`，至少完成以下配置：
+
+| 变量 | 配置要求 |
+| --- | --- |
+| `POSTGRES_PASSWORD`、`REDIS_PASSWORD` | 各自使用强随机值，建议 URL 安全字符 |
+| `DORMPRINT_SECRET_KEY` | 固定、至少 32 字符的随机主密钥；单独安全保存，升级时保留 |
+| `DORMPRINT_PUBLIC_ORIGIN` | 浏览器实际使用的完整 HTTPS 源，如 `https://print.example.com` |
+| `DORMPRINT_PUBLIC_HOST` | 对应域名，如 `print.example.com` |
+| `DORMPRINT_INITIAL_ADMIN_USERNAME` | 首次管理员用户名 |
+| `DORMPRINT_INITIAL_ADMIN_EMAIL` | 部署负责人已核验的真实账号邮箱 |
+| `DORMPRINT_MAIL_ALLOWED_HOSTS` | 实际 SMTP 主机白名单；连接参数及发信账号在后台配置 |
+| `RESTIC_REPOSITORY`、`RESTIC_PASSWORD` 等 | 加密备份仓库及凭据，按备份手册配置 |
+
+可用 `openssl rand -hex 32` 生成随机值。域名和邮箱示例需替换；真实环境文件、私钥和凭据不要提交到仓库。未配置备份目标时，备份服务会报告 `BACKUP_UNAVAILABLE`。
+
+### 2. 构建并初始化
+
+在仓库根目录、同一个 Bash 会话执行：
+
+```bash
+# 正式前端产物；不要使用 build:demo
+npm ci --legacy-peer-deps
+npm run build
+
+# 缩短后续 Compose 命令
+dc() { docker compose -f deploy/compose.yaml --env-file deploy/.env "$@"; }
+
+dc config --quiet
+dc build api file-worker business-worker beat migrate init-admin doctor backup
+dc up -d --wait postgres redis
+dc run --rm --no-deps volume-init
+dc run --rm --no-deps migrate
+dc run --rm --no-deps init-admin
+dc run --rm --no-deps doctor
+dc up -d api file-worker business-worker beat proxy backup
+```
+
+`init-admin` 交互设置密码。Nginx 只读挂载 `dist/`；部署时必须实际发布构建产物。随后配置外层 HTTPS 反代；仓库也提供 [TLS overlay](deploy/compose.tls.yaml)，证书和公网入口由部署者配置。
+
+### 3. 检查与业务初始化
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/v1/health/live
+curl -fsS http://127.0.0.1:8080/api/v1/health/ready
+dc ps
+dc logs -f api file-worker business-worker
+```
+
+从正式 HTTPS 域名访问并登录，配置价目、校区、楼栋、配送时段、联系方式及 SMTP。通过一笔测试订单核对上传、转换、人工收款、生产、装袋和交付流程，并验证备份恢复。
+
+摄像头、定位、PWA、实体出纸和真实邮件投递需要在目标设备与正式环境验收，不能以健康检查代替。
+
+### 已有环境升级
+
+先确认工作区无未处理修改，再拉取：
+
+```bash
+git pull --ff-only origin main
+```
+
+发布按以下顺序进行：**核对增量说明 → 维护窗口停写 → 创建并验证备份点 → 构建匹配版本的前后端 → 执行迁移 → 同步启动服务 → 验证并恢复入口**。保留原环境文件、数据卷和 `DORMPRINT_SECRET_KEY`。
+
+- 游客订单与账号归属升级涉及历史链接、会话及订单回填，必须遵循 [升级说明](docs/incremental/2026-11-18-guest-order-access.md)。最新配送身份图标需要 API 与前端同步更新。
+- `ce72aa117014` 降级会作废游客链接与会话；存在新独立账号归属时会拒绝降级。上线后优先前向修复，恢复方案见 [备份与恢复](docs/BACKUP-RESTORE.md)。
+- 升级后让已打开的页面／PWA 刷新到新版本。`git push` 本身不会自动部署生产服务。
+
+## 本地开发
+
+需要 Node.js ≥ 20.19、Python 3.12、独立的开发 PostgreSQL／Redis，以及可用的 LibreOffice、Ghostscript 和中文字体。
+
+**前端**
+
+```bash
 npm ci --legacy-peer-deps
 cp .env.example .env.local
 npm run dev
 ```
 
-Vite在5173端口代理/api/v1到127.0.0.1:8000，可用DORMPRINT_DEV_API_TARGET调整开发代理。普通用户与获权员工统一从/u/account登录；旧管理/配送登录地址仅兼容跳转到基础账号登录。
+访问 `http://localhost:5173`。Vite 默认把 `/api/v1` 代理到 `http://127.0.0.1:8000`，可通过 `.env.local` 中的 `DORMPRINT_DEV_API_TARGET` 调整。
 
-```sh
+**后端**
+
+```bash
 cd backend
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-# 复制.env.example到.env.local并填写专属数据库、Redis、存储及密钥；不要提交秘密。
+cp .env.example .env.local
+```
+
+编辑 `backend/.env.local`：环境改为 `development`、源改为 `http://localhost:5173`、`DORMPRINT_SECURE_COOKIES=false`；数据库／Redis URL 指向开发实例，存储路径改为 `.data`，主密钥使用固定随机值，Office／Ghostscript 路径按本机安装位置填写。示例文件默认是生产配置，需要修改后再运行。
+
+```bash
+# 在 backend/ 中执行
 .venv/bin/python -m app.cli migrate
 .venv/bin/python -m app.cli init-admin --username admin --email owner@example.com
 .venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-邮箱示例必须换成由部署负责人核验的真实基础账号邮箱。初始化交互设置密码，无默认密码、示例收费或演示订单。员工账号、普通客户共用最多两台设备额度，员工权限从当前账号授权动态派生。
+另开终端，在 `backend/` 分别运行 worker 和调度器：
 
-另开终端运行文件/业务作业与维护调度；生产由Compose内的队列服务承担：
-
-```sh
-cd backend
+```bash
 .venv/bin/celery -A app.jobs:celery_app worker -Q files,business --concurrency=2
 .venv/bin/celery -A app.jobs:celery_app beat
 ```
 
-生产文件转换worker与业务发信worker按部署文件分网、分队列；本地单worker仅用于联调。配置SMTP前新注册会明确暂不可用，已有账号和游客业务不依赖SMTP成功。
+本机合并队列仅用于联调；生产使用 Compose 中独立的文件与业务 worker。仅浏览前端演示可执行 `npm run dev -- --mode demo`，使用虚构数据；正式构建使用 `npm run build`，真实 API 模式不会自动回退到演示。
 
-## 构建、契约和验证
+## 测试与契约
 
-```sh
-npm run contract:generate
+移动 UI 配置中的 Chromium 项目使用本机 Google Chrome，请先安装 Chrome；以下命令另行安装 Playwright 的浏览器资源。
+
+```bash
 npm test
 npm run build
-# 后端测试仅使用独立DormPrint测试库，各进程自动创建隔离schema
-cd backend
-.venv/bin/pytest -q
-.venv/bin/alembic check
-.venv/bin/python -m app.cli doctor
+npm run test:e2e:install
+npm run test:e2e:install-webkit
+npm run test:e2e:mobile-ui
 ```
 
-契约由实际FastAPI OpenAPI生成，docs/openapi.yaml及src/lib/api-schema.d.ts不手改。测试库默认本机55432；生产凭据必须使用环境配置。Playwright包含桌面和移动视口，模拟接口测试不等于真实后端或实机验收。真实模式构建输出dist；build:demo仅供明确演示，不能用于营业。
+移动布局回归覆盖 Chromium／WebKit 和 320、375、390、430、768、1440 px；桌面浏览器模拟不等于 iPhone Safari、微信或已安装 PWA 的真机验收。
 
-## 部署与交付证据
+后端测试只使用独立测试数据库。默认连接 `127.0.0.1:55432` 的 DormPrint 测试库，也可通过 `DORMPRINT_TEST_DATABASE_URL` 指定；测试会创建并清理隔离 schema，不能指向业务数据库。
 
-[部署手册](docs/DEPLOYMENT.md)、[备份恢复](docs/BACKUP-RESTORE.md)。验收记录、截图、日志及浏览器追踪仅在本地 `docs/qa/` 和 `output/` 保留，不纳入版本控制。模块代码完成/单项测试通过不代表全部V1验收或已经上线；最终证据以本地最新验收记录为准。
+```bash
+cd backend
+.venv/bin/pytest -q
+```
 
-仓库保留测试代码及其虚构样例；运行产生的数据库、上传文件、备份、真实账号资料和本地密钥均不得提交。`.env.example` 仅提供配置占位值，真实值放在已忽略的本地环境文件或部署密钥管理中。
+修改接口后，在仓库根目录生成契约；以 FastAPI OpenAPI 为源，不手改生成文件：
 
-私有文件不作为公开静态目录，API/令牌/文件/定位/交付照片不进入离线缓存。普通业务记录不按年龄删除；文件/草稿/导出、临时秘密、备份轮换按Q/R例外清理。管理员主动删除进入24小时垃圾桶，永久清理必须检查未结业务、费用、工资和有效引用。
+```bash
+npm run contract:generate
+```
 
-真实服务器/域名、SMTP服务商、异地备份目标、打印机/纸型和设备定位验收尚需对实际环境配置与验证；仓库中的配置机制和本地测试不构成生产RPO/RTO或实体出纸通过声明。
+本机 Docker 配置回归：`node --test tests/deploy/local-docker.test.mjs`。已启动本机栈后，可执行 `node --test tests/deploy/local-docker.smoke.mjs` 检查真实入口。
+
+## 项目结构
+
+```text
+src/
+├── customer/       # 用户端：上传、订单与账号
+├── admin/          # 管理端：订单、生产与调度
+├── courier/        # 配送任务与交付
+├── components/     # 共用界面组件
+├── growth/         # 身份、客户、优惠与演示适配
+└── lib/            # 状态、类型、接口与文件工具
+backend/
+├── app/            # FastAPI 业务模块与 Celery 作业
+├── alembic/        # 数据库迁移
+└── tests/          # PostgreSQL 集成与浏览器验收
+deploy/             # Docker、Nginx、备份与启动脚本
+docs/               # 部署、业务说明与产品截图
+tests/              # 前端单元、浏览器与部署测试
+```
+
+## 文档导航
+
+| 文档 | 内容 |
+| --- | --- |
+| [生产部署](docs/DEPLOYMENT.md) | 环境变量、镜像、初始化、TLS、可信代理与运维 |
+| [备份与恢复](docs/BACKUP-RESTORE.md) | restic、保留策略、锁恢复、主密钥与恢复演练 |
+| [账号归属与游客链接升级](docs/incremental/2026-11-18-guest-order-access.md) | 14 天访问、关联账号、迁移与回退限制、三端身份图标 |
+| [校区配送升级](docs/incremental/2026-11-03-campus-delivery.md) | 校区独立时段、历史容量与引用迁移 |
+| [V1 业务范围](docs/superpowers/specs/2026-10-30-dormprint-v1-scope.md) | 已确认业务规则与功能边界 |
+| [API 契约](docs/openapi.yaml) | 由实际 FastAPI 应用生成的 OpenAPI |
+| [界面设计](DESIGN.md) · [移动端规范](docs/UIUX-移动端布局规范.md) | 字体、间距、触控区域与浏览器验收要求 |
+
+## 参与贡献
+
+欢迎通过 [Issues](https://github.com/KHIIHarry/dormitory-print/issues) 报告问题或提出建议，通过 Pull Request 提交修改。问题反馈请附复现步骤、版本、浏览器及视口；界面修改遵循仓库 `AGENTS.md`、设计与移动端规范，并运行对应测试。请勿提交真实账号、订单资料、上传文件或环境密钥。
+
+## 许可证
+
+项目采用 [Apache License 2.0](LICENSE)。
