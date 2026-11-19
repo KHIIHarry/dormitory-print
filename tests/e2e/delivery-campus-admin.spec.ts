@@ -92,6 +92,11 @@ async function fixture(
     }),
   );
   await page.goto("/campus-admin-fixture");
+  if (view === "detail") {
+    await expect
+      .poll(() => page.evaluate(() => typeof (window as any).fixture?.refresh))
+      .toBe("function");
+  }
 }
 
 test("current delivery time uses the effective batch window", async ({

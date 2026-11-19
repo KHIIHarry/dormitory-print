@@ -2,7 +2,10 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { OrderPickupCode } from "../src/admin/order-pickup-code";
+import {
+  OrderCustomerIdentity,
+  OrderPickupCode,
+} from "../src/admin/order-pickup-code";
 
 const render = (pickup: {
   pickupCode: string;
@@ -42,15 +45,49 @@ describe("admin pickup code", () => {
     expect(html.match(/<a /g)).toHaveLength(1);
     expect(html).not.toContain("/customers/");
   });
-  it("reserves the same icon slot for an order placed as guest", () => {
+  it("fills the guest icon slot without adding a customer link", () => {
     const html = render({
       pickupCode: "K5Q2R",
       placedWithAccount: false,
       customerDetailId: null,
     });
     expect(html).toContain("order-pickup-origin");
-    expect(html).not.toContain("<svg");
+    expect(html).toContain('aria-label="游客订单"');
+    expect(html).toContain('class="order-guest-icon"');
+    expect(html).not.toContain("/customers/");
     expect(html.match(/<a /g)).toHaveLength(1);
+  });
+  it("uses the same guest icon on identity rows and replaces it for an account owner", () => {
+    const identity = (owned: boolean) =>
+      renderToStaticMarkup(
+        createElement(
+          MemoryRouter,
+          null,
+          createElement(OrderCustomerIdentity, {
+            order: {
+              pickupCode: "K5Q2R",
+              accountOwned: owned,
+              adminPickup: {
+                pickupCode: "K5Q2R",
+                placedWithAccount: owned,
+                customerDetailId: owned ? "customer-1" : null,
+              },
+              customerSummary: owned
+                ? {
+                    accountId: "customer-1",
+                    email: "owner@example.test",
+                    displayName: "同学",
+                    createdAt: "2026-11-19T00:00:00Z",
+                    verified: true,
+                  }
+                : null,
+            },
+          }),
+        ),
+      );
+    expect(identity(false)).toContain('class="order-guest-icon"');
+    expect(identity(true)).not.toContain("order-guest-icon");
+    expect(identity(true)).toContain('href="/manage/customers/customer-1"');
   });
 });
 

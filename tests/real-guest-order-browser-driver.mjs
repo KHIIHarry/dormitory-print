@@ -105,6 +105,7 @@ try {
   await admin.page.goto(`${base}/manage/orders/${orderId}`);
   await expect(admin.page.getByRole('heading', { name: '订单专属链接', exact: true })).toBeVisible();
   await expect(admin.page.getByText('尚无链接', { exact: true })).toBeVisible();
+  await expect(admin.page.locator('.order-customer-identity .order-guest-icon')).toBeVisible();
   await adminMutation(admin.page, 'reset', '真实浏览器核实后开放十四天', 14);
   const firstToken = await openGuestLink(admin.page);
   const link = token => `${base}/u/order-link?orderId=${orderId}#token=${token}`;
@@ -160,12 +161,15 @@ try {
   await expect(forwarded.page.getByRole('heading', { name: '游客订单链接已停止访问', exact: true })).toBeVisible();
   await admin.page.goto(`${base}/manage/orders/${orderId}`);
   await expect(admin.page.getByRole('heading', { name: '客户信息', exact: true })).toBeVisible();
+  await expect(admin.page.locator('.order-customer-identity .order-guest-icon')).toHaveCount(0);
+  await expect(admin.page.locator('.order-customer-identity a.order-pickup-origin svg')).toBeVisible();
   await expect(admin.page.getByText('guest-browser-user@example.test', { exact: true })).toBeVisible();
   await admin.page.screenshot({ path: join(process.env.DORMPRINT_BROWSER_QA_DIR, 'guest-claimed-admin-desktop.png'), fullPage: true });
 
   const expiredOrderId = process.env.DORMPRINT_BROWSER_EXPIRED_ORDER_ID;
   const targetEmail = 'guest-browser-user@example.test';
   await admin.page.goto(`${base}/manage/orders/${expiredOrderId}`);
+  await expect(admin.page.locator('.order-customer-identity .order-guest-icon')).toBeVisible();
   await admin.page.getByRole('button', { name: '关联到客户账号', exact: true }).click();
   const dialog = admin.page.getByRole('dialog', { name: '关联到客户账号' });
   await dialog.getByRole('combobox', { name: '目标客户邮箱或账号 ID' }).fill('guest-browser-us');
@@ -184,6 +188,8 @@ try {
     orderId: expiredOrderId, ownerAccountId: process.env.DORMPRINT_BROWSER_OWNER_ID,
   });
   await expect(admin.page.locator('.order-customer-identity')).toContainText(targetEmail);
+  await expect(admin.page.locator('.order-customer-identity .order-guest-icon')).toHaveCount(0);
+  await expect(admin.page.locator('.order-customer-identity a.order-pickup-origin svg')).toBeVisible();
   await original.page.goto(`${base}/u/orders`);
   await expect(original.page.locator(`a[href="/u/orders/${expiredOrderId}"]`)).toBeVisible();
   console.log('REAL_GUEST_BROWSER_PASS: actual UI and API reset, open, close, reset, old-link denial, original-device claim, admin association by email, forwarded-session revocation, account ownership, no token storage.');

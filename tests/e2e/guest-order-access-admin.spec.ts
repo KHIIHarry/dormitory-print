@@ -300,7 +300,7 @@ import React from '${react}';import ReactDOM from '${dom}';import {MemoryRouter,
 import {Dashboard} from '/src/admin/dashboard.tsx';import {AdminOrders,AdminOrderDetail} from '/src/admin/orders.tsx';import {PrintCenter,PrintTask,BindingCenter} from '/src/admin/production.tsx';import {AdminAfterSalesPage,AdminAfterSaleDetail} from '/src/v1/admin.tsx';import {AdminOrderAccess} from '/src/admin/order-access.tsx';import '/src/styles.css';
 const surface=${JSON.stringify(surface)};const components={'dashboard':Dashboard,'orders':AdminOrders,'order-detail':AdminOrderDetail,'guest-detail':AdminOrderDetail,'print':PrintCenter,'print-detail':PrintTask,'guest-print-detail':PrintTask,'binding':BindingCenter,'after-sales':AdminAfterSalesPage,'after-sale-detail':AdminAfterSaleDetail};
 const component=surface==='access'?React.createElement(AdminOrderAccess,{order:${JSON.stringify(data.orders[1])}}):React.createElement(components[surface]);
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MemoryRouter,{initialEntries:[surface==='order-detail'?'/order-1':surface==='guest-detail'?'/order-2':surface==='print-detail'?'/task-1':surface==='guest-print-detail'?'/task-2':surface==='after-sale-detail'?'/case-1':'/']},React.createElement('main',{className:'admin-content'},React.createElement(Routes,null,React.createElement(Route,{path:'/:id?',element:component})))));
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(MemoryRouter,{initialEntries:[surface==='order-detail'?'/order-1':surface==='guest-detail'?'/order-2':surface==='print-detail'?'/task-1':surface==='guest-print-detail'?'/task-2':surface==='after-sale-detail'?'/case-1':'/']},React.createElement('main',{className:'admin-content',onClick:(event)=>event.currentTarget.setAttribute('data-row-clicked','true')},React.createElement(Routes,null,React.createElement(Route,{path:'/:id?',element:component})))));
 </script></html>`,
     }),
   );
@@ -346,9 +346,34 @@ for (const surface of [
     } else if (surface === "guest-print-detail") {
       await expect(identity).toHaveText("游客订单");
       await expect(identity.locator("svg")).toHaveCount(0);
+      await expect(identity.locator(".order-guest-icon")).toBeVisible();
       await expect(page.locator(".order-pickup-code")).toHaveCount(0);
     } else
       await expect(page.locator(".order-pickup-code").first()).toBeVisible();
+    const guestIcon = page.locator(".order-guest-icon").first();
+    if (
+      [
+        "dashboard",
+        "orders",
+        "print",
+        "binding",
+        "after-sales",
+        "guest-print-detail",
+      ].includes(surface)
+    ) {
+      await expect(guestIcon).toBeVisible();
+      const slot = guestIcon.locator("..");
+      await page
+        .locator("main.admin-content")
+        .evaluate((element) => element.removeAttribute("data-row-clicked"));
+      await slot.click();
+      await expect(page.locator("main.admin-content")).not.toHaveAttribute(
+        "data-row-clicked",
+        "true",
+      );
+      await expect(slot).not.toHaveAttribute("href");
+      await expect(guestIcon).toBeVisible();
+    }
     const printHeading = page.getByRole("heading", { name: /^打印任务 · / });
     const printDetail =
       surface === "print-detail" || surface === "guest-print-detail";
@@ -387,6 +412,13 @@ for (const surface of [
           });
           expect(emailFits).toBe(true);
         }
+      }
+      for (const icon of await page
+        .locator(".order-guest-icon, .order-pickup-icon")
+        .all()) {
+        const box = (await icon.boundingBox())!;
+        expect(box.width).toBe(28);
+        expect(box.height).toBe(28);
       }
       const metrics = await page
         .locator(".order-pickup-code")
@@ -500,9 +532,11 @@ test("print-detail reflects a guest association when the order is absent from th
   const requests = await mount(page, "guest-print-detail");
   const identity = page.locator(".order-customer-identity");
   await expect(identity).toHaveText("游客订单");
+  await expect(identity.locator(".order-guest-icon")).toBeVisible();
   await expect
     .poll(
-      () => requests.filter(({ path }) => path === "/admin/orders/order-2").length,
+      () =>
+        requests.filter(({ path }) => path === "/admin/orders/order-2").length,
     )
     .toBeGreaterThan(0);
   await page.evaluate(async () => {
@@ -510,6 +544,8 @@ test("print-detail reflects a guest association when the order is absent from th
   });
   await page.clock.runFor(10_001);
   await expect(identity).toContainText("@example.com");
+  await expect(identity.locator(".order-guest-icon")).toHaveCount(0);
+  await expect(identity.locator("svg")).toHaveCount(1);
   await expect(
     identity.getByRole("link", { name: "查看客户详情" }),
   ).toHaveAttribute("href", "/manage/customers/customer-1");
@@ -528,6 +564,7 @@ test("guest link closes, resets and switches to customer facts after association
   const identity = page.locator(".order-customer-identity");
   await expect(identity).toHaveText("游客订单");
   await expect(identity.locator("svg")).toHaveCount(0);
+  await expect(identity.locator(".order-guest-icon")).toBeVisible();
   await expect(page.getByText("开放中", { exact: true })).toBeVisible();
   const access = page.locator(".admin-order-access");
   for (const width of [320, 375, 390, 430, 768, 1440]) {
@@ -685,6 +722,8 @@ test("guest link closes, resets and switches to customer facts after association
     page.getByRole("heading", { name: "订单专属链接", exact: true }),
   ).toHaveCount(0);
   await expect(identity).toContainText("@example.com");
+  await expect(identity.locator(".order-guest-icon")).toHaveCount(0);
+  await expect(identity.locator("svg")).toHaveCount(1);
   await expect(
     identity.getByRole("link", { name: "查看客户详情" }),
   ).toHaveAttribute("href", "/manage/customers/customer-1");

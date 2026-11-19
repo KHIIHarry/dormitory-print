@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ADMIN } from "../lib/store";
 import type { AdminOrderPickup, Order } from "../lib/types";
+import guestOrderIcon from "../assets/guest-order.svg";
 import "./order-pickup-code.css";
 
 export function adminPickupOf(order: {
@@ -26,7 +27,7 @@ function OrderCustomerIcon({
   customerDetailId: string | null;
   label: string;
 }) {
-  const icon = placedWithAccount && (
+  const icon = placedWithAccount ? (
     <span className="order-pickup-icon">
       <svg
         width="18"
@@ -43,6 +44,15 @@ function OrderCustomerIcon({
         <path d="M5 21v-1.5a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4V21" />
       </svg>
     </span>
+  ) : (
+    <img
+      className="order-guest-icon"
+      src={guestOrderIcon}
+      width="28"
+      height="28"
+      alt=""
+      aria-hidden="true"
+    />
   );
   return (
     <>
@@ -59,9 +69,9 @@ function OrderCustomerIcon({
       ) : (
         <span
           className="order-pickup-origin"
-          role={placedWithAccount ? "img" : undefined}
-          aria-label={placedWithAccount ? "账号订单" : undefined}
-          aria-hidden={placedWithAccount ? undefined : true}
+          role="img"
+          aria-label={placedWithAccount ? "账号订单" : "游客订单"}
+          onClick={(event) => event.stopPropagation()}
         >
           {icon}
         </span>
@@ -79,19 +89,22 @@ export function OrderCustomerIdentity({
   >;
 }) {
   const pickup = adminPickupOf(order);
-  if (!(order.accountOwned ?? pickup.placedWithAccount))
-    return <p className="order-customer-identity">游客订单</p>;
+  const accountOwned = order.accountOwned ?? pickup.placedWithAccount;
 
   return (
     <div className="order-customer-identity">
       <OrderCustomerIcon
-        placedWithAccount
+        placedWithAccount={accountOwned}
         customerDetailId={
-          order.customerSummary?.accountId ?? pickup.customerDetailId
+          accountOwned
+            ? (order.customerSummary?.accountId ?? pickup.customerDetailId)
+            : null
         }
         label="查看客户详情"
       />
-      <span>{order.customerSummary?.email || "账号订单"}</span>
+      <span>
+        {accountOwned ? order.customerSummary?.email || "账号订单" : "游客订单"}
+      </span>
     </div>
   );
 }

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" role="img" aria-labelledby="guest-title" focusable="false">
+  <title id="guest-title">游客订单</title>
+  <circle cx="14" cy="14" r="14" fill="#EEEEEE"/>
+  <text x="14" y="14" text-anchor="middle" dominant-baseline="central" fill="#747474" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="13.5" font-weight="500" letter-spacing="0">游</text>
+</svg>
