@@ -90,7 +90,7 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
   };
   const inProgress = {
     ...tasks[1], id: "another-order", orderId: "order-2", pickupCode: "R9KPF",
-    fileName: "另一单.pdf", status: "ATTEMPTED", openAttemptId: "existing-attempt",
+    fileName: "另一单.pdf", status: "ATTEMPTED", openAttemptId: "existing-attempt" as string | null,
     actualStartedAt: "2026-11-12T01:00:00+00:00",
   };
   const companion = {
@@ -102,7 +102,15 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
     actualStartedAt: null as string | null,
     refundLocked: false,
   };
-  const queue = [...tasks, identification, inProgress, companion];
+  const otherComplete = {
+    ...tasks[0], id: "other-complete", orderId: "order-3", pickupCode: "B7XFM",
+    fileName: "已打完的文件.pdf",
+  };
+  const otherPending = {
+    ...companion, id: "other-pending", orderId: "order-4", pickupCode: "V2RQJ",
+    fileName: "待打印文件.pdf",
+  };
+  const queue = [...tasks, identification, inProgress, companion, otherComplete, otherPending];
   const { config } = createDemo();
   const pdf = await PDFDocument.create();
   const sample = pdf.addPage([595, 842]);
@@ -147,6 +155,10 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
       companion.actualStartedAt = "2026-11-12T02:00:00+00:00";
       companion.orderVersion++;
       data = { actualStartedAt: companion.actualStartedAt, version: companion.orderVersion };
+    } else if (path.endsWith("/print-attempts/new-attempt/result")) {
+      companion.status = "COMPLETED";
+      companion.openAttemptId = null;
+      companion.orderVersion++;
     } else if (path.startsWith("/api/v1/admin/print-tasks/")) {
       data = queue.find((task) => path.endsWith(`/${task.id}`));
     }
@@ -165,12 +177,24 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
   await expect(second).toContainText("已开印，待完成");
   await expect(second).toContainText("待结果确认");
   await expect(second.locator(".identification-progress")).toHaveText("识别页 0/0");
+  const toggles = page.locator(".print-order-toggle");
+  const expectQueue = async (codes: string[]) => {
+    await expect(toggles).toHaveCount(codes.length);
+    for (const [index, code] of codes.entries()) {
+      await expect(toggles.nth(index)).toHaveAccessibleName(new RegExp(`^${code} `));
+    }
+  };
+  await expect(page.getByRole("link", { name: /下一项/ })).toHaveCount(0);
+  await expectQueue(["R9KPF", "V2RQJ", "T8DUW", "B7XFM"]);
+  const status = page.getByLabel("订单打印状态");
+  await status.selectOption("COMPLETED");
+  await expectQueue(["T8DUW", "B7XFM"]);
+  await status.selectOption("");
   await expect(page.locator(".print-task-card")).toHaveCount(0);
   await order.click();
   const firstCard = page.locator(".print-task-card").first();
   await expect(firstCard).toContainText("订单识别页.pdf");
   await expect(firstCard).toContainText("可选");
-  await expect(page.getByRole("link", { name: /下一项/ })).toHaveAttribute("href", "/manage/print/another-order");
   await expect(page.getByText("另一单.pdf")).toBeHidden();
   await firstCard.getByRole("link", { name: "打开任务" }).click();
   await expect(page.getByRole("heading", { name: "识别页记录" })).toBeVisible();
@@ -303,11 +327,13 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
     if (width === 320 || width === 1440) {
       await page
         .locator(".print-order-card")
-        .first()
+        .filter({ has: order })
         .screenshot({
           path: info.outputPath(`print-task-${width}.png`),
         });
     }
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: info.outputPath(`print-queue-${width}.png`), scale: "css" });
   }
   await secondCard.locator(".print-task-card").filter({ hasText: companion.fileName })
     .getByRole("link", { name: "打开任务" }).click();
@@ -379,6 +405,13 @@ test("打印中心和任务详情显示每项任务的双面翻转方向", async
   await expect(page.getByText("退款审核期间暂停新的打印和补打。", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "建立补打并记录尝试" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "确认记录当前尝试" })).toBeEnabled();
+  inProgress.status = "COMPLETED";
+  inProgress.openAttemptId = null;
+  await page.getByRole("button", { name: "确认记录当前尝试" }).click();
+  await expect(page.getByText("实际打印结果已记录", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "返回打印中心" }).click();
+  await expectQueue(["V2RQJ", "T8DUW", "R9KPF", "B7XFM"]);
+  await expect(second).toHaveAttribute("aria-expanded", "true");
 });
 
 test("我的订单空状态在整个列表内居中", async ({ page }, info) => {

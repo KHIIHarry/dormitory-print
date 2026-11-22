@@ -92,7 +92,10 @@ function DemoPrintCenter() {
         ["PENDING_PRINT", "READY_FOR_DELIVERY"].includes(o.status) &&
         (!params.get("order") || o.id === params.get("order")),
     )
-    .flatMap((o) => o.files.map((f) => ({ o, f })))
+    .flatMap((o) => {
+      const orderComplete = o.files.every((f) => f.printStatus === "COMPLETED");
+      return o.files.map((f) => ({ o, f, orderComplete }));
+    })
     .filter(
       ({ o, f }) =>
         (!campus ||
@@ -102,6 +105,13 @@ function DemoPrintCenter() {
           .toLowerCase()
           .includes(search.toLowerCase()),
     );
+  const sortedTasks = [...tasks].sort((a, b) => {
+    const byCompletion = Number(a.orderComplete) - Number(b.orderComplete);
+    if (byCompletion || view !== "type") return byCompletion;
+    return (a.f.segments[0]?.colorMode || "").localeCompare(
+      b.f.segments[0]?.colorMode || "",
+    );
+  });
   return (
     <>
       <PageHeading
@@ -187,14 +197,7 @@ function DemoPrintCenter() {
         ，文件已展开份数，关闭对话框后请返回确认结果。
       </Notice>
       <div className="production-list">
-        {(view === "type"
-          ? [...tasks].sort((a, b) =>
-              (a.f.segments[0]?.colorMode || "").localeCompare(
-                b.f.segments[0]?.colorMode || "",
-              ),
-            )
-          : tasks
-        ).map(({ o, f }) => (
+        {sortedTasks.map(({ o, f }) => (
           <Panel key={f.id} className="print-task-card">
             <div className="print-task-top">
               <OrderPickupCode pickup={adminPickupOf(o)} href={`${ADMIN}/orders/${o.id}`} />
@@ -994,7 +997,6 @@ function ServerPrintCenter() {
   const [opened, setOpened] = useState(
     () => new Set(selectedOrderId ? [selectedOrderId] : []),
   );
-  const [currentOrderId, setCurrentOrderId] = useState(selectedOrderId);
   const [status, setStatus] = useState("");
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
@@ -1085,7 +1087,6 @@ function ServerPrintCenter() {
         id,
         historical: id === historicalOrderId,
         tasks: sorted,
-        documentTasks,
         identificationProgress,
         code: sorted[0].pickupCode,
         campus: taskCampus,
@@ -1097,7 +1098,12 @@ function ServerPrintCenter() {
         exception,
         progress,
       };
-    }).filter((order) => !campus || order.campus?.id === campus);
+    })
+      .filter((order) => !campus || order.campus?.id === campus)
+      .sort(
+        (a, b) =>
+          Number(a.progress === "COMPLETED") - Number(b.progress === "COMPLETED"),
+      );
   }, [
     campus,
     data.buildings,
@@ -1126,17 +1132,6 @@ function ServerPrintCenter() {
         ) ||
         (!!order.job && "订单识别页.pdf".includes(query))),
   );
-  const nextOrders = [
-    ...visibleOrders.filter((order) => order.id === currentOrderId),
-    ...visibleOrders.filter((order) => order.id !== currentOrderId),
-  ];
-  const next = nextOrders
-    .filter((order) => !order.locked && !order.historical)
-    .flatMap((order) => order.documentTasks)
-    .find((task) =>
-      ["PENDING", "ATTEMPTED", "EXCEPTION"].includes(task.status),
-    );
-
   async function retryIdentification(orderId: string) {
     setRetrying(orderId);
     try {
@@ -1160,14 +1155,6 @@ function ServerPrintCenter() {
       <PageHeading
         title="打印中心"
         description="按订单逐项打印，实际出纸后确认结果。"
-        action={
-          next && (
-            <Link className="btn" to={`${ADMIN}/print/${next.id}`}>
-              <ArrowRight size={16} />
-              下一项 · {next.pickupCode}
-            </Link>
-          )
-        }
       />
       <div className="production-stats">
         {[...orderPrintStates, ["EXCEPTION", "打印异常", "red"] as const].map(
@@ -1278,7 +1265,6 @@ function ServerPrintCenter() {
                     else next.add(order.id);
                     return next;
                   });
-                  setCurrentOrderId(expanded ? null : order.id);
                 }}
               >
                 <span className="print-order-heading">
