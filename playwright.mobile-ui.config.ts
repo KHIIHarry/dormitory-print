@@ -6,6 +6,7 @@ export default defineConfig({
     "guest-order-access.spec.ts",
     "guest-order-access-admin.spec.ts",
     "delivery-campus-admin.spec.ts",
+    "delivery-campus-customer.spec.ts",
     "slot-date-filter.spec.ts",
     "native-month.spec.ts",
     "delivery-proof-details.spec.ts",

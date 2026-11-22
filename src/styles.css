@@ -2324,12 +2324,6 @@ input[type="date"],
   color: var(--primary);
   font-weight: 600;
 }
-.quote-version {
-  font-size: 9px;
-  color: #b5a799;
-  display: block;
-  margin-top: 8px;
-}
 .privacy-caption {
   font-size: 9px;
   color: #ab9b8d;

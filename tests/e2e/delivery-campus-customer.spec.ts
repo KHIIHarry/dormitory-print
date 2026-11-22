@@ -71,6 +71,14 @@ test("switching campuses replaces the available slots and keeps checkout progres
   await page.route("**/api/v1/orders/*/after-sales", (route) => route.fulfill({ json: { items: [] } }));
   await page.goto("/u/review");
   await expect(page.getByLabel("微信昵称 *", { exact: true })).toBeVisible();
+  const fees = page.locator(".checkout-summary");
+  await expect(fees.getByText(/有效期至/)).toBeVisible();
+  await expect(fees.getByText(/报价版本|价格版本|后台配置/)).toHaveCount(0);
+  await expect(fees.getByText("合计应付")).toBeVisible();
+  await expect(fees.getByText(/照片与装订不计入满量折扣/)).toBeVisible();
+  await expect(fees.getByText(/订单提交后锁定报价/)).toBeVisible();
+  await expect(fees.getByRole("checkbox", { name: /我确认本次应付/ })).toBeVisible();
+  await expect(fees.getByText(/核对提取码与金额后线下付款/)).toBeVisible();
   await page.getByLabel("微信昵称 *", { exact: true }).fill("保留的昵称");
   await page.getByRole("button", { name: /东校区/ }).first().click();
   const east = page.getByRole("button", { name: /东校区时段/ });
@@ -86,8 +94,10 @@ test("switching campuses replaces the available slots and keeps checkout progres
     await page.setViewportSize({ width, height: 900 });
     await expect(east).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-    if (width === 390 || width === 1440)
+    if (width === 390 || width === 1440) {
       await east.screenshot({ path: info.outputPath(`checkout-window-${width}.png`) });
+      await fees.screenshot({ path: info.outputPath(`checkout-fees-${width}.png`) });
+    }
   }
   await expect(page.getByRole("button", { name: /西校区时段/ })).toHaveCount(0);
   const firstBuilding = page.locator(".building-choices button").first();

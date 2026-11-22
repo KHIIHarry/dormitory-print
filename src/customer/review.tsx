@@ -277,17 +277,12 @@ function ReviewContent() {
       : null,
   );
   const current = () => mounted.current;
-  const [priceVersionChange, setPriceVersionChange] = useState<{
-    from: number;
-    to: number;
-  } | null>(null);
+  const [priceChanged, setPriceChanged] = useState(false);
   const acceptQuote = (next: Quote) => {
     const valid = assertQuote(next);
     const previous = quoteRef.current;
-    setPriceVersionChange(
-      previous && previous.priceVersion !== valid.priceVersion
-        ? { from: previous.priceVersion, to: valid.priceVersion }
-        : null,
+    setPriceChanged(
+      !!previous && previous.priceVersion !== valid.priceVersion,
     );
     setQuote(valid);
     quoteRef.current = valid;
@@ -1500,7 +1495,6 @@ function ReviewContent() {
             ) : contentCurrent && quote ? (
               <>
                 <PriceRows total={quote.totalCents} quote={quote} />
-                <span className="quote-version">报价版本 · {quote.id}</span>
                 <p className="form-hint">
                   本单 A4 用纸{" "}
                   {quote.lines
@@ -1535,23 +1529,21 @@ function ReviewContent() {
                     {money(discount.amountCents)}
                   </Notice>
                 ))}
-                {priceVersionChange && (
+                {priceChanged && (
                   <Notice type="warning">
-                    价格版本已由 v{priceVersionChange.from} 更新为 v
-                    {priceVersionChange.to}
-                    ，原金额确认已清除；请核对新报价并重新勾选确认。已提交且内容未变的订单继续锁价，不受影响。
+                    价格已更新，请核对新报价并重新勾选确认金额。
                   </Notice>
                 )}
                 <p className="form-hint">
-                  本次报价价格版本 v{quote.priceVersion}，有效期至{" "}
+                  本次报价有效期至{" "}
                   {new Date(quote.expiresAt).toLocaleTimeString("zh-CN", {
                     timeZone: "Asia/Shanghai",
                     hour12: false,
                   })}
-                  （后台配置{" "}
+                  （有效时长{" "}
                   {(data.config as unknown as { quoteMinutes?: number })
                     .quoteMinutes ?? 15}{" "}
-                  分钟）。过期或价格版本变化时必须重新获取并确认；已提交订单的报价锁价。
+                  分钟）。报价过期或价格更新后，请重新获取报价并确认金额。订单提交后锁定报价。
                 </p>
                 {expired && (
                   <Notice type="warning">
