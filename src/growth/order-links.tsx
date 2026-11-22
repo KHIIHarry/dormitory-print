@@ -38,7 +38,7 @@ export function CustomerSavedLink({ orderId }: { orderId: string }) {
                     });
                   } catch (e) {
                     if ((e as Error).name !== "AbortError")
-                      toast("分享未完成，请复制链接");
+                      toast("分享未完成，请复制链接", "warning");
                   }
                 }}
               >

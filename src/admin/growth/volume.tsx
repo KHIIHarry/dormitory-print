@@ -277,7 +277,7 @@ export function VolumeDiscountsPage() {
                 预览新报价影响
               </Button>
               {previewError && (
-                <Notice type="error">
+                <Notice type="error" reveal>
                   <span role="alert">{previewError}</span>
                 </Notice>
               )}

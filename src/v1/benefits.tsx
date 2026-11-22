@@ -423,7 +423,7 @@ export function AdminBenefitsPage() {
             </Notice>
 
             {error && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{error}</span>
               </Notice>
             )}

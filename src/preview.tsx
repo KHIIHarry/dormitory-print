@@ -193,7 +193,7 @@ export function PreviewHub() {
       setDraft([file]);
       nav(photo ? `/u/new/photo/${file.id}` : "/u/new/settings");
     } catch (error) {
-      toast((error as Error).message);
+      toast((error as Error).message, "error");
     } finally {
       setLoadingSample(false);
     }

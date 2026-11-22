@@ -6,7 +6,8 @@ import {
   type ResourceSnapshot,
 } from "./feedback-state";
 import { isUncertainSubmission, invalidateRequestContext } from "./api";
-import { usePresence, MOTION } from "../components/presence";
+import { OperationFeedback, type OperationIssue } from "../components/operation-feedback";
+import { getFeedbackLayer } from "../components/overlay-stack";
 import {
   createContext,
   useContext,
@@ -90,12 +91,10 @@ type Store = {
   refreshing: boolean;
   refreshError: string;
   pendingActions: Record<string, boolean>;
-  actionIssues: Record<string, string>;
-  clearActionIssues: () => void;
   loading: boolean;
   authReady: boolean;
   error: string;
-  toast: (text: string) => void;
+  toast: (text: string, tone?: "success" | "info" | "error" | "warning") => void;
   act: (
     path: string,
     body: unknown,
@@ -206,13 +205,15 @@ export function Provider({ children }: { children: ReactNode }) {
   const [pendingActions, setPendingActions] = useState<Record<string, boolean>>(
     {},
   );
-  const [actionIssues, setActionIssues] = useState<Record<string, string>>({});
-  const clearActionIssues = useCallback(() => setActionIssues({}), []);
   const [dataGeneration, setDataGeneration] = useState(getIdentityGeneration());
   const authReady = identity.staffReady;
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<{ message: string; tone: "success" | "info" }>();
+  const [issue, setIssue] = useState<(OperationIssue & { page: string; path?: string })>();
+  const [checkingStatus, setCheckingStatus] = useState(false);
   const location = useLocation();
+  const currentPage = useRef(location.pathname);
+  currentPage.current = location.pathname;
   const today = useShanghaiToday();
   const courierToday = /^\/courier\/?$/.test(location.pathname)
     ? today
@@ -220,16 +221,24 @@ export function Provider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const sessionReady = useRef(false);
   const sessionRequest = useRef<Promise<unknown> | null>(null);
-  const messageRef = useRef(message);
-  if (message) messageRef.current = message;
-  const toastPresence = usePresence(!!message, MOTION.local);
-  const toast = (text: string) => setMessage(text);
-  useEffect(() => {
-    if (message) {
-      const t = setTimeout(() => setMessage(""), 4500);
-      return () => clearTimeout(t);
+  const toast: Store["toast"] = (message, tone = "success") => {
+    if (!message) return;
+    if (tone === "error" || tone === "warning") {
+      setMessage(undefined);
+      setIssue({ message, tone, page: currentPage.current, layer: getFeedbackLayer() });
+    } else {
+      setIssue(undefined);
+      setMessage({ message, tone });
     }
+  };
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(undefined), 3000);
+    return () => clearTimeout(timer);
   }, [message]);
+  useEffect(() => {
+    setIssue(undefined);
+  }, [location.pathname]);
   const refresh = async () => {
     if (DEMO) {
       const generation = getIdentityGeneration();
@@ -540,7 +549,8 @@ export function Provider({ children }: { children: ReactNode }) {
       setResources({});
       locks.current.clear();
       setPendingActions({});
-      setActionIssues({});
+      setIssue(undefined);
+      setMessage(undefined);
       sessionReady.current = false;
       sessionRequest.current = null;
       setDataGeneration(getIdentityGeneration());
@@ -605,13 +615,15 @@ export function Provider({ children }: { children: ReactNode }) {
   ) => {
     if (!navigator.onLine) {
       const message = "当前离线，联网后再执行此操作";
-      if (!onError?.(new Error(message), message)) toast(message);
+      if (!onError?.(new Error(message), message)) toast(message, "warning");
       return false;
     }
     const release = locks.current.acquire(path);
     if (!release) return false;
     setPendingActions((old) => ({ ...old, [path]: true }));
-    setActionIssues((old) => ({ ...old, [path]: "" }));
+    const operationPage = currentPage.current;
+    const operationLayer = getFeedbackLayer();
+    setIssue((previous) => previous?.path === path ? undefined : previous);
     const operationGeneration = getIdentityGeneration();
     try {
       if (!DEMO) {
@@ -653,14 +665,30 @@ export function Provider({ children }: { children: ReactNode }) {
     } catch (e) {
       if (operationGeneration !== getIdentityGeneration()) return false;
       const blocked = trashBlockers(e);
-      const issue = isUncertainSubmission(e)
+      const uncertain = isUncertainSubmission(e);
+      const issue = uncertain
         ? "提交结果待核实：请求响应未确认，请先刷新并核对实际业务状态，避免重复操作。"
         : blocked.length
           ? `${(e as Error).message}：${blocked.map((b) => b.label).join("；")}`
           : (e as Error).message;
-      if (!onError?.(e, issue))
-        setActionIssues((old) => ({ ...old, [path]: issue }));
-      if ((e as { status: number }).status === 409) void refresh();
+      const conflict = (e as { status: number }).status === 409;
+      if (!onError?.(e, issue) &&
+          operationPage === currentPage.current &&
+          (!operationLayer || operationLayer.isConnected)) {
+        setMessage(undefined);
+        setIssue({
+          page: operationPage,
+          path,
+          layer: operationLayer,
+          tone: uncertain ? "warning" : "error",
+          message: issue,
+          checkStatus: uncertain || conflict ? () => {
+            setCheckingStatus(true);
+            void refresh().finally(() => setCheckingStatus(false));
+          } : undefined,
+        });
+      }
+      if (conflict) void refresh();
       return false;
     } finally {
       release();
@@ -688,15 +716,10 @@ export function Provider({ children }: { children: ReactNode }) {
       path = `/admin/orders/${id}`;
       method = "PATCH";
       payload.priority = patch.priority;
-    } else if (["note", "review-address"].includes(action)) {
-      path = `/admin/corrections`;
-      Object.assign(payload, {
-        targetType: "ORDER",
-        targetId: id,
-        action: action === "review-address" ? "REVIEW_ADDRESS" : "SET_NOTE",
-        reason: patch.note || action,
-        actionPayload: patch,
-      });
+    } else if (action === "note") {
+      path = `/admin/orders/${id}`;
+      method = "PATCH";
+      payload.note = patch.note;
     }
     return act(
       path,
@@ -716,9 +739,7 @@ export function Provider({ children }: { children: ReactNode }) {
                         ? "订单已撤销"
                         : action === "location"
                           ? "楼栋已更新"
-                          : action === "review-address"
-                            ? "配送地址已复核"
-                            : "订单记录已更新",
+                          : "订单记录已更新",
                     time: now(),
                     description: patch.note || "",
                   },
@@ -808,8 +829,6 @@ export function Provider({ children }: { children: ReactNode }) {
         refreshing,
         refreshError,
         pendingActions,
-        actionIssues,
-        clearActionIssues,
         setData,
         draft,
         setDraft,
@@ -825,14 +844,11 @@ export function Provider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-      {toastPresence.present && (
-        <div className="toast" data-state={toastPresence.phase} role="status">
-          {messageRef.current}
-          <button aria-label="关闭提示" onClick={() => setMessage("")}>
-            ×
-          </button>
-        </div>
-      )}
+      <OperationFeedback
+        issue={issue?.page === location.pathname ? { ...issue, busy: checkingStatus } : undefined}
+        toast={message}
+        dismiss={() => setIssue(undefined)}
+      />
     </Context.Provider>
   );
 }

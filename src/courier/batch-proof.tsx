@@ -477,7 +477,7 @@ export function BatchProof({
             {uploading ? (
               <p className="batch-proof-muted">{transferLabel}</p>
             ) : null}
-            {photoError ? <p className="field-error">{photoError}</p> : null}
+            {photoError ? <Notice type="error" reveal>{photoError}</Notice> : null}
             <label className="checkbox-label">
               <input
                 type="checkbox"
@@ -537,7 +537,7 @@ export function BatchProof({
               </p>
             ) : null}
             {locationError ? (
-              <p className="field-error">{locationError}</p>
+              <Notice type="error" reveal>{locationError}</Notice>
             ) : null}
             {role === "ADMIN" && !adminCapable && !position ? (
               <p className="field-error">
@@ -693,7 +693,7 @@ export function LocationExceptionRequest({
             提交定位例外申请
           </Button>
           {message ? <p className="batch-proof-muted">{message}</p> : null}
-          {error ? <p className="field-error">{error}</p> : null}
+          {error ? <Notice type="error" reveal>{error}</Notice> : null}
         </div>
       ) : null}
     </div>

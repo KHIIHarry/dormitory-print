@@ -184,7 +184,7 @@ export function ConfirmAction({
     <Modal title={title} onClose={() => !pending && onClose()}>
       <div className="growth-stack">
         {error && (
-          <Notice type="error">
+          <Notice type="error" reveal>
             <span role="alert">{error}</span>
           </Notice>
         )}

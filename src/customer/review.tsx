@@ -801,23 +801,23 @@ function ReviewContent() {
       quoteBusy ||
       quoteError
     ) {
-      toast("请取得最新报价并明确确认本次应付金额");
+      toast("请取得最新报价并明确确认本次应付金额", "warning");
       return;
     }
     if (!allArtifactsAcknowledged(artifacts, acks)) {
-      toast("请逐项检查并确认全部最终 PDF");
+      toast("请逐项检查并确认全部最终 PDF", "warning");
       return;
     }
     if (!data.config.serviceEnabled) {
-      toast("当前已暂停接单，请稍后重试");
+      toast("当前已暂停接单，请稍后重试", "warning");
       return;
     }
     if (!selectableSlots.some((s) => s.id === slot)) {
-      toast("原预约时段已截单、封批或关闭，请重新选择可预约时段");
+      toast("原预约时段已截单、封批或关闭，请重新选择可预约时段", "warning");
       return;
     }
     if (original && original.status !== "PENDING_CONFIRMATION") {
-      toast("订单已确认付款，不能继续修改内容");
+      toast("订单已确认付款，不能继续修改内容", "warning");
       return;
     }
     const submittedQuote = quote,
@@ -997,7 +997,7 @@ function ReviewContent() {
           target?.focus({ preventScroll: true });
         });
       } else {
-        toast((e as Error).message);
+        toast((e as Error).message, "error");
         setConfirmedQuote("");
         setQuoteError((e as Error).message);
       }
@@ -1581,7 +1581,7 @@ function ReviewContent() {
             {quoteBusy && <TaskStatus label="正在重新核验身份与优惠…" />}
             {quoteError && (
               <div role="alert">
-                <Notice type="error">{quoteError}</Notice>
+                <Notice type="error" reveal>{quoteError}</Notice>
               </div>
             )}
             {!busy && (quoteError || expired || !quote) && (

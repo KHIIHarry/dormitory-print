@@ -394,6 +394,8 @@ test("sets and clears priority through the versioned order endpoint", async ({
       route.fulfill({ json: { data: { items: [order] } } }),
     [`/admin/orders/${order.id}`]: (route) => {
       const request = route.request();
+      if (request.method() === "GET")
+        return route.fulfill({ json: { data: order } });
       expect(request.method()).toBe("PATCH");
       const body = request.postDataJSON();
       writes.push(body);

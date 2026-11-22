@@ -354,7 +354,7 @@ export function AdminOrders() {
 export function AdminOrderDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { data, act, updateOrder, toast, refresh, actionIssues } = useStore();
+  const { data, act, updateOrder, toast, refresh, pendingActions } = useStore();
   const [payment, setPayment] = useState(false);
   const [changingSlot, setChangingSlot] = useState(false);
   const [reopening, setReopening] = useState(false);
@@ -385,6 +385,13 @@ export function AdminOrderDetail() {
       />
     );
   const orderForChange = order as Order & AdminOrderView;
+  const assignment = orderForChange.arrangement?.assignment;
+  const reviewAddressPath = assignment
+    ? `/admin/assignments/${encodeURIComponent(assignment.id)}/address-review`
+    : null;
+  const canReviewAddress = staff?.capabilities?.some(
+    (capability) => capability === "*" || capability === "delivery.manage",
+  );
   const canReopen =
     order.status === "CANCELLED" &&
     order.allowedActions?.includes("ADMIN_REOPEN_TIMED_OUT_ORDER");
@@ -470,7 +477,7 @@ export function AdminOrderDetail() {
       if (paymentBlockers.length)
         throw new Error("订单存在风控阻断，请先人工核对处理");
     } catch (e) {
-      toast((e as Error).message);
+      toast((e as Error).message, "error");
       return;
     }
     const settlementCopy = {
@@ -872,18 +879,32 @@ export function AdminOrderDetail() {
               )}
               {order.addressReview && (
                 <>
-                  <Notice>用户修改了楼栋，必须复核后才可配送。</Notice>
-                  <Button
-                    onClick={() =>
-                      updateOrder(
-                        order.id,
-                        { addressReview: false },
-                        "review-address",
-                      )
-                    }
-                  >
-                    确认配送地址已复核
-                  </Button>
+                  <Notice type="warning">用户修改了楼栋，必须复核后才可配送。</Notice>
+                  {canReviewAddress && reviewAddressPath && assignment && (
+                    <Button
+                      busy={pendingActions?.[reviewAddressPath]}
+                      busyLabel="正在确认复核"
+                      onClick={async () => {
+                        if (await act(reviewAddressPath, {
+                          expectedVersion: assignment.version,
+                          decision: "APPROVED",
+                          reason: "已核对订单配送地址",
+                        }, (state) => ({
+                          ...state,
+                          orders: state.orders.map((item) =>
+                            item.id === order.id ? { ...item, addressReview: false } : item,
+                          ),
+                        }))) toast("配送地址已复核");
+                      }}
+                    >
+                      确认配送地址已复核
+                    </Button>
+                  )}
+                  {canReviewAddress && !reviewAddressPath && (
+                    <Button variant="secondary" onClick={() => void refresh()}>
+                      刷新配送执行
+                    </Button>
+                  )}
                 </>
               )}
             </Panel>
@@ -996,11 +1017,6 @@ export function AdminOrderDetail() {
             </div>
           </dl>
           {receiptNotice && <Notice>{receiptNotice}</Notice>}
-          {actionIssues[`/admin/orders/${id}/confirm-payment`] && (
-            <Notice type="error">
-              {actionIssues[`/admin/orders/${id}/confirm-payment`]}
-            </Notice>
-          )}
           {!!order.unmatchedReceipts?.length && (
             <Field label="复用待核对实收（必选，不再登记新款）">
               <select
@@ -1117,7 +1133,7 @@ export function AdminOrderDetail() {
           ) : (
             <p>恢复后请核对实际收款和配送时段。</p>
           )}
-          {reopenIssue && <Notice type="error">{reopenIssue}</Notice>}
+          {reopenIssue && <Notice type="error" reveal>{reopenIssue}</Notice>}
           <div className="button-row order-reopen-actions">
             <Button
               variant="secondary"

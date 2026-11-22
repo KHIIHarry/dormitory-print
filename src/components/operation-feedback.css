@@ -1,0 +1,120 @@
+.operation-feedback {
+  position: fixed;
+  z-index: 1200;
+  inset-inline-end: max(24px, env(safe-area-inset-right));
+  max-inline-size: min(460px, calc(100% - 48px));
+  box-sizing: border-box;
+  color: var(--ink, #313131);
+}
+.operation-feedback-alert {
+  inset-block-start: max(18px, env(safe-area-inset-top));
+  inline-size: 460px;
+}
+.operation-feedback .notice {
+  margin: 0;
+  padding: 12px 8px 12px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  box-shadow: 0 6px 24px #3325151c;
+  max-block-size: 45dvh;
+  overflow: auto;
+}
+.operation-feedback .notice > svg {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+}
+.operation-feedback .notice > div {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.operation-feedback-body {
+  flex: 1;
+  min-width: 0;
+  padding-block: 3px;
+  overflow-wrap: anywhere;
+}
+.operation-feedback-body strong {
+  display: block;
+  margin-bottom: 2px;
+}
+.operation-feedback-body .text-link {
+  color: inherit;
+  margin-top: 2px;
+  min-height: 44px;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.operation-feedback-close {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  inline-size: 44px;
+  block-size: 44px;
+  margin-block: -5px;
+  border-radius: 8px;
+  color: inherit;
+}
+.operation-feedback-close:hover {
+  background: #54392b0c;
+}
+.operation-feedback-toast {
+  inset-block-end: max(28px, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+.feedback-toast {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 10px 14px;
+  border: 1px solid #e8e2dc;
+  border-radius: 10px;
+  background: #fff;
+  color: #39342e;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  box-shadow: 0 6px 22px #33251516;
+}
+.feedback-toast > span {
+  flex: 0 0 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: #3f7956;
+  align-self: flex-start;
+  margin-block-start: 6px;
+}
+.feedback-toast[data-tone="info"] > span {
+  background: #927254;
+}
+@media (max-width: 767px) {
+  .operation-feedback {
+    inset-inline: max(12px, env(safe-area-inset-left))
+      max(12px, env(safe-area-inset-right));
+    max-inline-size: none;
+    inline-size: auto;
+  }
+  .operation-feedback-alert {
+    inset-block-start: max(12px, calc(env(safe-area-inset-top) + 4px));
+  }
+  .operation-feedback-toast {
+    inset-block-end: calc(78px + env(safe-area-inset-bottom));
+    display: grid;
+    justify-items: center;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .operation-feedback {
+    animation: feedback-appear 150ms ease-out;
+  }
+  @keyframes feedback-appear {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}

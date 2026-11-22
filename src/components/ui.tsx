@@ -1,3 +1,4 @@
+import { Notice } from "./notice";
 import { NumberInput } from "./number-input";
 import { AmountInput } from "./amount-input";
 import { formatFileSize } from "../lib/display-format";
@@ -223,20 +224,7 @@ export function Panel({
     </section>
   );
 }
-export function Notice({
-  children,
-  type = "info",
-}: {
-  children: ReactNode;
-  type?: string;
-}) {
-  return (
-    <div className={`notice ${type}`}>
-      <Info size={16} />
-      <div>{children}</div>
-    </div>
-  );
-}
+export { Notice };
 export function Empty({
   title = "这里还没有内容",
   text = "新的记录会出现在这里。",
@@ -338,6 +326,7 @@ export function Modal({
     );
     return () => {
       const clone = node.cloneNode(true) as HTMLDivElement;
+      clone.querySelector("[data-operation-feedback]")?.remove();
       const sourceWindow = node.querySelector<HTMLElement>(".modal");
       const clonedWindow = clone.querySelector<HTMLElement>(".modal");
       if (sourceWindow && clonedWindow)

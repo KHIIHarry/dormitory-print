@@ -1628,3 +1628,150 @@ test("pickup-code icon copies the complete contact message without a separate mo
   await page.locator(".pickup-code").getByRole("button", { name: "复制联系文案", exact: true }).click();
   expect(await page.evaluate(() => (window as any).orderCopiedText)).toBe(copied);
 });
+
+test("address review uses the delivery execution and shows feedback at the current scroll position", async ({
+  page,
+}, info) => {
+  const assignment = { id: "ASG-1", version: 7, status: "PLANNED" };
+  const state = await installApi(page, {
+    admin: true,
+    order: orderFixture({
+      status: "READY_FOR_DELIVERY",
+      addressReview: true,
+      deliveryAssignmentId: assignment.id,
+      arrangement: { assignment },
+    }),
+  });
+  await page.route("**/api/v1/auth/me", (route) =>
+    route.fulfill({
+      json: envelope({
+        id: "staff-1",
+        role: "ADMIN",
+        name: "验收管理员",
+        capabilities: ["*"],
+        emailVerified: true,
+      }),
+    }),
+  );
+  await page.route("**/api/v1/admin/orders/ORD-1", (route) =>
+    route.fulfill({
+      json: envelope(state.order),
+    }),
+  );
+  await page.route("**/api/v1/admin/orders", (route) =>
+    route.fulfill({
+      json: envelope({ items: [state.order] }),
+    }),
+  );
+  await page.route("**/api/v1/admin/slots", (route) =>
+    route.fulfill({
+      json: envelope({ items: [] }),
+    }),
+  );
+  await page.route("**/api/v1/admin/config", (route) =>
+    route.fulfill({
+      json: envelope(publicConfig),
+    }),
+  );
+  let approve = false;
+  const reviews: unknown[] = [];
+  await page.route(
+    "**/api/v1/admin/assignments/ASG-1/address-review",
+    (route) => {
+      reviews.push(route.request().postDataJSON());
+      if (!approve)
+        return route.fulfill({
+          status: 422,
+          json: errorEnvelope("VALIDATION_ERROR", "请核对配送楼栋"),
+        });
+      state.order = { ...state.order, addressReview: false };
+      return route.fulfill({ json: envelope(state.order) });
+    },
+  );
+  await page.setViewportSize({ width: 390, height: 750 });
+  await page.goto(appUrl("/manage/orders/ORD-1"));
+  const button = page.getByRole("button", { name: "确认配送地址已复核" });
+  await button.scrollIntoViewIfNeeded();
+  await expect(button).toBeInViewport();
+  const currentScroll = await page.evaluate(() => scrollY);
+  expect(currentScroll).toBeGreaterThan(100);
+  await button.click();
+  await expect
+    .poll(() => reviews)
+    .toEqual([
+      {
+        expectedVersion: 7,
+        decision: "APPROVED",
+        reason: "已核对订单配送地址",
+      },
+    ]);
+  const alert = page.getByRole("alert").filter({ hasText: "请核对配送楼栋" });
+  await expect(alert).toBeInViewport();
+  expect(await page.evaluate(() => scrollY)).toBe(currentScroll);
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 750 });
+    await expect(alert).toBeInViewport({ ratio: 1 });
+    const bounds = (await alert.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
+    if (width === 390 || width === 1440)
+      await page.screenshot({
+        path: info.outputPath(`action-alert-${width}.png`),
+      });
+  }
+  const close = page.getByRole("button", { name: "关闭提示" });
+  expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await close.click();
+  await expect(alert).toHaveCount(0);
+  approve = true;
+  await button.click();
+  await expect(button).toHaveCount(0);
+  const success = page
+    .getByRole("status")
+    .filter({ hasText: "配送地址已复核" });
+  await expect(success).toBeInViewport();
+  await page.setViewportSize({ width: 390, height: 750 });
+  await page.screenshot({ path: info.outputPath("action-toast-390.png") });
+  await expect(success).toHaveCount(0, { timeout: 5000 });
+
+  // Shared feedback in a dialog keeps the error and its close action in the
+  // active focus trap. Failed saves must preserve the current input.
+  const notes: unknown[] = [];
+  await page.route("**/api/v1/admin/orders/ORD-1", (route, request) => {
+    if (request.method() !== "PATCH") return route.fallback();
+    notes.push(request.postDataJSON());
+    return route.fulfill({
+      status: 422,
+      json: errorEnvelope("VALIDATION_ERROR", "请检查备注内容"),
+    });
+  });
+  await page.getByRole("button", { name: "内部备注", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "内部备注" });
+  const note = dialog.getByLabel("仅员工可见");
+  await note.fill("需要保留的输入");
+  await dialog.getByRole("button", { name: "保存备注" }).click();
+  await expect
+    .poll(() => notes)
+    .toEqual([{ expectedVersion: 3, note: "需要保留的输入" }]);
+  const modalAlert = dialog
+    .getByRole("alert")
+    .filter({ hasText: "请检查备注内容" });
+  await expect(modalAlert).toBeInViewport();
+  await expect(note).toHaveValue("需要保留的输入");
+  const closeModalAlert = dialog.getByRole("button", { name: "关闭提示" });
+  await closeModalAlert.focus();
+  await expect(closeModalAlert).toBeFocused();
+  await closeModalAlert.click();
+  await expect(modalAlert).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "保存备注" }).click();
+  await expect(modalAlert).toBeInViewport();
+  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("请检查备注内容", { exact: true })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "内部备注", exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(modalAlert).toHaveCount(0);
+});

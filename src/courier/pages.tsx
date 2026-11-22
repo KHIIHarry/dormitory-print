@@ -364,11 +364,11 @@ export function CourierBatch() {
           <p className="muted">
             整批原子开始：任何未满足条件的订单都会阻止本次开始，不会部分生效。
           </p>
-          {startError ? <Notice type="error">{startError}</Notice> : null}
+          {startError ? <Notice type="error" reveal>{startError}</Notice> : null}
         </div>
       ) : null}
       {batch.status === "DELIVERING" && startError ? (
-        <Notice type="error">{startError}</Notice>
+        <Notice type="error" reveal>{startError}</Notice>
       ) : null}
       {buildings.map((buildingId) => {
         const buildingOrders = orders.filter(
@@ -881,7 +881,7 @@ function DeliveryProofForm() {
               ? "重新获取位置"
               : "获取当前位置"}
         </Button>
-        {locationError && <p className="field-error">{locationError}</p>}
+        {locationError && <Notice type="error" reveal>{locationError}</Notice>}
         {role === "ADMIN" ? (
           adminCapable ? (
             <>
@@ -1037,7 +1037,7 @@ function DeliveryProofForm() {
             <span>优先调用相机，也可以从相册选择</span>
           </button>
         )}
-        {photoError && <p className="field-error">{photoError}</p>}
+        {photoError && <Notice type="error" reveal>{photoError}</Notice>}
         <label className="checkbox-label">
           <input
             type="checkbox"

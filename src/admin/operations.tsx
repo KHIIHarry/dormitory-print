@@ -66,7 +66,7 @@ export function MapEditor() {
 }
 
 function LegacyMapEditor() {
-  const { data, act, toast, pendingActions, actionIssues } = useStore();
+  const { data, act, toast, pendingActions } = useStore();
   const [buildings, setBuildings] = useState(
     data.buildings.map((b) => ({ ...b })),
   );
@@ -126,7 +126,7 @@ function LegacyMapEditor() {
   }, []);
   const uploadMap = async (file: File) => {
     if (!file.type.startsWith("image/")) {
-      toast("底图必须是图片文件");
+      toast("底图必须是图片文件", "warning");
       return;
     }
     if (DEMO) {
@@ -156,7 +156,7 @@ function LegacyMapEditor() {
         setMigrate(false);
         setVersion((value) => value + 1);
       },
-      (error) => toast((error as Error).message),
+      (error) => toast((error as Error).message, "error"),
     );
   };
   const active = buildings.find((b) => b.id === selected);
@@ -307,7 +307,7 @@ function LegacyMapEditor() {
                 variant="danger-outline"
                 onClick={() => {
                   if (data.orders.some((o) => o.locationId === active.id)) {
-                    toast("楼栋仍被订单引用，请先关闭配送，不可直接删除");
+                    toast("楼栋仍被订单引用，请先关闭配送，不可直接删除", "warning");
                     return;
                   }
                   setBuildings((s) => s.filter((b) => b.id !== active.id));
@@ -351,10 +351,10 @@ function LegacyMapEditor() {
             本次将发布 {buildings.length} 个楼栋热点，其中{" "}
             {buildings.filter((b) => b.enabled).length} 个开放配送。
           </Notice>
-          {(mapIssue || actionIssues["/admin/maps"]) && (
-            <Notice type="error">
+          {mapIssue && (
+            <Notice type="error" reveal>
               <span role="alert">
-                {mapIssue || actionIssues["/admin/maps"]}
+                {mapIssue}
               </span>
             </Notice>
           )}
@@ -368,7 +368,7 @@ function LegacyMapEditor() {
             disabled={mapUploadState.busy || (version > 1 && !migrate)}
             onClick={async () => {
               if (buildings.some((b) => !b.name.trim())) {
-                toast("楼栋名称不能为空");
+                toast("楼栋名称不能为空", "warning");
                 return;
               }
               setMapBusy(true);
@@ -484,7 +484,7 @@ function SettingsForm() {
     try {
       file = qrUploadFile(files);
     } catch (error) {
-      toast((error as Error).message);
+      toast((error as Error).message, "error");
       return;
     }
     qrUploadLock.current = true;
@@ -509,7 +509,7 @@ function SettingsForm() {
           },
           setImageState,
           (url) => patch({ qrUrl: url }),
-          (error) => toast((error as Error).message),
+          (error) => toast((error as Error).message, "error"),
         );
       }
     } finally {
@@ -677,7 +677,7 @@ function SettingsForm() {
         </nav>
         <Panel>
           {saveError && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{saveError}</span>
             </Notice>
           )}
@@ -1266,7 +1266,7 @@ function SettingsForm() {
           </Notice>
           <p>配置分区：{tabs.find(([value]) => value === tab)?.[1]}</p>
           {saveError && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{saveError}</span>
             </Notice>
           )}
@@ -1440,7 +1440,7 @@ export function StaffPage() {
                 !edit.username?.trim() ||
                 (!edit.id && password.length < 8)
               ) {
-                toast("姓名、账号必填，初始密码至少 8 位");
+                toast("姓名、账号必填，初始密码至少 8 位", "warning");
                 return;
               }
               const id = edit.id || crypto.randomUUID();
@@ -1630,7 +1630,7 @@ export function Exceptions() {
             busy={!!pendingActions[path(edit)]}
             onClick={async () => {
               if (!reason.trim()) {
-                toast("请填写处理原因");
+                toast("请填写处理原因", "warning");
                 return;
               }
               const target = path(edit);
@@ -1818,7 +1818,7 @@ export function Trash() {
                       {},
                     );
                   } catch (e) {
-                    toast((e as Error).message);
+                    toast((e as Error).message, "error");
                     return;
                   }
                 }

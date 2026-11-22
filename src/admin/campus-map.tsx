@@ -364,7 +364,7 @@ export function CampusMapAdmin() {
 
   const uploadMap = async (file: File) => {
     if (!file.type.startsWith("image/")) {
-      toast("底图必须是图片文件");
+      toast("底图必须是图片文件", "warning");
       return;
     }
     if (DEMO) {
@@ -394,7 +394,7 @@ export function CampusMapAdmin() {
         setMapVersion((value) => value + 1);
         setMigrate(false);
       },
-      (error) => toast((error as Error).message),
+      (error) => toast((error as Error).message, "error"),
     );
   };
 
@@ -913,7 +913,7 @@ export function CampusMapAdmin() {
             </label>
           )}
           {mapIssue && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{mapIssue}</span>
             </Notice>
           )}
@@ -951,7 +951,7 @@ export function CampusMapAdmin() {
             将删除「{selectedCampus.name}」。仅当校区内没有点位时可以删除；已有订单引用的点位不能删除。
           </p>
           {deleteIssue && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{deleteIssue}</span>
             </Notice>
           )}

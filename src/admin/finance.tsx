@@ -234,7 +234,7 @@ export function AdminFinance() {
             {message && <Notice type="success">{message}</Notice>}
             {error && (
               <div role="alert">
-                <Notice type="error">{error}</Notice>
+                <Notice type="error" reveal>{error}</Notice>
               </div>
             )}
           </div>

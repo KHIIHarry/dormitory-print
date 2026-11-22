@@ -33,16 +33,9 @@ export function ResourceOutlet() {
     refreshing,
     refreshError,
     refresh,
-    actionIssues,
-    clearActionIssues,
     resources,
   } = useStore();
   const { pathname, search } = useLocation();
-  // Action errors describe the page they failed on; do not carry them (or
-  // duplicate banners from an earlier attempt) into the next page.
-  useLayoutEffect(() => {
-    clearActionIssues();
-  }, [pathname, clearActionIssues]);
   const reduced = useReducedMotion();
   const anchor = useRef<HTMLSpanElement>(null);
   const publicOrLocal =
@@ -68,15 +61,6 @@ export function ResourceOutlet() {
     });
     return () => animation?.cancel();
   }, [pathname, reduced]);
-  const issues = Object.entries(actionIssues).filter(
-    ([path, text]) =>
-      text &&
-      (pathname.startsWith("/courier")
-        ? path.startsWith("/courier")
-        : pathname.startsWith(ADMIN)
-          ? !path.startsWith("/courier")
-          : !path.startsWith("/admin") && !path.startsWith("/courier")),
-  );
   const config = resources.config;
   const needsConfig = /^\/u\/(new|review)(\/|$)/.test(pathname);
   return (
@@ -96,14 +80,6 @@ export function ResourceOutlet() {
           )}
         </div>
       )}
-      {issues.map(([path, text]) => (
-        <Notice key={path} type="error">
-          <span role="alert">{text}</span>{" "}
-          <button className="text-link" onClick={() => void refresh()}>
-            刷新并核对状态
-          </button>
-        </Notice>
-      ))}
       {!independent && !DEMO && loading ? (
         <PageSkeleton />
       ) : !independent && error ? (

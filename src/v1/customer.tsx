@@ -270,7 +270,7 @@ function TaskFeedback({
       {state.pending && <TaskStatus label={`${label}…`} />}
       {state.error && (
         <div role="alert" className="v1-feedback">
-          <Notice type={state.uncertain ? "warning" : "error"}>
+          <Notice type={state.uncertain ? "warning" : "error"} reveal>
             {state.error}
             {state.uncertain && (
               <>
@@ -736,7 +736,7 @@ export function AfterSalesPanel({
                           </Button>
                         </div>
                         {choiceFailed[item.id] && (
-                          <Notice type="error">{choiceFailed[item.id]}</Notice>
+                          <Notice type="error" reveal>{choiceFailed[item.id]}</Notice>
                         )}
                       </div>
                     )}

@@ -34,17 +34,15 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.resource-refresh {
+.resource-refresh > div {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 12px;
-  padding: 8px 0;
-  color: var(--text-muted, #796f66);
 }
-.resource-refresh.has-error {
-  color: var(--danger, #a54136);
+.resource-refresh button {
+  min-height: 44px;
+  color: inherit;
 }
 .resource-skeleton {
   width: 100%;
@@ -212,14 +210,6 @@
 .dropdown {
   animation: content-appear var(--motion-local) var(--motion-enter);
 }
-.toast {
-  animation: content-appear var(--motion-local) var(--motion-enter);
-}
-.toast[data-state="closing"] {
-  opacity: 0;
-  transition: opacity var(--motion-local) ease-in;
-  pointer-events: none;
-}
 .motion-fold {
   display: grid;
   grid-template-rows: 0fr;
@@ -302,8 +292,7 @@
   }
   .resource-skeleton .skeleton-block,
   .route-content,
-  .dropdown,
-  .toast {
+  .dropdown {
     animation: none;
   }
   .motion-fold,

@@ -506,7 +506,7 @@ function BatchForm({ onClose, batch }: { onClose: () => void; batch?: Batch }) {
             !time ||
             !courier
           ) {
-            toast("请完整填写批次信息并选择配送员");
+            toast("请完整填写批次信息并选择配送员", "warning");
             return;
           }
           if (batch && !assignmentOnly && !reason.trim()) {
@@ -610,7 +610,7 @@ function WithdrawPublication({
         />
       </Field>
       {issue && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{issue}</span>
         </Notice>
       )}
@@ -780,11 +780,11 @@ export function BatchDetail() {
       ["ADD", "REMOVE", "TRANSFER", "SPLIT"].includes(mode) &&
       !selected.length
     ) {
-      toast("请先选择订单");
+      toast("请先选择订单", "warning");
       return;
     }
     if (["TRANSFER", "MERGE"].includes(mode) && !target) {
-      toast("请选择目标批次");
+      toast("请选择目标批次", "warning");
       return;
     }
     if (
@@ -793,11 +793,11 @@ export function BatchDetail() {
       ) &&
       !reason.trim()
     ) {
-      toast("请填写操作原因");
+      toast("请填写操作原因", "warning");
       return;
     }
     if (mode === "RESCHEDULE" && (!date || !time)) {
-      toast("请填写新的日期与时间");
+      toast("请填写新的日期与时间", "warning");
       return;
     }
     let blockers: string[] = [];
@@ -811,7 +811,7 @@ export function BatchDetail() {
           .filter(Boolean),
       );
       if (selectedCampuses.size > 1) {
-        toast("一个批次只能包含同一校区的订单，请先按校区分批");
+        toast("一个批次只能包含同一校区的订单，请先按校区分批", "warning");
         return;
       }
       if (
@@ -819,7 +819,7 @@ export function BatchDetail() {
         selectedCampuses.size === 1 &&
         !selectedCampuses.has(batchCampusId)
       ) {
-        toast("所选订单不属于本批次校区，请切换到对应校区");
+        toast("所选订单不属于本批次校区，请切换到对应校区", "warning");
         return;
       }
     }
@@ -852,7 +852,7 @@ export function BatchDetail() {
           payload: { date, time, reason },
         });
         if (scopeRef.current !== requestedScope) {
-          toast("批次范围已变化，请重新预览");
+          toast("批次范围已变化，请重新预览", "warning");
           return;
         }
         setPreview({
@@ -861,7 +861,7 @@ export function BatchDetail() {
         });
         return;
       } catch (e) {
-        toast((e as Error).message);
+        toast((e as Error).message, "error");
         return;
       }
     }
@@ -2000,7 +2000,7 @@ export function Slots() {
             />
           </Field>
           {removeError && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{removeError}</span>
             </Notice>
           )}
@@ -2048,7 +2048,7 @@ export function Slots() {
             」的新申请并冻结该时段名单； 不可撤销，需要继续接单请新建时段。
           </Notice>
           {!sealPreview && sealError && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{sealError}</span>
             </Notice>
           )}
@@ -2082,7 +2082,7 @@ export function Slots() {
                 />
               </Field>
               {sealError && (
-                <Notice type="error">
+                <Notice type="error" reveal>
                   <span role="alert">{sealError}</span>
                 </Notice>
               )}
@@ -2278,7 +2278,7 @@ export function Slots() {
             </p>
             <div ref={submitActions} className="slot-editor-actions">
               {formErrors.submit && (
-                <Notice type="error">
+                <Notice type="error" reveal>
                   <span role="alert">{formErrors.submit}</span>
                 </Notice>
               )}

@@ -323,7 +323,7 @@ function PolicyEditor({
           />
           启用该策略
         </label>
-        {localError && <Notice type="error">{localError}</Notice>}
+        {localError && <Notice type="error" reveal>{localError}</Notice>}
         <SubmitState state={submit} />
         <div className="payroll-inline">
           <Button type="submit" busy={submit.pending}>
@@ -442,7 +442,7 @@ function ManualEntryModal({
             onChange={(event) => setReason(event.target.value)}
           />
         </Field>
-        {localError && <Notice type="error">{localError}</Notice>}
+        {localError && <Notice type="error" reveal>{localError}</Notice>}
         <SubmitState state={submit} />
         <div className="payroll-inline payroll-end">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -547,7 +547,7 @@ function ApplyPolicyModal({
             onChange={(event) => setReason(event.target.value)}
           />
         </Field>
-        {localError && <Notice type="error">{localError}</Notice>}
+        {localError && <Notice type="error" reveal>{localError}</Notice>}
         <SubmitState state={submit} />
         <div className="payroll-inline payroll-end">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -632,7 +632,7 @@ function SettlementConfirm({
             onChange={(event) => setReason(event.target.value)}
           />
         </Field>
-        {localError && <Notice type="error">{localError}</Notice>}
+        {localError && <Notice type="error" reveal>{localError}</Notice>}
         <SubmitState state={submit} />
         <div className="payroll-inline payroll-end">
           <Button type="button" variant="secondary" onClick={onClose}>

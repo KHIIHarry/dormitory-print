@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
+import { Notice } from "./notice";
 
 function useDocumentVisible() {
   const [visible, setVisible] = useState(
@@ -181,13 +182,9 @@ export function RefreshStatus({
       </span>
     ) : null;
   return (
-    <div
-      className={`resource-refresh ${error ? "has-error" : ""}`}
-      role={error ? "alert" : "status"}
-    >
-      {visible && <Loader2 className="spin" size={16} aria-hidden="true" />}
-      <span>{error ? `更新失败，当前为上次数据：${error}` : label}</span>
-      {error && retry && (
+    <Notice type="warning" className="resource-refresh" role="alert">
+      <span>更新失败，当前为上次数据：{error}</span>
+      {retry && (
         <button
           type="button"
           className="text-link"
@@ -197,7 +194,7 @@ export function RefreshStatus({
           重试
         </button>
       )}
-    </div>
+    </Notice>
   );
 }
 export function Progress({

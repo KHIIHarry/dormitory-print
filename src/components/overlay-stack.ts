@@ -6,6 +6,7 @@ type Layer = {
   trigger: HTMLElement | null;
 };
 const layers: Layer[] = [];
+const overlayListeners = new Set<() => void>();
 let originalOverflow = "",
   originalPadding = "",
   originalGap = "";
@@ -20,6 +21,19 @@ function focusable(layer: Layer) {
 }
 function top() {
   return layers.at(-1);
+}
+export function subscribeToOverlays(listener: () => void) {
+  overlayListeners.add(listener);
+  return () => {
+    overlayListeners.delete(listener);
+  };
+}
+export function getFeedbackLayer() {
+  const layer = top()?.element;
+  return layer?.querySelector<HTMLElement>(":scope > .modal") ?? layer ?? null;
+}
+function notifyOverlayListeners() {
+  overlayListeners.forEach((listener) => listener());
 }
 function syncBackground() {
   if (!layers.length) return;
@@ -121,6 +135,7 @@ export function registerOverlay(
   }
   layers.push(layer);
   syncBackground();
+  notifyOverlayListeners();
   const first = focusable(layer)[0];
   first?.focus({ preventScroll: true });
   let released = false;
@@ -129,6 +144,7 @@ export function registerOverlay(
       layer.element = replacement;
       replacement.setAttribute("data-dp-layer", "");
       syncBackground();
+      notifyOverlayListeners();
     },
     release: () => {
       if (released) return;
@@ -157,6 +173,7 @@ export function registerOverlay(
         document.removeEventListener("keydown", onKey, true);
         document.removeEventListener("focusin", onFocus, true);
       } else syncBackground();
+      notifyOverlayListeners();
       if (wasTop) {
         const remaining = top();
         const trigger = layer.trigger;

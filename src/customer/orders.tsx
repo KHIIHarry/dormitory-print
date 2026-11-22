@@ -433,7 +433,6 @@ function OrderDetailContent() {
     refreshing,
     refreshError,
     pendingActions,
-    actionIssues,
   } = useStore();
   const { orderAccess, customer } = useIdentity();
   const [pdf, setPdf] = useState<PrintFile | null>(null);
@@ -780,11 +779,6 @@ function OrderDetailContent() {
           {order.batchId && (
             <Notice>已分配批次，修改后需要管理员重新复核配送安排。</Notice>
           )}
-          {actionIssues[`/orders/${order.id}/location`] && (
-            <Notice type="error">
-              {actionIssues[`/orders/${order.id}/location`]}
-            </Notice>
-          )}
           <Button
             busy={!!pendingActions[`/orders/${order.id}/location`]}
             disabled={
@@ -828,11 +822,6 @@ function OrderDetailContent() {
               placeholder="告诉我们撤销的原因"
             />
           </Field>
-          {actionIssues[`/orders/${order.id}/cancel`] && (
-            <Notice type="error">
-              {actionIssues[`/orders/${order.id}/cancel`]}
-            </Notice>
-          )}
           <Button
             variant="danger"
             busy={!!pendingActions[`/orders/${order.id}/cancel`]}

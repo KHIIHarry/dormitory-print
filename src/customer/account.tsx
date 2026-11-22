@@ -159,7 +159,7 @@ function Feedback({ action }: { action: ReturnType<typeof useAction> }) {
     <>
       {action.error && (
         <div role="alert">
-          <Notice type="error">{action.error}</Notice>
+          <Notice type="error" reveal>{action.error}</Notice>
         </div>
       )}
       {action.success && (

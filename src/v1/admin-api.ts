@@ -691,6 +691,7 @@ export type AdminOrderView = {
   requestedSlotId?: string | null;
   confirmedSlotId?: string | null;
   arrangement?: {
+    assignment?: { id: string; version: number; status: string } | null;
     status?: string;
     effective?: SlotBrief | null;
     pendingProposal?: {

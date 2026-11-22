@@ -384,7 +384,7 @@ export function AdminOrderAccess({ order }: { order: Order }) {
         </>
       )}
       {error && !action && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{error}</span>
         </Notice>
       )}
@@ -494,7 +494,7 @@ export function AdminOrderAccess({ order }: { order: Order }) {
               />
             </Field>
             {error && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{error}</span>
               </Notice>
             )}

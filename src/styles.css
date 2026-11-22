@@ -401,30 +401,47 @@ svg.lucide {
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  background: var(--cream);
-  color: #8a6145;
-  font-size: 12px;
-  line-height: 1.85;
-  padding: 13px 15px;
+  background: #f8f2ec;
+  color: #775237;
+  border: 1px solid #eadcd0;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 14px;
   border-radius: 10px;
   margin: 17px 0;
+  scroll-margin-block: 16px 88px;
+}
+.notice > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .notice > svg {
   flex-shrink: 0;
   margin-top: 3px;
-  color: var(--primary);
+  color: inherit;
 }
 .notice p {
   margin: 0;
 }
 .notice a {
-  color: var(--primary);
+  color: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.notice.warning {
+  background: #fff4e3;
+  border-color: #efd6ad;
+  color: #815013;
+}
 .notice.error {
   background: #fff0ed;
-  color: #a74e45;
+  border-color: #f1c6bf;
+  color: #963b34;
+}
+.notice.success {
+  background: #eef7ef;
+  border-color: #cde4d1;
+  color: #356548;
 }
 .badge {
   display: inline-flex;
@@ -811,29 +828,6 @@ input[type="date"],
   to {
     transform: rotate(360deg);
   }
-}
-.toast {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 32px;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  background: #37312d;
-  color: #fff;
-  padding: 15px 20px;
-  border-radius: 12px;
-  box-shadow: 0 7px 25px #33251526;
-  max-width: min(90vw, 650px);
-  font-size: 13px;
-  line-height: 1.7;
-}
-.toast button {
-  color: #d9d1ca;
-  font-size: 22px;
-  padding: 0;
 }
 .modal-backdrop {
   position: fixed;
@@ -6259,7 +6253,6 @@ select.campus-filter:focus {
     padding: 0 5px;
   }
   .flow-aside .panel .notice {
-    font-size: 10px;
     margin-bottom: 0;
   }
   .flow-aside .tips-list li {
@@ -6615,9 +6608,6 @@ select.campus-filter:focus {
   .price-total > strong {
     font-size: 25px;
   }
-  .checkout-summary .notice {
-    font-size: 11px;
-  }
   .checkout-summary .btn {
     margin-top: 3px;
   }
@@ -6704,9 +6694,6 @@ select.campus-filter:focus {
   }
   .contact-amount strong {
     font-size: 23px;
-  }
-  .contact-order .notice {
-    font-size: 10px;
   }
   .wechat-title h2 {
     font-size: 14px;
@@ -6816,9 +6803,6 @@ select.campus-filter:focus {
     gap: 10px;
     font-size: 8px;
   }
-  .detail-grid .notice {
-    font-size: 10px;
-  }
   .order-detail-page > .page-heading .btn {
     font-size: 9px;
     min-height: 38px;
@@ -6884,15 +6868,8 @@ select.campus-filter:focus {
   .modal .btn {
     font-size: 11px;
   }
-  .toast {
-    font-size: 11px;
-    padding: 12px 16px;
-    bottom: 83px;
-    max-width: calc(100vw - 30px);
-    min-width: 260px;
-  }
   .notice {
-    font-size: 10px;
+    font-size: 12px;
     padding: 12px;
     margin: 15px 0;
   }
@@ -7255,9 +7232,6 @@ select.campus-filter:focus {
     font-size: 10px;
     min-height: 38px;
     padding: 9px 12px;
-  }
-  .admin-content .detail-grid .notice {
-    font-size: 9px;
   }
   .admin-content .detail-grid .button-row .btn {
     font-size: 9px;
@@ -7933,9 +7907,6 @@ select.campus-filter:focus {
 .detail-dl dd {
   color: #77604d;
 }
-.panel .notice {
-  color: #876044;
-}
 .artifact-info {
   color: #8a7059;
 }
@@ -7998,9 +7969,6 @@ td small {
 .preview-canvas iframe {
   background: white;
 }
-.courier-content .notice {
-  font-size: 12px;
-}
 .courier-content .field > label {
   font-size: 12px;
 }
@@ -8060,12 +8028,6 @@ td small {
     font-size: 10px;
   }
   .faq-item p {
-    font-size: 11px;
-  }
-  .courier-content .notice {
-    font-size: 11px;
-  }
-  .notice {
     font-size: 11px;
   }
   .courier-content .checkbox-label {

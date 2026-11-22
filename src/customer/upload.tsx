@@ -154,7 +154,7 @@ export function UploadPage() {
       })
       .catch((error) => {
         if (live && mounted.current && generation === getIdentityGeneration())
-          toast(`客户会话暂不可用：${(error as Error).message}。未上传的本地文件不会保存在浏览器，请联网后重新选择。`);
+          toast(`客户会话暂不可用：${(error as Error).message}。未上传的本地文件不会保存在浏览器，请联网后重新选择。`, "error");
       });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -326,7 +326,7 @@ export function UploadPage() {
     return true;
   };
   const beginUpload = (files: File[], retryFile?: PrintFile) => {
-    if (!uploadReady) { toast("正在准备上传，请稍候重试"); return; }
+    if (!uploadReady) { toast("正在准备上传，请稍候重试", "info"); return; }
     const needsOptions = files.filter(
       (file) =>
         isSpreadsheetUpload(file) && !excelOptions.current.has(file),
@@ -395,7 +395,7 @@ export function UploadPage() {
   };
   const upload = async (files: FileList | File[], retryFile?: PrintFile) => {
     if (!navigator.onLine) {
-      toast("离线时无法上传，请联网后重试");
+      toast("离线时无法上传，请联网后重试", "warning");
       return;
     }
     if (uploadLock.current) return;
@@ -404,7 +404,7 @@ export function UploadPage() {
       items.length + draftRef.current.length - (retryFile ? 1 : 0) >
       data.config.maxFiles
     ) {
-      toast(`每单最多选择 ${data.config.maxFiles} 个文件`);
+      toast(`每单最多选择 ${data.config.maxFiles} 个文件`, "warning");
       return;
     }
     uploadLock.current = true;
@@ -666,7 +666,7 @@ export function UploadPage() {
     if (active()) {
       uploadLock.current = false;
       setBusy(false);
-      if (failures.length) toast(failures.join("；"));
+      if (failures.length) toast(failures.join("；"), "error");
     }
   };
   const sampleFile = async () => {
@@ -748,6 +748,7 @@ export function UploadPage() {
         // browser). The only honest action is asking for a new selection.
         toast(
           "本地原文件已不可用。为保护隐私不会从浏览器恢复文件，请重新选择该文件上传。",
+          "warning",
         );
       }
       return;
@@ -772,7 +773,7 @@ export function UploadPage() {
       operations.current.cancel(f.id);
     } catch (e) {
       if (operation.current() && generation === getIdentityGeneration())
-        toast((e as Error).message);
+        toast((e as Error).message, "error");
       operations.current.cancel(f.id);
     }
   };
@@ -1293,7 +1294,7 @@ export function UploadPage() {
               </p>
             )}
             {choiceError && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{choiceError}</span>
               </Notice>
             )}
@@ -1419,7 +1420,7 @@ export function UploadPage() {
             </label>
             {excelError && (
               <div role="alert">
-                <Notice type="error">{excelError}</Notice>
+                <Notice type="error" reveal>{excelError}</Notice>
               </div>
             )}
             <div className="v1-actions">

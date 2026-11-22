@@ -265,7 +265,7 @@ function GuestOrderAccessBoundary({
               </>
             )}
           </p>
-          {claimError && <Notice type="error">{claimError}</Notice>}
+          {claimError && <Notice type="error" reveal>{claimError}</Notice>}
           {identity.customer.account?.verified ? (
             current.value.canClaimOnDevice ? (
               <Button busy={busy} onClick={() => void claim()}>

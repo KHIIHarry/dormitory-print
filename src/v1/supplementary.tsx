@@ -446,7 +446,7 @@ export function AdminSupplementaryPanel({ orderId }: { orderId: string }) {
           )}
           {notice && <Notice type="success">{notice}</Notice>}
           {write.error && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{write.error}</span>
             </Notice>
           )}
@@ -621,7 +621,7 @@ export function AdminSupplementaryPanel({ orderId }: { orderId: string }) {
               </label>
             </Field>
             {write.error && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{write.error}</span>
               </Notice>
             )}
@@ -698,7 +698,7 @@ export function AdminSupplementaryPanel({ orderId }: { orderId: string }) {
               />
             </Field>
             {write.error && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{write.error}</span>
               </Notice>
             )}
@@ -759,7 +759,7 @@ export function AdminSupplementaryPanel({ orderId }: { orderId: string }) {
               />
             </Field>
             {write.error && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{write.error}</span>
               </Notice>
             )}
@@ -907,7 +907,7 @@ export function CustomerSupplementaryPanel({
           )}
           {notice && <Notice type="success">{notice}</Notice>}
           {write.error && (
-            <Notice type="error">
+            <Notice type="error" reveal>
               <span role="alert">{write.error}</span>
             </Notice>
           )}
@@ -993,7 +993,7 @@ export function CustomerSupplementaryPanel({
               />
             </Field>
             {write.error && (
-              <Notice type="error">
+              <Notice type="error" reveal>
                 <span role="alert">{write.error}</span>
               </Notice>
             )}

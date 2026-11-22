@@ -356,18 +356,18 @@ function DemoPrintTask() {
     if (ok) {
       toast("已记录打印尝试。请打开最终 PDF 手动打印，之后确认实际结果。");
       if (printWindow && pdfUrl) printWindow.location.href = pdfUrl;
-      else toast("打印窗口被拦截，请点击上方“打开 PDF”，然后返回确认结果。");
+      else toast("打印窗口被拦截，请点击上方“打开 PDF”，然后返回确认结果。", "warning");
     }
     if (!ok) printWindow?.close();
     setBusy(false);
   };
   const confirmResult = async () => {
     if (result !== "COMPLETED" && !reason.trim()) {
-      toast("请填写失败或取消原因");
+      toast("请填写失败或取消原因", "warning");
       return;
     }
     if (!attemptId) {
-      toast("缺少当前任务的打印尝试记录，请重新加载任务后核对");
+      toast("缺少当前任务的打印尝试记录，请重新加载任务后核对", "warning");
       return;
     }
     setBusy(true);
@@ -579,7 +579,7 @@ function DemoPrintTask() {
               result === "REPRINT"
                 ? async () => {
                     if (!reason.trim()) {
-                      toast("请填写重打原因");
+                      toast("请填写重打原因", "warning");
                       return;
                     }
                     setResult("");
@@ -1149,7 +1149,7 @@ function ServerPrintCenter() {
       );
       refreshQueue();
     } catch (error) {
-      toast(errorText(error));
+      toast(errorText(error), "error");
     } finally {
       setRetrying("");
     }
@@ -1511,7 +1511,7 @@ function ServerPrintTask() {
       );
       setAttemptId(attempt.attemptId);
       if (win) win.location.href = pdfUrl;
-      else toast("打印窗口被拦截，请点击“打开最终 PDF”后手动打印并返回确认");
+      else toast("打印窗口被拦截，请点击“打开最终 PDF”后手动打印并返回确认", "warning");
       await taskState.reload();
       await refresh();
     } catch (cause) {
@@ -1604,7 +1604,7 @@ function ServerPrintTask() {
       setAttemptId(result.attemptId);
       const url = printAssetUrl(result.artifactId);
       if (win) win.location.href = url;
-      else toast("补打窗口被拦截，请点击上方补打 PDF 手动打印");
+      else toast("补打窗口被拦截，请点击上方补打 PDF 手动打印", "warning");
       await taskState.reload();
       await refresh();
       toast("补打已建立，请打印补打 PDF 后确认结果");
@@ -1638,7 +1638,7 @@ function ServerPrintTask() {
         </Notice>
       )}
       {issue && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{issue}</span>
         </Notice>
       )}
@@ -1760,7 +1760,7 @@ function ServerPrintTask() {
           />
         </Field>
         {startIssue && (
-          <Notice type="error">
+          <Notice type="error" reveal>
             <span role="alert">{startIssue}</span>
           </Notice>
         )}
@@ -1973,7 +1973,7 @@ function ServerBindingCenter() {
         </Panel>
       )}
       {issue && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{issue}</span>
         </Notice>
       )}
@@ -2110,7 +2110,7 @@ function ServerPackingCenter() {
         description="服务端清单逐项核对；必须全部打印与装订完成，人工确认后才能出发。"
       />
       {issue && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{issue}</span>
         </Notice>
       )}

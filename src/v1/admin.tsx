@@ -508,7 +508,7 @@ function UnmatchedReceipts({ orderId }: { orderId?: string }) {
             <Notice type="warning">
               该操作只登记未匹配收款退款；不会替客户确认任何时段或售后方案。
             </Notice>
-            {submit.error && <Notice type="error">{submit.error}</Notice>}
+            {submit.error && <Notice type="error" reveal>{submit.error}</Notice>}
             <div className="form-actions">
               <Button variant="secondary" type="button" onClick={() => setTarget(null)}>
                 取消
@@ -957,7 +957,7 @@ export function AdminAfterSaleDetail() {
           批准表示同意方案，不代表已退款。必须线下完成退款后另行登记金额与原因；累计现金退款不得超过该单实收。
         </Notice>
         {previewError && (
-          <Notice type="error">
+          <Notice type="error" reveal>
             <span role="alert">{previewError}</span>
           </Notice>
         )}
@@ -1072,7 +1072,7 @@ function AfterSaleActionModal({
             required
           />
         </Field>
-        {submit.error && <Notice type="error">{submit.error}</Notice>}
+        {submit.error && <Notice type="error" reveal>{submit.error}</Notice>}
         <div className="form-actions">
           <Button variant="secondary" type="button" onClick={onClose}>
             取消
@@ -1515,7 +1515,7 @@ function TrashOperations() {
         <span className="muted">回收站内对象保留 24 小时；过期不可恢复。</span>
       </div>
       {issue && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{issue}</span>
         </Notice>
       )}
@@ -1820,7 +1820,7 @@ function ExportOperations() {
           申请导出
         </Button>
         {submit.error && (
-          <Notice type="error">
+          <Notice type="error" reveal>
             <span role="alert">{submit.error}</span>
           </Notice>
         )}
@@ -1940,7 +1940,7 @@ export function AdminPermissionEditor({
         <textarea value={reason} onChange={(event) => setReason(event.target.value)} />
       </Field>
       {submit.error && (
-        <Notice type="error">
+        <Notice type="error" reveal>
           <span role="alert">{submit.error}</span>
         </Notice>
       )}
