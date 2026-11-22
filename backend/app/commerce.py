@@ -540,8 +540,8 @@ def order_view(db,order,actor):
         proposal=dict(proposal)
         proposed_slot=db.get(DeliverySlot,proposal.get('slotId')) if proposal.get('slotId') else None
         if proposed_slot:
-            from .delivery_plan import slot_snapshot
-            proposal['proposed']=slot_snapshot(proposed_slot)
+            from .delivery_plan import booking_slot_snapshot
+            proposal['proposed']=booking_slot_snapshot(db, proposed_slot)
     location_snapshot=data.get('locationSnapshot') or {}
     # Expose only the public delivery destination, not arbitrary order data.
     # Delivery assignment snapshots use locationId; checkout snapshots use id.
@@ -695,17 +695,11 @@ def require_order_account(db, actor):
     return account
 
 
-def _requested_slot_snapshot(slot):
-    from .delivery_plan import slot_snapshot
-    snapshot=slot_snapshot(slot,public=True)
-    snapshot.pop('selectable',None)
-    return snapshot
-
-
 def submit_order(db,actor,payload):
     require_customer(actor)
     require_order_account(db, actor)
     prep,quote,artifacts,location,slot=_current_ready(db,actor,payload)
+    from .delivery_plan import booking_slot_snapshot
     if db.scalar(select(Order.id).where(Order.preparation_id==prep.id)):
         raise DomainError('PREPARATION_ALREADY_SUBMITTED','该准备单已经提交，请核实已有订单',409)
     workflow=get_config(db,'workflow').data
@@ -720,7 +714,7 @@ def submit_order(db,actor,payload):
         close_at=utcnow()+timedelta(minutes=workflow['unpaidTimeoutMinutes']),data={'quote':quote_view(quote),
         'checkoutAuthKind':'REGISTERED' if quote.checkout_account_id else 'ANONYMOUS',
         'locationSnapshot':location_campus_snapshot(db,location),
-        'requestedSlotSnapshot':_requested_slot_snapshot(slot),'history':[]})
+        'requestedSlotSnapshot':booking_slot_snapshot(db,slot),'history':[]})
     db.add(order);db.flush()
     from .growth import reserve_coupon
     reserve_coupon(db,order,quote)
@@ -885,6 +879,8 @@ def admin_void_order(order_id:str,body:VoidOrderInput,db=Depends(get_db),actor:A
 
 @router.post('/orders/{order_id}/revisions',response_model=Envelope[OrderResult])
 def revise_order(order_id:str,body:RevisionSubmit,db=Depends(get_db),actor:Actor=Depends(actor_dep)):
+    from .delivery_plan import booking_slot_snapshot
+
     order=lock(db,Order,order_id,body.expected_version)
     authorize_order(db,actor,order,'ORDER_REVISE_PENDING')
     if order.status!='PENDING_CONFIRMATION' or order.settlement_kind:
@@ -901,7 +897,7 @@ def revise_order(order_id:str,body:RevisionSubmit,db=Depends(get_db),actor:Actor
     order.location_id=location.id;order.requested_slot_id=slot.id
     revised_data={**order.data,'quote':quote_view(quote),
                   'locationSnapshot':location_campus_snapshot(db,location),
-                  'requestedSlotSnapshot':_requested_slot_snapshot(slot)}
+                  'requestedSlotSnapshot':booking_slot_snapshot(db,slot)}
     original_request=(order.data or {}).get('requestedSlotSnapshot')
     if original_request and original_request!=revised_data['requestedSlotSnapshot']:
         revised_data['previousRequestedSlots']=[*(order.data or {}).get('previousRequestedSlots',[]),original_request]
@@ -1209,8 +1205,9 @@ def _complete_settlement(db,actor,order,body,receipt):
              'confirmedAt':utcnow().isoformat(),'confirmedBy':actor.staff_id,
              'batchId':auto_batch.id if auto_batch else None,
              'batchName':auto_batch.name if auto_batch else None}
-    order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':plan_slot_snapshot(slot,public=False),
-                'settlementSlotSnapshot':plan_slot_snapshot(slot,public=False)}
+    confirmed_snapshot = plan_slot_snapshot(slot, public=False, batch=auto_batch)
+    order.data={**order.data,'settlement':summary,'confirmedSlotSnapshot':confirmed_snapshot,
+                'settlementSlotSnapshot':confirmed_snapshot}
     if proposal:
         data = dict(order.data)
         data.pop('slotProposal', None)
@@ -1237,13 +1234,17 @@ def _complete_settlement(db,actor,order,body,receipt):
     db.flush();refresh_production(db,order)
     from .order_identification import queue_identification
     queue_identification(db, order)
-    if auto_batch and (auto_batch.starts_at != slot.starts_at or auto_batch.ends_at != slot.ends_at):
+    original = order.data.get('requestedSlotSnapshot') or {}
+    if original.get('id') != slot.id:
+        original = plan_slot_snapshot(slot)
+    try:
+        original_window = tuple(datetime.fromisoformat(original[key]) for key in ('startsAt', 'endsAt'))
+    except (KeyError, TypeError, ValueError):
+        original, original_window = plan_slot_snapshot(slot), (slot.starts_at, slot.ends_at)
+    if auto_batch and original_window != (auto_batch.starts_at, auto_batch.ends_at):
         from .delivery_plan import record_change
         from .growth import notify_delivery_change
-        original=plan_slot_snapshot(slot)
-        revised={**original,'startsAt':auto_batch.starts_at.isoformat(),
-                 'endsAt':auto_batch.ends_at.isoformat()}
-        change=record_change(db,order,kind='ETA_UPDATED',original=original,proposed=revised,
+        change=record_change(db,order,kind='ETA_UPDATED',original=original,proposed=confirmed_snapshot,
             reason=(auto_batch.reason or '配送时间调整')[:300],actor_id=actor.id,
             batch_id=auto_batch.id,slot_id=slot.id)
         notify_delivery_change(db,order,change)
@@ -1256,7 +1257,7 @@ def _complete_settlement(db,actor,order,body,receipt):
 @router.post('/admin/orders/{order_id}/slot-change', response_model=Envelope[OrderView])
 def change_order_slot(order_id: str, body: SlotChange, db=Depends(get_db),
                       actor: Actor=Depends(actor_dep)):
-    from .delivery_plan import apply_reschedule, ensure_slot_accepting, pending_slot_id
+    from .delivery_plan import apply_reschedule, booking_slot_snapshot, ensure_slot_accepting, pending_slot_id
 
     require_admin(actor)
     order = lock(db, Order, order_id, body.expected_version)
@@ -1281,7 +1282,7 @@ def change_order_slot(order_id: str, body: SlotChange, db=Depends(get_db),
                 raise DomainError('SLOT_UNCHANGED', '目标时段与当前申请相同', 409)
         else:
             ensure_slot_accepting(db, slot)
-        snapshot = _requested_slot_snapshot(slot)
+        snapshot = booking_slot_snapshot(db, slot)
         original = data.get('requestedSlotSnapshot')
         if original and order.requested_slot_id != slot.id:
             data['previousRequestedSlots'] = [*data.get('previousRequestedSlots', []), original]

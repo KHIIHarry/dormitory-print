@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 test("switching campuses replaces the available slots and keeps checkout progress", async ({
   page,
-}) => {
+}, info) => {
   const transformed = await (
     await page.request.get("/src/customer/review.tsx")
   ).text();
@@ -17,7 +17,7 @@ test("switching campuses replaces the available slots and keeps checkout progres
     const data=createDemo();
     data.orders[0]={...data.orders[0],locationId:'missing-building',locationSnapshot:{name:'旧楼快照',campusId:'campus-east'},allowedActions:['ORDER_CHANGE_LOCATION_PRE_DELIVERY']};
     data.slots=[
-      {id:'east-slot',campusId:'campus-east',name:'东校区时段',date:'2099-01-01',weekday:'周四',start:'12:00',end:'13:00',enabled:true,selectable:true,capacity:10},
+      {id:'east-slot',campusId:'campus-east',name:'东校区时段',date:'2099-01-01',weekday:'周四',start:'12:00',end:'13:00',cutoffAt:'2098-12-31T14:00:00Z',enabled:true,selectable:true,capacity:10},
       {id:'west-slot',campusId:'campus-west',name:'西校区时段',date:'2099-01-01',weekday:'周四',start:'12:00',end:'13:00',enabled:true,selectable:true,capacity:10},
       {id:'legacy',name:'未归属时段',date:'2099-01-01',weekday:'周四',start:'12:00',end:'13:00',enabled:true,selectable:true,capacity:10}]; const file=data.orders.flatMap(o=>o.files).find(f=>f.kind==='DOCUMENT');
     const listeners=new Set();
@@ -25,6 +25,10 @@ test("switching campuses replaces the available slots and keeps checkout progres
     const apply=(value,previous)=>typeof value==='function'?value(previous):value;
     Object.assign(store,{toast:()=>{},updateOrder:async()=>{window.reviewFixture.updated=true;return true},clearActionIssues:()=>{},refresh:async()=>{},setDraft:()=>{},setEditingOrderId:()=>{},setSavedAccessLinks:()=>{},setData:v=>{store.data=apply(v,store.data)},setCheckoutMemory:v=>{store.checkoutMemory=apply(v,store.checkoutMemory)}});
     window.reviewFixture={get store(){return store},calls:[],removeBuilding(id){store={...store,data:{...store.data,buildings:store.data.buildings.filter(b=>b.id!==id)}};listeners.forEach(f=>f())}, setBuildingCatalogReady(ready){store={...store,resources:{...store.resources,buildings:{hasData:ready}}};listeners.forEach(f=>f())},setReady(ready){store={...store,resources:{config:{hasData:ready,loading:!ready,error:''}}};listeners.forEach(f=>f())}};
+    window.reviewFixture.updateSlotWindow=(id,start,end)=>{
+      store={...store,data:{...store.data,slots:store.data.slots.map(slot=>slot.id===id?{...slot,start,end}:slot)}};
+      listeners.forEach(f=>f());
+    };
     export const DEMO=false,ADMIN='/manage'; export const Provider=({children})=>children;
     export const useStore=()=>useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn)},()=>store);
   `,
@@ -69,7 +73,22 @@ test("switching campuses replaces the available slots and keeps checkout progres
   await expect(page.getByLabel("微信昵称 *", { exact: true })).toBeVisible();
   await page.getByLabel("微信昵称 *", { exact: true }).fill("保留的昵称");
   await page.getByRole("button", { name: /东校区/ }).first().click();
-  await expect(page.getByRole("button", { name: /东校区时段/ })).toBeVisible();
+  const east = page.getByRole("button", { name: /东校区时段/ });
+  await expect(east).toContainText("12:00 – 13:00");
+  await east.click();
+  await page.evaluate(() =>
+    (window as any).reviewFixture.updateSlotWindow("east-slot", "09:30", "09:45"),
+  );
+  await expect(east).toContainText("09:30 – 09:45");
+  await expect(east).toContainText(/截单.*22:00/);
+  await expect(east).toHaveClass(/selected/);
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(east).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+    if (width === 390 || width === 1440)
+      await east.screenshot({ path: info.outputPath(`checkout-window-${width}.png`) });
+  }
   await expect(page.getByRole("button", { name: /西校区时段/ })).toHaveCount(0);
   const firstBuilding = page.locator(".building-choices button").first();
   await firstBuilding.click();

@@ -1,7 +1,7 @@
 """Closed-loop delivery acceptance tests: windows, sealing and auto-batching."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -446,11 +446,22 @@ def test_paid_order_reschedule_needs_customer_confirmation_and_moves_capacity(
 
 def test_eta_reschedule_updates_undelivered_assignment_and_keeps_batch_status(
         db, admin_client, api, client, act_as):
-    from app.delivery_schemas import to_shanghai_hhmm
+    from app.commerce import order_view
+    from app.core import Actor
+    from app.delivery_schemas import SHANGHAI, to_shanghai_hhmm
 
     admin = admin_client.staff
     act_as(admin)
     world = make_world(db)
+    world.slot.starts_at = world.slot.starts_at.astimezone(SHANGHAI).replace(hour=12, minute=0)
+    world.slot.ends_at = world.slot.starts_at + timedelta(hours=2)
+    other_customer = make_world(db, campus=False)
+    other_customer.slot.enabled = False
+    other_customer.location.campus_id = world.campus.id
+    awaiting_payment = submit(db, other_customer, slot=world.slot)
+    original_request = awaiting_payment.data['requestedSlotSnapshot']
+    guest_actor = Actor(principal_id=other_customer.principal.id,
+                        guest_principal_id=other_customer.principal.id)
     order = submit(db, world)
     settle(db, order, admin_client_actor(admin))
     batch = db.scalar(select(DeliveryBatch).where(DeliveryBatch.slot_id == world.slot.id))
@@ -461,6 +472,9 @@ def test_eta_reschedule_updates_undelivered_assignment_and_keeps_batch_status(
     db.commit()
     original_start = world.slot.starts_at
     original_cutoff = world.slot.cutoff_at
+    public_path = f'/public/slots?campusId={world.campus.id}&date={world.slot.date}'
+    before = api(client, public_path, None, method='GET').json()['data']['items']
+    assert before[0]['start'] == to_shanghai_hhmm(original_start)
     new_start = batch.starts_at + timedelta(minutes=30)
     preview = api(client, '/admin/batch-operations/preview', {
         'action': 'RESCHEDULE', 'sourceBatchIds': [batch.id],
@@ -487,11 +501,62 @@ def test_eta_reschedule_updates_undelivered_assignment_and_keeps_batch_status(
     }
     assert world.slot.starts_at == original_start
     assert world.slot.cutoff_at == original_cutoff
+    response = api(client, public_path, None, method='GET')
+    assert response.status_code == 200, response.text
+    public, = response.json()['data']['items']
+    assert public['id'] == slot['id']
+    assert public['date'] == slot['batchWindow']['date']
+    assert public['weekday'] == slot['batchWindow']['weekday']
+    assert public['start'] == slot['batchWindow']['start']
+    assert public['end'] == slot['batchWindow']['end']
+    assert datetime.fromisoformat(public['startsAt']) == stored.starts_at
+    assert datetime.fromisoformat(public['endsAt']) == stored.ends_at
+    assert datetime.fromisoformat(public['cutoffAt']) == original_cutoff
+    assert public['selectable'] is True
+    assert 'batchWindow' not in public
+    assert awaiting_payment.data['requestedSlotSnapshot'] == original_request
+    pending_view = order_view(db, awaiting_payment, guest_actor)['arrangement']
+    assert datetime.fromisoformat(pending_view['effective']['startsAt']) == stored.starts_at
+    assert pending_view['originalRequest'] == original_request
+    new_customer = make_world(db, campus=False)
+    new_customer.slot.enabled = False
+    new_customer.location.campus_id = world.campus.id
+    new_order = submit(db, new_customer, slot=world.slot)
+    assert datetime.fromisoformat(new_order.data['requestedSlotSnapshot']['startsAt']) == stored.starts_at
+    settle(db, new_order, admin_client_actor(admin))
+    new_guest = Actor(principal_id=new_customer.principal.id,
+                      guest_principal_id=new_customer.principal.id)
+    paid_view = order_view(db, new_order, new_guest)['arrangement']
+    assert datetime.fromisoformat(paid_view['effective']['startsAt']) == stored.starts_at
+    assert datetime.fromisoformat(paid_view['originalConfirmation']['startsAt']) == stored.starts_at
+    assert paid_view['latestChange'] is None
     from app.models import DeliveryChange
     change = db.scalar(select(DeliveryChange).where(
         DeliveryChange.order_id == order.id,
         DeliveryChange.kind == 'ETA_UPDATED'))
     assert change is not None and change.status == 'APPLIED'
+
+
+def test_public_slot_uses_empty_regular_batch_instead_of_split_window(db, api, client):
+    from app.delivery_schemas import to_shanghai_hhmm
+
+    world = make_world(db)
+    group = DeliveryGroup(slot_id=world.slot.id, campus_id=world.campus.id)
+    db.add(group)
+    db.flush()
+    start = world.slot.starts_at + timedelta(minutes=15)
+    db.add(DeliveryBatch(name='自动归集主批次', group_id=group.id, slot_id=world.slot.id,
+                         campus_id=world.campus.id, source='AUTO', is_regular=True,
+                         starts_at=start, ends_at=start + timedelta(hours=2), status='PLANNED'))
+    db.add(DeliveryBatch(name='拆分批次', group_id=group.id, slot_id=world.slot.id,
+                         campus_id=world.campus.id, source='SPLIT', is_regular=False,
+                         starts_at=start + timedelta(minutes=15), ends_at=start + timedelta(hours=2),
+                         status='PLANNED'))
+    db.commit()
+    response = api(client, f'/public/slots?campusId={world.campus.id}', None, method='GET')
+    assert response.status_code == 200, response.text
+    booking, = response.json()['data']['items']
+    assert booking['start'] == to_shanghai_hhmm(start)
 
 
 def test_first_auto_batch_courier_assignment_needs_no_reason(db, api, client, act_as, staff_factory):

@@ -23,6 +23,7 @@ from sqlalchemy.orm import object_session
 
 from .config import get_config
 from .core import DomainError, lock, touch, utcnow
+from .delivery_schemas import to_shanghai_date
 from .models import (
     Campus,
     DeliveryAssignment,
@@ -147,16 +148,17 @@ def ensure_slot_accepting(db, slot: DeliverySlot, now: datetime | None = None) -
     })
 
 
-def slot_snapshot(slot: DeliverySlot, *, public: bool = True) -> dict:
+def slot_snapshot(slot: DeliverySlot, *, public: bool = True,
+                  batch: DeliveryBatch | None = None) -> dict:
     snapshot = {
         'id': slot.id,
         'campusId': slot.campus_id,
         'campusName': (object_session(slot).get(Campus, slot.campus_id).name
                        if object_session(slot) and slot.campus_id and object_session(slot).get(Campus, slot.campus_id) else None),
-        'date': slot.date,
+        'date': to_shanghai_date(batch.starts_at) if batch is not None else slot.date,
         'name': slot.name,
-        'startsAt': slot.starts_at.isoformat(),
-        'endsAt': slot.ends_at.isoformat(),
+        'startsAt': (batch.starts_at if batch is not None else slot.starts_at).isoformat(),
+        'endsAt': (batch.ends_at if batch is not None else slot.ends_at).isoformat(),
         'capacity': slot.capacity,
         'version': slot.version,
     }
@@ -386,6 +388,33 @@ def operational_slot_batches(slot_id: str):
     return slot_batches(slot_id).where(DeliveryBatch.status != 'CANCELLED', ~empty_auto_batch())
 
 
+def representative_slot_batch(db, slot: DeliverySlot) -> DeliveryBatch | None:
+    batches = list(db.scalars(
+        operational_slot_batches(slot.id)
+        .where(DeliveryBatch.campus_id == slot.campus_id)
+        .order_by(DeliveryBatch.is_regular.desc(), DeliveryBatch.id)
+        .limit(2)))
+    # A split or secondary batch has its own ETA. Prefer the regular batch,
+    # or use the only linked batch if there is no regular one.
+    if not batches or (len(batches) == 2 and batches[0].is_regular == batches[1].is_regular):
+        return None
+    return batches[0]
+
+
+def booking_slot_batch(db, slot: DeliverySlot) -> DeliveryBatch | None:
+    # Settlement uses the regular batch for the slot/campus group, even if a
+    # split removed its last order and the batch is hidden on the workbench.
+    return db.scalar(select(DeliveryBatch).join(DeliveryGroup).where(
+        DeliveryGroup.slot_id == slot.id, DeliveryGroup.campus_id == slot.campus_id,
+        DeliveryBatch.slot_id == slot.id, DeliveryBatch.campus_id == slot.campus_id,
+        DeliveryBatch.is_regular.is_(True), DeliveryBatch.deleted_at.is_(None),
+        DeliveryBatch.status != 'CANCELLED'))
+
+
+def booking_slot_snapshot(db, slot: DeliverySlot) -> dict:
+    return slot_snapshot(slot, batch=booking_slot_batch(db, slot))
+
+
 def arrangement_for_order(db, order: Order, *, assignment: DeliveryAssignment | None = None) -> dict:
     """Compute the one authoritative arrangement shown to every surface."""
     data = order.data or {}
@@ -411,6 +440,10 @@ def arrangement_for_order(db, order: Order, *, assignment: DeliveryAssignment | 
         current = applied.proposed
     elif pending is not None and pending.original:
         current = pending.original
+    elif order.status == 'PENDING_CONFIRMATION' and assignment is None:
+        booking_slot = db.get(DeliverySlot, pending_slot_id(order))
+        if booking_slot is not None:
+            current = booking_slot_snapshot(db, booking_slot)
     if current is None and batch is not None:
         current = {'startsAt': batch.starts_at.isoformat(), 'endsAt': batch.ends_at.isoformat(),
                    'name': batch.name, 'source': 'CURRENT_BATCH'}

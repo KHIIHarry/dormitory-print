@@ -47,6 +47,7 @@ from .delivery_plan import (
     arrangement_for_order,
     batch_effective_sealed,
     batch_has_delivery_tasks,
+    booking_slot_batch,
     current_slot_orders,
     delivery_task_conditions,
     empty_auto_batch,
@@ -56,6 +57,7 @@ from .delivery_plan import (
     pending_slot_orders,
     persist_seal_facts,
     record_change,
+    representative_slot_batch,
     seal_preview,
     service_accepting,
     SLOT_ERRORS,
@@ -295,16 +297,9 @@ def _slot_batch_count(db, slot_id: str) -> int:
 
 
 def _slot_batch_window(db, slot: DeliverySlot) -> dict | None:
-    batches = list(db.scalars(
-        operational_slot_batches(slot.id)
-        .where(DeliveryBatch.campus_id == slot.campus_id)
-        .order_by(DeliveryBatch.is_regular.desc(), DeliveryBatch.id)
-        .limit(2)))
-    # A split or secondary batch has its own ETA. Prefer the regular batch,
-    # or use the only linked batch if there is no regular one.
-    if not batches or (len(batches) == 2 and batches[0].is_regular == batches[1].is_regular):
+    batch = representative_slot_batch(db, slot)
+    if batch is None:
         return None
-    batch = batches[0]
     date = to_shanghai_date(batch.starts_at)
     return {
         'batchId': batch.id, 'date': date, 'weekday': slot_weekday(date),
@@ -329,6 +324,10 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
     remaining = max(0, slot.capacity - slot.occupied)
     archived = _slot_archived(slot)
     state = slot_acceptance(db, slot, now, service_open=True if admin else None)
+    booking_batch = booking_slot_batch(db, slot) if public and state['selectable'] else None
+    starts_at = booking_batch.starts_at if booking_batch else slot.starts_at
+    ends_at = booking_batch.ends_at if booking_batch else slot.ends_at
+    date = to_shanghai_date(starts_at) if booking_batch else slot.date
     pending = 0
     batches = 0
     admin_fields = {}
@@ -345,13 +344,13 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
         'id': slot.id,
         'campusId': slot.campus_id,
         'campusName': (db.get(Campus, slot.campus_id).name if slot.campus_id and db.get(Campus, slot.campus_id) else None),
-        'date': slot.date,
-        'weekday': slot_weekday(slot.date),
+        'date': date,
+        'weekday': slot_weekday(date),
         'name': slot.name,
-        'start': to_shanghai_hhmm(slot.starts_at),
-        'end': to_shanghai_hhmm(slot.ends_at),
-        'startsAt': slot.starts_at,
-        'endsAt': slot.ends_at,
+        'start': to_shanghai_hhmm(starts_at),
+        'end': to_shanghai_hhmm(ends_at),
+        'startsAt': starts_at,
+        'endsAt': ends_at,
         'openAt': slot.open_at,
         'cutoffAt': slot.cutoff_at,
         'capacity': slot.capacity,
@@ -795,21 +794,19 @@ def public_map(db=Depends(get_db)):
 @router.get('/public/slots', response_model=Envelope[SlotListView])
 def public_slots(date: str | None = None, campus_id: str | None = Query(default=None, alias='campusId'), db=Depends(get_db)):
     now = utcnow()
-    query = select(DeliverySlot).where(DeliverySlot.enabled.is_(True))
+    today = to_shanghai_date(now)
+    query = select(DeliverySlot).where(
+        DeliverySlot.enabled.is_(True), DeliverySlot.open_at <= now, DeliverySlot.cutoff_at > now)
     if campus_id:
         query = query.where(DeliverySlot.campus_id == campus_id)
-    if date:
-        query = query.where(DeliverySlot.date == date)
-    else:
-        query = query.where(DeliverySlot.date >= to_shanghai_date(now))
-    slots = list(db.scalars(query.order_by(DeliverySlot.starts_at, DeliverySlot.id)))
     items = []
-    for slot in slots:
+    for slot in db.scalars(query):
         if _slot_archived(slot):
             continue
         view = _slot_view(db, slot, now, public=True)
-        if view['acceptanceStatus'] == 'OPEN':
+        if view['acceptanceStatus'] == SLOT_OPEN and (view['date'] == date if date else view['date'] >= today):
             items.append(view)
+    items.sort(key=lambda view: (view['startsAt'], view['id']))
     return ok({'items': items})
 
 
