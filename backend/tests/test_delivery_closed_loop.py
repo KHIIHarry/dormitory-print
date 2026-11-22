@@ -446,12 +446,21 @@ def test_paid_order_reschedule_needs_customer_confirmation_and_moves_capacity(
 
 def test_eta_reschedule_updates_undelivered_assignment_and_keeps_batch_status(
         db, admin_client, api, client, act_as):
+    from app.delivery_schemas import to_shanghai_hhmm
+
     admin = admin_client.staff
     act_as(admin)
     world = make_world(db)
     order = submit(db, world)
     settle(db, order, admin_client_actor(admin))
     batch = db.scalar(select(DeliveryBatch).where(DeliveryBatch.slot_id == world.slot.id))
+    # Split batches keep their own windows; the regular batch represents the slot.
+    db.add(DeliveryBatch(name='拆分批次', slot_id=batch.slot_id, group_id=batch.group_id,
+                         campus_id=batch.campus_id, source='SPLIT', is_regular=False,
+                         starts_at=batch.starts_at, ends_at=batch.ends_at, status='PLANNED'))
+    db.commit()
+    original_start = world.slot.starts_at
+    original_cutoff = world.slot.cutoff_at
     new_start = batch.starts_at + timedelta(minutes=30)
     preview = api(client, '/admin/batch-operations/preview', {
         'action': 'RESCHEDULE', 'sourceBatchIds': [batch.id],
@@ -469,6 +478,15 @@ def test_eta_reschedule_updates_undelivered_assignment_and_keeps_batch_status(
     stored = db.get(DeliveryBatch, batch.id)
     assert stored.status == 'PLANNED'
     assert stored.starts_at == new_start.replace(microsecond=0) or stored.starts_at == new_start
+    slots = api(client, '/admin/slots', None, method='GET').json()['data']['items']
+    slot = next(item for item in slots if item['id'] == world.slot.id)
+    assert slot['batchWindow'] == {
+        'batchId': batch.id, 'date': shanghai_day(stored.starts_at),
+        'weekday': slot['weekday'], 'start': to_shanghai_hhmm(stored.starts_at),
+        'end': to_shanghai_hhmm(stored.ends_at),
+    }
+    assert world.slot.starts_at == original_start
+    assert world.slot.cutoff_at == original_cutoff
     from app.models import DeliveryChange
     change = db.scalar(select(DeliveryChange).where(
         DeliveryChange.order_id == order.id,

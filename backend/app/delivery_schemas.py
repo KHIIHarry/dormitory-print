@@ -687,8 +687,17 @@ class SlotEditConstraints(DTO):
     time_lock: Literal['SEALED', 'BATCH', 'ORDER', 'OCCUPIED'] | None
 
 
+class SlotBatchWindow(DTO):
+    batch_id: str
+    date: str
+    weekday: str
+    start: str
+    end: str
+
+
 class AdminSlotView(SlotView):
     edit_constraints: SlotEditConstraints
+    batch_window: SlotBatchWindow | None = None
 
 
 class AdminSlotListView(DTO):

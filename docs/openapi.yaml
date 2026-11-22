@@ -647,6 +647,16 @@
             "title": "Batchcount",
             "type": "integer"
           },
+          "batchWindow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlotBatchWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "blockers": {
             "items": {
               "$ref": "#/components/schemas/BlockerView"
@@ -16223,6 +16233,40 @@
           "confirm"
         ],
         "title": "SlotAgreement",
+        "type": "object"
+      },
+      "SlotBatchWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "batchId": {
+            "title": "Batchid",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "weekday": {
+            "title": "Weekday",
+            "type": "string"
+          }
+        },
+        "required": [
+          "batchId",
+          "date",
+          "weekday",
+          "start",
+          "end"
+        ],
+        "title": "SlotBatchWindow",
         "type": "object"
       },
       "SlotChange": {

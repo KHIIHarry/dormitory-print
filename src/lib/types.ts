@@ -206,12 +206,16 @@ export type Slot = {
   openAt?: string | null;
   cutoffAt?: string | null;
   sealedAt?: string | null;
+  sealReason?: string;
   acceptanceStatus?: string;
   selectable?: boolean;
   lateRescheduleSelectable?: boolean;
   occupied?: number;
   remaining?: number;
   batchCount?: number;
+  batchWindow?:
+    | import("./api-schema").components["schemas"]["SlotBatchWindow"]
+    | null;
   pendingApplicationCount?: number;
   editConstraints?: import("./api-schema").components["schemas"]["SlotEditConstraints"];
   blockers?: { code: string; message: string }[];

@@ -1495,7 +1495,7 @@ function localInputLabel(value?: string | null) {
 
 const SLOT_TIME_LOCK_MESSAGES = {
   SEALED: "时段已封批，配送时间和接单窗口已锁定。",
-  BATCH: "已生成配送批次，原配送时间和接单窗口已锁定。",
+  BATCH: "已生成配送批次，接单窗口已锁定。请到配送调度调整批次时间。",
   ORDER: "时段已有有效预约，配送时间和接单窗口已锁定。已有预约可通过订单改期。",
   OCCUPIED: "时段仍有预约占用，配送时间和接单窗口已锁定。",
 };
@@ -1549,13 +1549,17 @@ export function Slots() {
   const campusSlots = slots.filter(
     (slot) => !campusFilter || slot.campusId === campusFilter,
   );
-  const dateFilter = useSlotDateFilter(campusSlots.map((slot) => slot.date));
-  const visibleSlots = campusSlots.filter(
-    (slot) =>
-      !dateFilter.error &&
-      slot.date >= dateFilter.range.start &&
-      slot.date <= dateFilter.range.end,
+  const dateFilter = useSlotDateFilter(
+    campusSlots.map((slot) => (slot.batchWindow ?? slot).date),
   );
+  const visibleSlots = campusSlots.filter((slot) => {
+    const { date } = slot.batchWindow ?? slot;
+    return (
+      !dateFilter.error &&
+      date >= dateFilter.range.start &&
+      date <= dateFilter.range.end
+    );
+  });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [removeSlot, setRemoveSlot] = useState<Slot | null>(null);
   const [removeReason, setRemoveReason] = useState("");
@@ -1600,6 +1604,7 @@ export function Slots() {
   const original = editor?.original;
   const current =
     original && (slots.find((slot) => slot.id === original.id) ?? original);
+  const batchWindow = current?.batchWindow;
   const timeLock = slotTimeLock(current);
   const campusLocked = current?.editConstraints?.campusLocked ??
     !!(current?.batchCount || current?.pendingApplicationCount || current?.occupied);
@@ -1869,7 +1874,8 @@ export function Slots() {
               </tr>
             </thead>
             <tbody>
-              {visibleSlots.map((s: any) => {
+              {visibleSlots.map((s) => {
+                const window = s.batchWindow ?? s;
                 const state =
                   s.acceptanceStatus ||
                   (s.sealedAt ? "SEALED" : s.enabled ? "OPEN" : "DISABLED");
@@ -1877,13 +1883,13 @@ export function Slots() {
                   <tr key={s.id}>
                     <td>{campusName(s)}</td>
                     <td>
-                      {s.date}
+                      {window.date}
                       <small>
-                        {s.weekday} · {s.name}
+                        {window.weekday} · {s.name}
                       </small>
                     </td>
                     <td className="numeric">
-                      {s.start} – {s.end}
+                      {window.start} – {window.end}
                     </td>
                     <td className="numeric">
                       {localInputLabel(s.openAt)} 开放
@@ -2101,12 +2107,23 @@ export function Slots() {
               <div className="slot-editor-lock">
                 <Notice>
                   <div role="status">
-                    {fillingRules
-                      ? "原配送时间和已配置的接单时间已锁定，可补齐缺失的接单时间。"
-                      : SLOT_TIME_LOCK_MESSAGES[timeLock]}
+                    {batchWindow
+                      ? fillingRules
+                        ? "配送时间随批次同步，可补齐缺失的接单时间。"
+                        : "配送时间随批次同步，接单窗口已锁定。"
+                      : fillingRules
+                        ? "原配送时间和已配置的接单时间已锁定，可补齐缺失的接单时间。"
+                        : SLOT_TIME_LOCK_MESSAGES[timeLock]}
                   </div>
                   {current?.batchCount ? (
-                    <Link className="text-button" to={`${ADMIN}/batches`}>
+                    <Link
+                      className="text-button"
+                      to={
+                        batchWindow
+                          ? `${ADMIN}/batches/${encodeURIComponent(batchWindow.batchId)}`
+                          : `${ADMIN}/batches`
+                      }
+                    >
                       前往配送调度 <ArrowRight size={16} aria-hidden="true" />
                     </Link>
                   ) : null}
@@ -2145,7 +2162,7 @@ export function Slots() {
               <input
                 data-slot-field="date"
                 type="date"
-                value={edit.date || ""}
+                value={batchWindow?.date ?? edit.date ?? ""}
                 disabled={!!timeLock}
                 onChange={(e) => changeDraft({ date: e.target.value })}
               />
@@ -2163,7 +2180,7 @@ export function Slots() {
                 <input
                   data-slot-field="start"
                   type="time"
-                  value={edit.start || ""}
+                  value={batchWindow?.start ?? edit.start ?? ""}
                   disabled={!!timeLock}
                   onChange={(e) => changeDraft({ start: e.target.value })}
                 />
@@ -2172,7 +2189,7 @@ export function Slots() {
                 <input
                   data-slot-field="end"
                   type="time"
-                  value={edit.end || ""}
+                  value={batchWindow?.end ?? edit.end ?? ""}
                   disabled={!!timeLock}
                   onChange={(e) => changeDraft({ end: e.target.value })}
                 />

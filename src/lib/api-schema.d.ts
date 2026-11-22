@@ -3970,6 +3970,7 @@ export interface components {
              * @default 0
              */
             batchCount: number;
+            batchWindow?: components["schemas"]["SlotBatchWindow"] | null;
             /** Blockers */
             blockers?: components["schemas"]["BlockerView"][];
             /** Campusid */
@@ -9411,6 +9412,19 @@ export interface components {
             expectedVersion: number;
             /** Slotid */
             slotId: string;
+        };
+        /** SlotBatchWindow */
+        SlotBatchWindow: {
+            /** Batchid */
+            batchId: string;
+            /** Date */
+            date: string;
+            /** End */
+            end: string;
+            /** Start */
+            start: string;
+            /** Weekday */
+            weekday: string;
         };
         /** SlotChange */
         SlotChange: {

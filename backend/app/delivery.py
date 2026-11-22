@@ -294,6 +294,24 @@ def _slot_batch_count(db, slot_id: str) -> int:
     return db.scalar(select(func.count()).select_from(operational_slot_batches(slot_id).subquery())) or 0
 
 
+def _slot_batch_window(db, slot: DeliverySlot) -> dict | None:
+    batches = list(db.scalars(
+        operational_slot_batches(slot.id)
+        .where(DeliveryBatch.campus_id == slot.campus_id)
+        .order_by(DeliveryBatch.is_regular.desc(), DeliveryBatch.id)
+        .limit(2)))
+    # A split or secondary batch has its own ETA. Prefer the regular batch,
+    # or use the only linked batch if there is no regular one.
+    if not batches or (len(batches) == 2 and batches[0].is_regular == batches[1].is_regular):
+        return None
+    batch = batches[0]
+    date = to_shanghai_date(batch.starts_at)
+    return {
+        'batchId': batch.id, 'date': date, 'weekday': slot_weekday(date),
+        'start': to_shanghai_hhmm(batch.starts_at), 'end': to_shanghai_hhmm(batch.ends_at),
+    }
+
+
 def _slot_time_lock(slot: DeliverySlot, order_count: int, batch_count: int) -> str | None:
     if slot.sealed_at is not None:
         return 'SEALED'
@@ -318,6 +336,7 @@ def _slot_view(db, slot: DeliverySlot, now: datetime, *, public: bool = False,
         pending = db.scalar(select(func.count()).select_from(pending_slot_orders(slot.id).subquery())) or 0
         batches = _slot_batch_count(db, slot.id)
         active_orders = (pending or _slot_order_count(db, slot.id)) if not batches and not slot.sealed_at else 0
+        admin_fields['batchWindow'] = _slot_batch_window(db, slot) if batches else None
         admin_fields['editConstraints'] = {
             'campusLocked': bool(pending or active_orders or batches) or _slot_campus_referenced(db, slot.id),
             'timeLock': _slot_time_lock(slot, active_orders, batches),

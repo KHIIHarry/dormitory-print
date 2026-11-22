@@ -234,23 +234,37 @@ test("slot editor locks batched fields and saves only editable changes", async (
   page,
 }, info) => {
   await fixture(page, "slots");
+  await expect.poll(() =>
+    page.evaluate(() => typeof (window as any).fixture?.refresh),
+  ).toBe("function");
   await page.evaluate(() => {
-    Object.assign((window as any).fixture.slots[0], {
+    const fixture = (window as any).fixture;
+    Object.assign(fixture.slots[0], {
       editConstraints: { campusLocked: true, timeLock: "BATCH" },
       batchCount: 1,
+      batchWindow: {
+        batchId: "source", date: "2030-11-01", weekday: "星期五",
+        start: "09:30", end: "09:45",
+      },
       openAt: "2030-11-01T03:00:00Z",
       cutoffAt: "2030-11-01T05:00:00Z",
       occupied: 3,
     });
+    fixture.data.slots = [...fixture.slots];
+    fixture.refresh();
   });
-  await page.getByRole("row").filter({ hasText: "东时段" })
-    .getByRole("button", { name: "编辑" }).click();
+  const row = page.getByRole("row").filter({ hasText: "东时段" });
+  await expect(row).toContainText("09:30 – 09:45");
+  await row.getByRole("button", { name: "编辑" }).click();
   const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("预计配送开始")).toHaveValue("09:30");
+  await expect(dialog.getByLabel("预计配送结束")).toHaveValue("09:45");
+  await expect(dialog.getByLabel("截单时间")).toHaveValue("2030-11-01T13:00");
   for (const label of [
     "配送校区", "配送日期", "预计配送开始", "预计配送结束", "开放下单时间", "截单时间",
   ]) await expect(dialog.getByLabel(label, { exact: true })).toBeDisabled();
   await expect(dialog.getByRole("link", { name: "前往配送调度" }))
-    .toHaveAttribute("href", "/admin/batches");
+    .toHaveAttribute("href", "/admin/batches/source");
   const autoPublish = dialog.getByRole("checkbox", { name: "截单后自动发布" });
   await expect(autoPublish).toBeEnabled();
   await expect(dialog.getByRole("checkbox", { name: /人工开启接单/ })).toBeEnabled();
@@ -291,6 +305,18 @@ test("slot editor locks batched fields and saves only editable changes", async (
   await page.clock.fastForward(3_600_001);
   await expect(autoPublish).toBeDisabled();
   await dialog.getByLabel("时段名称").fill("更新显示名称");
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.data.slots = fixture.slots.map((slot: any) =>
+      slot.id === "e1"
+        ? { ...slot, batchWindow: { ...slot.batchWindow, start: "10:00", end: "10:30" } }
+        : slot,
+    );
+    fixture.refresh();
+  });
+  await expect(dialog.getByLabel("预计配送开始")).toHaveValue("10:00");
+  await expect(dialog.getByLabel("预计配送结束")).toHaveValue("10:30");
+  await expect(dialog.getByLabel("时段名称")).toHaveValue("更新显示名称");
   const capacity = dialog.getByLabel("预约容量（单）");
   await capacity.fill("2");
   await save.click();
