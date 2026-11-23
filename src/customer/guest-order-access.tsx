@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import { Clock3, MessageCircle, Home } from "lucide-react";
 import { Button, Notice } from "../components/ui";
@@ -6,12 +13,20 @@ import { useStore } from "../lib/store";
 import { growthRequest } from "../growth/client";
 import { useIdentity } from "../growth/identity";
 import {
+  guestAccessPath,
   guestAccessRemaining,
   guestAccessStatus,
+  originalGuestAccessVersion,
   ownsAccountOrder,
   type CustomerGuestAccess,
 } from "./guest-order-policy";
 import "./guest-order-access.css";
+
+const GuestOrderLinkContext = createContext<string | undefined>(undefined);
+
+export function useGuestOrderLink() {
+  return useContext(GuestOrderLinkContext);
+}
 
 export function GuestOrderUnavailable({
   status,
@@ -140,7 +155,7 @@ function GuestOrderAccessBoundary({
       active = controller;
       try {
         const value = await growthRequest<CustomerGuestAccess>(
-          `/customer/orders/${encodeURIComponent(orderId)}/guest-access`,
+          guestAccessPath(orderId),
           { signal: controller.signal },
         );
         if (disposed || controller.signal.aborted) return;
@@ -219,6 +234,11 @@ function GuestOrderAccessBoundary({
       </main>
     );
   const returnTo = `/u/orders/${encodeURIComponent(orderId)}`;
+  // A reset invalidates the original link retained in memory from checkout.
+  const guestLink =
+    current.value.version === originalGuestAccessVersion
+      ? store.savedAccessLinks[orderId]
+      : undefined;
   const claim = async () => {
     if (busy) return;
     setBusy(true);
@@ -280,7 +300,9 @@ function GuestOrderAccessBoundary({
           ) : null}
         </section>
       </div>
-      {children}
+      <GuestOrderLinkContext.Provider value={guestLink}>
+        {children}
+      </GuestOrderLinkContext.Provider>
     </>
   );
 }

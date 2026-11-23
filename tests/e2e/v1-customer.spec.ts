@@ -98,6 +98,7 @@ const customerSession = {
 const publicConfig = {
   serviceEnabled: true,
   announcement: "",
+  orderWebsiteUrl: "https://print.example.test/campus?from=workflow#login",
   prices: {
     bwSingle: 50,
     bwDuplex: 80,
@@ -1601,10 +1602,16 @@ test("pickup-code icon copies the complete contact message without a separate mo
   const copy = page.locator(".detail-code").getByRole("button", { name: "复制联系文案", exact: true });
   await copy.click();
   const copied = await page.evaluate(() => (window as any).orderCopiedText);
-  expect(copied).toContain("提取码 AB12CD34");
-  expect(copied).toContain("12.00");
-  expect(copied).toContain("微信昵称 验收同学");
-  expect(copied).not.toContain("/order-link");
+  expect(copied).toBe([
+    "订单提取码：AB12CD34",
+    "本次应付：¥12.00",
+    "微信昵称：验收同学",
+    "请核对线下付款",
+    "",
+    "用户账号订单",
+    "请登录账号查看订单详情",
+    `网站访问链接：${publicConfig.orderWebsiteUrl}`,
+  ].join("\n"));
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 844 });
     const metrics = await page.locator(".detail-code").evaluate((row) => {
@@ -1622,6 +1629,8 @@ test("pickup-code icon copies the complete contact message without a separate mo
     expect(metrics.buttonW).toBeGreaterThanOrEqual(44);
     expect(metrics.buttonH).toBeGreaterThanOrEqual(44);
     expect(metrics.scroll, JSON.stringify(metrics.overflow)).toBeLessThanOrEqual(width + 1);
+    if (width === 390 || width === 1440)
+      await page.screenshot({ path: test.info().outputPath(`order-copy-${width}.png`) });
   }
   await page.goto(appUrl("/u/orders/ORD-1/contact"));
   await expect(page.locator(".contact-text")).toHaveCount(0);

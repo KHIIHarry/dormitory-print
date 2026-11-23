@@ -1,6 +1,14 @@
 import type { CustomerSession } from "../growth/types";
+
+export const originalGuestAccessVersion = 1;
+
+export function guestAccessPath(orderId: string) {
+  return `/customer/orders/${encodeURIComponent(orderId)}/guest-access`;
+}
+
 export type CustomerGuestAccess = {
   status: "ACTIVE" | "EXPIRED" | "CLOSED" | "NO_LINK";
+  version: number;
   expiresAt: string | null;
   serverNow: string;
   canClaimOnDevice: boolean;

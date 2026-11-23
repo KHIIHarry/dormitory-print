@@ -10,6 +10,7 @@ export default defineConfig({
     "delivery-campus-customer.spec.ts",
     "slot-date-filter.spec.ts",
     "native-month.spec.ts",
+    "operation-feedback.spec.ts",
     "delivery-proof-details.spec.ts",
     "service-prices.spec.ts",
     "print-task-flip.spec.ts",

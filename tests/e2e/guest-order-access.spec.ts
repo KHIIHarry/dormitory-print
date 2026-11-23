@@ -13,6 +13,7 @@ async function mount(
     access?: boolean;
     strict?: boolean;
     delayedToken?: string;
+    copyOrder?: boolean;
   } = {},
 ) {
   const main = await (await page.request.get("/src/main.tsx")).text();
@@ -46,7 +47,7 @@ async function mount(
  if(path==='/order-access/exchange') {if(options.body.accessToken===f.delayedToken){await new Promise(resolve=>{f.releasePrevious=resolve;});throw Object.assign(new Error('旧链接已停止访问'),{code:'ORDER_GRANT_REVOKED'});}if(f.status!=='ACTIVE')throw Object.assign(new Error('访问已结束'),{code:f.status==='EXPIRED'?'ORDER_GRANT_EXPIRED':'ORDER_GRANT_REVOKED'});return {order:f.order,access:{orderId:'o1',sourceGrantId:'root',scopes:['ORDER_VIEW','FINAL_PDF_PREVIEW','DELIVERY_PROOF_VIEW'],allowedActions:['ORDER_VIEW'],expiresAt:f.expiresAt}};}
  if(path==='/orders/o1'){if(f.order.ownerAccountId)return f.order;throw Object.assign(new Error('不可访问'),{status:404});}
  if(path==='/customer/auth/verify-email'){f.verified=true;return {success:true};}
- if(path.endsWith('/guest-access')) {if(f.offline)throw new Error('当前离线，请联网后重试');return {status:f.status,serverNow:new Date().toISOString(),expiresAt:f.expiresAt,canClaimOnDevice:f.original};}
+ if(path.endsWith('/guest-access')) {if(f.offline)throw new Error('当前离线，请联网后重试');return {status:f.status,version:f.guestAccessVersion,serverNow:new Date().toISOString(),expiresAt:f.expiresAt,canClaimOnDevice:f.original};}
  if(path.endsWith('/claim')) {f.order={...f.order,ownerAccountId:'account',accessKind:'OWNER'};f.store.setData(s=>({...s,orders:[f.order]}));return {orderId:'o1',ownerAccountId:'account'};}
  throw new Error(path);
  };`,
@@ -59,15 +60,15 @@ async function mount(
  <script type="module">import R from '/@react-refresh';R.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script>
  <script type="module">
  import React from '${react}';import ReactDOM from '${dom}';import {MemoryRouter,Routes,Route,useLocation,Link} from '${router}';
- import {GuestOrderBoundary} from '/src/customer/guest-order-access.tsx';import {OrderLinkPage,CustomerAuthForm} from '/src/customer/account.tsx';import {Help} from '/src/customer/help.tsx';import {Modal} from '/src/components/ui.tsx';import {createDemo} from '/src/lib/demo.ts';import '/src/styles.css';
- const registered=${options.registered ?? false};const data=createDemo();data.config.wechat=${JSON.stringify(options.wechat ?? "dormprint")};
- const order={...data.orders[0],id:'o1',pickupCode:'ABC12',ownerAccountId:${JSON.stringify(options.owned ? "account" : null)},accessKind:${JSON.stringify(options.owned ? "OWNER" : "GUEST_OWNER")}};data.orders=[order];
- const f=window.guestFixture={calls:[],delayedToken:${JSON.stringify(options.delayedToken || "")},status:${JSON.stringify(options.status || "ACTIVE")},expiresAt:new Date(Date.now()+${options.seconds ?? 120000}*1000).toISOString(),original:${options.original ?? true},order};
+ import {GuestOrderBoundary} from '/src/customer/guest-order-access.tsx';import {Contact,OrderDetail} from '/src/customer/orders.tsx';import {OrderLinkPage,CustomerAuthForm} from '/src/customer/account.tsx';import {Help} from '/src/customer/help.tsx';import {Modal} from '/src/components/ui.tsx';import {createDemo} from '/src/lib/demo.ts';import '/src/styles.css';
+ const registered=${options.registered ?? false};const copyOrder=${options.copyOrder ?? false};const data=createDemo();data.config.wechat=${JSON.stringify(options.wechat ?? "dormprint")};data.config.orderWebsiteUrl='https://print.invalid/u/';
+ const order={...data.orders[0],id:'o1',pickupCode:'ABC12',ownerAccountId:${JSON.stringify(options.owned ? "account" : null)},accessKind:${JSON.stringify(options.owned ? "OWNER" : "GUEST_OWNER")},...(copyOrder?{nickname:'验收同学',totalCents:0,status:'PENDING_CONFIRMATION',settlement:null,files:[],allowedActions:[],history:[]}:null)};data.orders=[order];
+ const f=window.guestFixture={calls:[],delayedToken:${JSON.stringify(options.delayedToken || "")},status:${JSON.stringify(options.status || "ACTIVE")},guestAccessVersion:1,expiresAt:new Date(Date.now()+${options.seconds ?? 120000}*1000).toISOString(),original:${options.original ?? true},order};
  function App(){const [state,setData]=React.useState(data);const [customer,setCustomer]=React.useState({authKind:registered?'REGISTERED':'ANONYMOUS',capabilities:[],account:registered?{id:'account',verified:true}:undefined});const [access,setOrderAccess]=React.useState(${options.access ? "{orderId:'o1',sourceGrantId:'root',scopes:['ORDER_VIEW'],allowedActions:['ORDER_VIEW'],expiresAt:f.expiresAt}" : "null"});const [saved,setSaved]=React.useState({o1:'https://print.invalid/u/order-link?orderId=o1#token='+ 's'.repeat(64),o2:'other-order-credential'});
- f.store={data:state,setData,resources:{config:{hasData:true}},savedAccessLinks:saved,setSavedAccessLinks:setSaved,refresh:async()=>{},toast:()=>{},setDraft:()=>{},setEditingOrderId:()=>{},setCheckoutMemory:()=>{}};
+ f.store={data:state,setData,resources:{config:{hasData:true}},pendingActions:{},savedAccessLinks:saved,setSavedAccessLinks:setSaved,refresh:async()=>{},toast:()=>{},setDraft:()=>{},setEditingOrderId:()=>{},setCheckoutMemory:()=>{}};
  f.identity={generation:0,customer,staff:null,orderAccess:access,setOrderAccess,invalidate:()=>{},refreshCustomer:async()=>{if(f.verified){const verified={authKind:'REGISTERED',capabilities:[],account:{id:'account',verified:true}};setCustomer(verified);return verified;}return customer;},loginCustomer:async()=>{setCustomer({authKind:'REGISTERED',capabilities:[],account:{id:'account',verified:true}});return false;}};
  React.useEffect(()=>{const end=e=>{f.ended=e.detail;setData(current=>({...current,orders:current.orders.filter(o=>o.id!==e.detail.orderId)}));};window.addEventListener('dormprint:order-access-ended',end);return()=>window.removeEventListener('dormprint:order-access-ended',end);},[]);
- return React.createElement(Routes,null,React.createElement(Route,{path:'/u/orders/:id',element:React.createElement(GuestOrderBoundary,{orderId:'o1',navigation:React.createElement(Link,{className:'back-link',to:'/u/orders'},'返回我的订单')},React.createElement(Private))}),React.createElement(Route,{path:'/u/order-link',element:React.createElement(OrderLinkPage)}),React.createElement(Route,{path:'/u/account/login',element:React.createElement(CustomerAuthForm,{mode:'login'})}),React.createElement(Route,{path:'/u/account/register',element:React.createElement(CustomerAuthForm,{mode:'register'})}),React.createElement(Route,{path:'/u/account/verify',element:React.createElement(CustomerAuthForm,{mode:'verify'})}),React.createElement(Route,{path:'/u/help',element:React.createElement(Help)}));}
+ return React.createElement(Routes,null,React.createElement(Route,{path:'/u/orders/:id',element:copyOrder?React.createElement(OrderDetail):React.createElement(GuestOrderBoundary,{orderId:'o1',navigation:React.createElement(Link,{className:'back-link',to:'/u/orders'},'返回我的订单')},React.createElement(Private))}),React.createElement(Route,{path:'/u/orders/:id/contact',element:React.createElement(Contact)}),React.createElement(Route,{path:'/u/order-link',element:React.createElement(OrderLinkPage)}),React.createElement(Route,{path:'/u/account/login',element:React.createElement(CustomerAuthForm,{mode:'login'})}),React.createElement(Route,{path:'/u/account/register',element:React.createElement(CustomerAuthForm,{mode:'register'})}),React.createElement(Route,{path:'/u/account/verify',element:React.createElement(CustomerAuthForm,{mode:'verify'})}),React.createElement(Route,{path:'/u/help',element:React.createElement(Help)}));}
  function Private(){f.privateMounted=true;const[preview,setPreview]=React.useState(false);return React.createElement('main',{className:'content-page'},React.createElement('h1',null,'订单 ABC12'),React.createElement('button',{className:'btn',onClick:()=>setPreview(true)},'查看私有 PDF'),preview&&React.createElement(Modal,{title:'最终 PDF',onClose:()=>setPreview(false)},React.createElement('p',null,'私有文件内容')));}
  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(${options.strict ? "React.StrictMode" : "React.Fragment"},null,React.createElement(MemoryRouter,{initialEntries:[${JSON.stringify(options.path || "/u/orders/o1")}]},React.createElement(App))));
  </script></html>`,
@@ -80,6 +81,48 @@ async function mount(
       : "";
   await page.goto("/guest-order-fixture" + incoming);
 }
+
+test("guest contact copy includes only the current link and switches after account binding", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async (text: string) => { (window as any).orderCopiedText = text; },
+      write: async ([item]: ClipboardItem[]) => {
+        (window as any).orderCopiedText = await (await item.getType("text/plain")).text();
+      },
+    } });
+  });
+  await page.route("**/api/v1/orders/o1/after-sales", (route) =>
+    route.fulfill({ json: { data: { items: [] }, requestId: "contact-copy-test" } }),
+  );
+  await mount(page, { copyOrder: true, registered: true, path: "/u/orders/o1/contact" });
+  const copy = page.getByRole("button", { name: "复制联系文案", exact: true });
+  const copied = () => page.evaluate(() => (window as any).orderCopiedText);
+  await copy.click();
+  const valid = "https://print.invalid/u/order-link?orderId=o1#token=" + "s".repeat(64);
+  await expect.poll(copied).toBe([
+    "订单提取码：ABC12", "本次应付：¥0.00", "微信昵称：验收同学",
+    "请联系管理员确认零元结算，无需转账", "", "游客订单", `订单访问链接：${valid}`,
+  ].join("\n"));
+
+  await page.getByRole("link", { name: "查看订单详情", exact: true }).click();
+  await copy.click();
+  await expect.poll(copied).toContain(`\n\n游客订单\n订单访问链接：${valid}`);
+
+  await page.evaluate(() => {
+    (window as any).guestFixture.guestAccessVersion = 2;
+  });
+  await copy.click();
+  await expect.poll(copied).toMatch(/\n\n游客订单\n请联系管理员获取订单访问链接$/);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByRole("button", { name: "复制专属链接" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "确认关联到我的订单" }).click();
+  await expect(page.getByRole("heading", { name: "账号订单", exact: true })).toBeVisible();
+  await copy.click();
+  expect((await copied()).split("\n\n")[1]).toBe([
+    "用户账号订单", "请登录账号查看订单详情", "网站访问链接：https://print.invalid/u/",
+  ].join("\n"));
+});
 
 test("server deadline ends an offline open page and closes its private preview", async ({
   page,

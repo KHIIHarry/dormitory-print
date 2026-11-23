@@ -3933,6 +3933,8 @@ export interface components {
             maxPages: number;
             /** Maxpixels */
             maxPixels: number;
+            /** Orderwebsiteurl */
+            orderWebsiteUrl: string;
             pauses: components["schemas"]["PauseConfig"];
             /** Phone */
             phone: string;
@@ -8848,6 +8850,8 @@ export interface components {
             maxPages: number;
             /** Maxpixels */
             maxPixels: number;
+            /** Orderwebsiteurl */
+            orderWebsiteUrl: string;
             pauses: components["schemas"]["PauseConfig"];
             /** Phone */
             phone: string;

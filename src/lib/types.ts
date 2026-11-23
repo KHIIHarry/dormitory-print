@@ -291,6 +291,7 @@ export type Config = {
   volumeDiscounts?: VolumePolicy;
   serviceEnabled: boolean;
   announcement: string;
+  orderWebsiteUrl?: string;
   prices: {
     bwSingle: number | null;
     bwDuplex: number | null;

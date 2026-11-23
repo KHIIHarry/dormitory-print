@@ -458,23 +458,44 @@ export function Field({
 }
 export function CopyButton({
   text,
+  prepareText,
   label = "复制",
   className = "",
   iconOnly = false,
+  disabled = false,
 }: {
   text: string;
+  prepareText?: () => Promise<string>;
   label?: string;
   className?: string;
   iconOnly?: boolean;
+  disabled?: boolean;
 }) {
   const { toast } = useStore();
-  const [manual, setManual] = useState(false);
+  const [manualText, setManualText] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const copy = async () => {
+    const prepared = prepareText?.().catch(() => text);
+    if (prepared) setPreparing(true);
     try {
-      await navigator.clipboard.writeText(text);
+      const clipboard = navigator.clipboard;
+      if (prepared && typeof ClipboardItem === "function" && clipboard?.write) {
+        // Safari requires starting the write within the original click gesture.
+        await clipboard.write([
+          new ClipboardItem({
+            "text/plain": prepared.then(
+              (value) => new Blob([value], { type: "text/plain" }),
+            ),
+          }),
+        ]);
+      } else {
+        await clipboard.writeText(prepared ? await prepared : text);
+      }
       toast("已复制到剪贴板");
     } catch {
-      setManual(true);
+      setManualText(prepared ? await prepared : text);
+    } finally {
+      if (prepared) setPreparing(false);
     }
   };
   return (
@@ -484,13 +505,18 @@ export function CopyButton({
         onClick={copy}
         title={label}
         aria-label={label}
+        disabled={disabled || preparing}
+        aria-busy={preparing || undefined}
       >
         <Copy size={16} />
         {!iconOnly && label !== "复制" && label}
       </button>
-      {manual && (
-        <Modal title="长按或选择下方文字复制" onClose={() => setManual(false)}>
-          <textarea readOnly value={text} onFocus={(e) => e.target.select()} />
+      {manualText !== null && (
+        <Modal
+          title="长按或选择下方文字复制"
+          onClose={() => setManualText(null)}
+        >
+          <textarea readOnly value={manualText} onFocus={(e) => e.target.select()} />
         </Modal>
       )}
     </>

@@ -66,6 +66,10 @@ def identification_default_website_url():
     return get_settings().public_origin.rstrip('/') + '/u/'
 
 
+def order_website_url(workflow):
+    return workflow['orderIdentificationWebsiteUrl'] or identification_default_website_url()
+
+
 def public_config(db):
     sections = {name:get_config(db,name) for name in ('prices','services','photo','contact','announcement','workflow','map')}
     result = {}
@@ -76,6 +80,7 @@ def public_config(db):
     result['version'] = max(row.version for row in sections.values())
     workflow = section_data('workflow', sections['workflow'])
     result.update({'quoteMinutes':15,'unpaidTimeoutMinutes':workflow.get('unpaidTimeoutMinutes'),
+                   'orderWebsiteUrl':order_website_url(workflow),
                    'pauses':workflow.get('pauses',{}),'bindingApproved':True,
                    'locationMaxAgeSeconds':workflow.get('locationMaxAgeSeconds',300),
                    'locationMaxAccuracyMeters':workflow.get('locationMaxAccuracyMeters',100)})
@@ -247,6 +252,7 @@ class PublicConfigView(DTO):
     version:int
     quote_minutes:int
     unpaid_timeout_minutes:int|None
+    order_website_url:str
     pauses:PauseConfig
     features:ConfigFeatures
     decisions:dict[str,str]

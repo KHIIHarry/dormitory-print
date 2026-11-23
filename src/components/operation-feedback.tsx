@@ -71,8 +71,8 @@ export function OperationFeedback({
         </Notice>
       ) : (
         <div className="feedback-toast" role="status" data-tone={toast?.tone}>
-          <span aria-hidden="true" />
-          {toast?.message}
+          <span className="feedback-toast-dot" aria-hidden="true" />
+          <span className="feedback-toast-message">{toast?.message}</span>
         </div>
       )}
     </div>,

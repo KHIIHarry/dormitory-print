@@ -310,6 +310,10 @@
             "title": "Maxpixels",
             "type": "integer"
           },
+          "orderWebsiteUrl": {
+            "title": "Orderwebsiteurl",
+            "type": "string"
+          },
           "pauses": {
             "$ref": "#/components/schemas/PauseConfig"
           },
@@ -420,6 +424,7 @@
           "version",
           "quoteMinutes",
           "unpaidTimeoutMinutes",
+          "orderWebsiteUrl",
           "pauses",
           "features",
           "decisions"
@@ -14352,6 +14357,10 @@
             "title": "Maxpixels",
             "type": "integer"
           },
+          "orderWebsiteUrl": {
+            "title": "Orderwebsiteurl",
+            "type": "string"
+          },
           "pauses": {
             "$ref": "#/components/schemas/PauseConfig"
           },
@@ -14452,6 +14461,7 @@
           "version",
           "quoteMinutes",
           "unpaidTimeoutMinutes",
+          "orderWebsiteUrl",
           "pauses",
           "features",
           "decisions"

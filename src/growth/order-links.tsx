@@ -2,8 +2,14 @@ import { Button, CopyButton, Notice, Panel } from "../components/ui";
 import { LinkQrButton } from "../components/link-qr";
 import { useStore } from "../lib/store";
 import { useIdentity } from "./identity";
-export function CustomerSavedLink({ orderId }: { orderId: string }) {
-  const { savedAccessLinks, toast, data } = useStore();
+export function CustomerSavedLink({
+  orderId,
+  link,
+}: {
+  orderId: string;
+  link?: string;
+}) {
+  const { toast, data } = useStore();
   const order = data.orders.find((item) => item.id === orderId);
   const { customer } = useIdentity();
   if (
@@ -15,14 +21,13 @@ export function CustomerSavedLink({ orderId }: { orderId: string }) {
         <p>可在「我的订单」长期查看订单记录。</p>
       </Panel>
     );
-  const link = savedAccessLinks[orderId];
   return (
     <Panel title="保存订单访问方式">
       {link ? (
         <>
           <Notice>
             游客订单链接默认有效 14
-            天。链接和二维码包含本单只读访问权限，请私下保存。
+            天。链接和二维码可查看本单，请私下保存或发送。
           </Notice>
           <div className="button-row">
             <CopyButton text={link} label="复制专属链接" />

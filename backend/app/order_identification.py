@@ -12,7 +12,7 @@ from PIL import Image, ImageOps
 from sqlalchemy import select
 
 from . import pdf_engine
-from .config import get_config, identification_default_website_url, section_data
+from .config import get_config, order_website_url, section_data
 from .core import DomainError, enqueue_job
 from .media import IDENTIFICATION_PURPOSE, IDENTIFICATION_QR_PURPOSE, _artifact_key, _expiry_for, _root, _storage_path
 from .models import Artifact, Asset, Job, Order, OrderFile, PrintTask
@@ -246,7 +246,7 @@ def queue_identification(db, order):
     if config['orderIdentificationEnabled']:
         enqueue_job(db, JOB_KIND, order.id, f'order-identification:{order.id}', {
             'contentRevision': order.content_revision,
-            'website': config['orderIdentificationWebsiteUrl'] or identification_default_website_url(),
+            'website': order_website_url(config),
         })
 
 

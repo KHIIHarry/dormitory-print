@@ -8,7 +8,14 @@ import { CustomerSupplementaryPanel } from "../v1/supplementary";
 import { useIdentity } from "../growth/identity";
 import { canOrderAction, effectiveOrderAccess } from "../growth/order-security";
 import { CustomerSavedLink } from "../growth/order-links";
-import { GuestOrderBoundary } from "./guest-order-access";
+import { GuestOrderBoundary, useGuestOrderLink } from "./guest-order-access";
+import {
+  guestAccessPath,
+  originalGuestAccessVersion,
+  ownsAccountOrder,
+  type CustomerGuestAccess,
+} from "./guest-order-policy";
+import { growthRequest } from "../growth/client";
 import { DocPreview } from "../components/doc-preview";
 import type { PrintFile } from "../lib/types";
 import { useEffect, useState } from "react";
@@ -80,8 +87,65 @@ function displayOrderStatus(order: Order) {
     ? "PRINTING"
     : order.status;
 }
-function orderContactMessage(order: Order) {
-  return `提取码 ${order.pickupCode}，${order.totalCents === 0 ? "本单优惠后应付¥0.00，请人工确认零元结算，无需转账" : `本次应付 ${money(order.totalCents)}，请核对线下付款`}，微信昵称 ${order.nickname}`;
+function OrderContactCopy({
+  order,
+  guestLink,
+}: {
+  order: Order;
+  guestLink?: string;
+}) {
+  const { data, resources } = useStore();
+  const { customer } = useIdentity();
+  const accountOrder =
+    order.accessKind === "OWNER" || ownsAccountOrder(order, customer);
+  const config = resources.config;
+  const orderLines = [
+    `订单提取码：${order.pickupCode}`,
+    `本次应付：${money(order.totalCents)}`,
+    `微信昵称：${order.nickname.replace(/[\r\n\u2028\u2029]+/g, " ").trim()}`,
+    order.totalCents === 0
+      ? "请联系管理员确认零元结算，无需转账"
+      : "请核对线下付款",
+    "",
+  ];
+  const guestMessage = (link?: string) =>
+    [
+      ...orderLines,
+      "游客订单",
+      link ? `订单访问链接：${link}` : "请联系管理员获取订单访问链接",
+    ].join("\n");
+  const text = accountOrder
+    ? [
+        ...orderLines,
+        "用户账号订单",
+        "请登录账号查看订单详情",
+        `网站访问链接：${data.config.orderWebsiteUrl || new URL("/u/", window.location.origin).href}`,
+      ].join("\n")
+    : guestMessage();
+  const prepareGuestMessage =
+    !accountOrder && guestLink
+      ? async () => {
+          const access = await growthRequest<CustomerGuestAccess>(
+            guestAccessPath(order.id),
+          );
+          const valid =
+            access.status === "ACTIVE" &&
+            access.version === originalGuestAccessVersion &&
+            !!access.expiresAt &&
+            Date.parse(access.expiresAt) > Date.parse(access.serverNow);
+          return guestMessage(valid ? guestLink : undefined);
+        }
+      : undefined;
+  return (
+    <CopyButton
+      key={accountOrder ? "account" : guestLink ? "guest-link" : "guest"}
+      text={text}
+      prepareText={prepareGuestMessage}
+      label="复制联系文案"
+      iconOnly
+      disabled={accountOrder && !DEMO && !config?.hasData && !config?.error}
+    />
+  );
 }
 
 export function OrderList() {
@@ -245,6 +309,7 @@ function ContactContent() {
     setEditingOrderId,
     setCheckoutMemory,
   } = useStore();
+  const guestLink = useGuestOrderLink();
   useEffect(() => {
     setDraft([]);
     setEditingOrderId(null);
@@ -262,7 +327,6 @@ function ContactContent() {
         />
       </main>
     );
-  const text = orderContactMessage(order);
   return (
     <main className="contact-page">
       <div className="success-heading">
@@ -293,7 +357,7 @@ function ContactContent() {
           <p>你的订单提取码</p>
           <div className="pickup-code">
             <span>{order.pickupCode}</span>
-            <CopyButton text={text} label="复制联系文案" iconOnly />
+            <OrderContactCopy order={order} guestLink={guestLink} />
           </div>
           <div className="contact-amount">
             本次应付<strong>{money(order.totalCents)}</strong>
@@ -349,7 +413,7 @@ function ContactContent() {
           )}
         </Panel>
       </div>
-      <CustomerSavedLink orderId={order.id} />
+      <CustomerSavedLink orderId={order.id} link={guestLink} />
       <div className="contact-actions">
         <LinkButton to={`/u/orders/${id}`}>
           查看订单详情
@@ -435,6 +499,7 @@ function OrderDetailContent() {
     pendingActions,
   } = useStore();
   const { orderAccess, customer } = useIdentity();
+  const guestLink = useGuestOrderLink();
   const [pdf, setPdf] = useState<PrintFile | null>(null);
   const [edit, setEdit] = useState(false);
   const [cancel, setCancel] = useState(false);
@@ -542,7 +607,7 @@ function OrderDetailContent() {
           <span>订单提取码</span>
           <strong>
             <span>{order.pickupCode}</span>
-            <CopyButton text={orderContactMessage(order)} label="复制联系文案" iconOnly />
+            <OrderContactCopy order={order} guestLink={guestLink} />
           </strong>
         </div>
       </div>
@@ -745,10 +810,9 @@ function OrderDetailContent() {
               </>
             )}
           </Panel>
-          <CustomerSavedLink orderId={order.id} />
+          <CustomerSavedLink orderId={order.id} link={guestLink} />
           <Notice>
-            如有疑问，请向管理员提供提取码 {order.pickupCode}
-            。不要发送订单专属访问链接。
+            如有疑问，请向管理员提供提取码 {order.pickupCode}。
           </Notice>
         </aside>
       </div>

@@ -2904,6 +2904,7 @@ def test_identification_pdf_uses_website_link_snapshotted_at_settlement(api, adm
     db.commit()
     section = api(admin_client, '/admin/config', method='GET').json()['data']['sections']['workflow']
     assert section['orderIdentificationDefaultWebsiteUrl'] == identification_default_website_url()
+    assert api(admin_client, '/public/config', method='GET').json()['data']['orderWebsiteUrl'] == identification_default_website_url()
     assert 'orderIdentificationQrUrl' not in section
     for invalid in ('javascript:alert(1)', 'https://user:pass@example.test/', 'https://example.test/a b',
                     'https:///example.test/', 'https://example.test/' + '页' * 90):
@@ -2918,6 +2919,7 @@ def test_identification_pdf_uses_website_link_snapshotted_at_settlement(api, adm
     }, method='PATCH')
     assert saved.status_code == 200, saved.text
     assert saved.json()['data']['orderIdentificationWebsiteUrl'] == url
+    assert api(admin_client, '/public/config', method='GET').json()['data']['orderWebsiteUrl'] == url
     _settle_real(api, admin_client, order)
     job = db.query(Job).filter_by(kind='ORDER_IDENTIFICATION', target_id=order.id).one()
     assert job.data['website'] == url
@@ -2927,6 +2929,7 @@ def test_identification_pdf_uses_website_link_snapshotted_at_settlement(api, adm
         'orderIdentificationWebsiteUrl': '',
     }, method='PATCH')
     assert cleared.status_code == 200, cleared.text
+    assert api(admin_client, '/public/config', method='GET').json()['data']['orderWebsiteUrl'] == identification_default_website_url()
     assert run_one(('ORDER_IDENTIFICATION',)) is True
     queue = api(admin_client, f'/admin/print-tasks?orderId={order.id}', method='GET').json()['data']
     sheet = queue['tasks'][0]
