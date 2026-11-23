@@ -266,6 +266,21 @@ def unread_notifications(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
     return ok({'unreadCount': _unread_count(db, actor)})
 
 
+@router.post('/read-all', response_model=Envelope[NotificationUnread])
+def read_all_notifications(db=Depends(get_db), actor: Actor = Depends(actor_dep)):
+    require_admin(actor)
+    visible = _visible_events(actor)
+    if visible is not None:
+        events = visible.subquery()
+        unread = select(literal(actor.staff_id), events.c.id, literal(utcnow())).where(
+            events.c.read.is_(False),
+        ).order_by(events.c.id)
+        db.execute(insert(NotificationRead).from_select(
+            ['staff_id', 'notification_id', 'read_at'], unread,
+        ).on_conflict_do_nothing())
+    return ok({'unreadCount': _unread_count(db, actor)})
+
+
 @router.post('/{notification_id}/read', response_model=Envelope[NotificationUnread])
 def read_notification(
     notification_id: Annotated[str, Path(min_length=1, max_length=160)],

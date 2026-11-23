@@ -67,6 +67,7 @@ test("notification bell, read order, five filters and exact exception link", asy
     },
   ];
   let unreadCount = 10;
+  let unreadLookupUnavailable = false;
   const writes: string[] = [];
   const filters: string[] = [];
   const orderDetails: string[] = [];
@@ -84,7 +85,13 @@ test("notification bell, read order, five filters and exact exception link", asy
       };
     else if (path === "/customer/auth/me" || path === "/customer/session")
       result = { role: "CUSTOMER", authKind: "ANONYMOUS" };
-    else if (path === "/admin/notifications/unread") result = { unreadCount };
+    else if (path === "/admin/notifications/unread") {
+      if (unreadLookupUnavailable) {
+        await route.fulfill({ status: 503 });
+        return;
+      }
+      result = { unreadCount };
+    }
     else if (path === "/admin/notifications") {
       const filter = url.searchParams.get("filter") || "ALL";
       filters.push(filter);
@@ -102,6 +109,11 @@ test("notification bell, read order, five filters and exact exception link", asy
         page: 1,
         pageSize: 20,
       };
+    } else if (path === "/admin/notifications/read-all") {
+      writes.push("read-all");
+      for (const item of items) item.read = true;
+      unreadCount = 0;
+      result = { unreadCount };
     } else if (path.endsWith("/read")) {
       const id = decodeURIComponent(path.split("/")[3]);
       const item = items.find((item) => item.id === id)!;
@@ -154,6 +166,12 @@ test("notification bell, read order, five filters and exact exception link", asy
   const unreadRow = row.first();
   const readRow = row.last();
   const mark = unreadRow.getByRole("button", { name: /定位例外待审批/ });
+  const title = unreadRow.getByRole("heading", { name: "定位例外待审批" });
+  const readAll = page.getByRole("button", { name: "一键已读" });
+  const refresh = page.getByRole("button", { name: "刷新通知" });
+  await expect(readAll).toBeEnabled();
+  await expect(refresh).toHaveText("");
+  await expect(title.locator("button")).toHaveCount(0);
   await expect(unreadRow).toContainText("定位例外待审批");
   await expect(readRow).toHaveAttribute("data-read", "true");
   const readBackground = await readRow.evaluate(
@@ -168,7 +186,7 @@ test("notification bell, read order, five filters and exact exception link", asy
     await titleWeight(readRow),
   );
   expect(
-    await mark.evaluate(
+    await title.evaluate(
       (element) => getComputedStyle(element, "::before").content,
     ),
   ).toBe('""');
@@ -184,12 +202,36 @@ test("notification bell, read order, five filters and exact exception link", asy
       elements.map((element) => element.scrollWidth - element.clientWidth),
     );
     for (const overflow of rowWidths) expect(overflow).toBeLessThanOrEqual(1);
-    const titleLines = await mark.evaluate((element) => {
+    const titleLines = await title.evaluate((element) => {
       const range = document.createRange();
       range.selectNodeContents(element);
       return range.getClientRects().length;
     });
     expect(titleLines).toBe(1);
+    await expect(readAll).toHaveCSS("font-size", "15px");
+    const labelOffset = await readAll.evaluate((element) => {
+      const button = element.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const label = range.getBoundingClientRect();
+      return {
+        x: Math.abs(
+          label.left + label.width / 2 - (button.left + button.width / 2),
+        ),
+        y: Math.abs(
+          label.top + label.height / 2 - (button.top + button.height / 2),
+        ),
+      };
+    });
+    expect(labelOffset.x).toBeLessThanOrEqual(1);
+    expect(labelOffset.y).toBeLessThanOrEqual(2);
+    const allBox = (await readAll.boundingBox())!;
+    const refreshBox = (await refresh.boundingBox())!;
+    expect(allBox.x + allBox.width).toBeLessThan(refreshBox.x);
+    expect(allBox.height).toBeGreaterThanOrEqual(44);
+    expect(allBox.height).toBe(refreshBox.height);
+    expect(refreshBox.height).toBeGreaterThanOrEqual(44);
+    expect(refreshBox.width).toBe(refreshBox.height);
     expect((await bell.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     for (const control of await page
       .locator(
@@ -204,18 +246,19 @@ test("notification bell, read order, five filters and exact exception link", asy
       });
   }
 
-  await mark.click();
-  await expect(unreadRow).toHaveAttribute("data-read", "true");
-  await expect(unreadRow).toHaveCSS("background-color", readBackground);
-  await expect(mark).toHaveCount(0);
-  await expect(unreadRow).toContainText("待处理");
+  const schedule = row.filter({ hasText: "配送计划已变更" });
+  await schedule.click({ position: { x: 16, y: 20 } });
+  await expect(schedule).toHaveAttribute("data-read", "true");
+  await expect(schedule).toHaveCSS("background-color", readBackground);
+  await expect(schedule.getByRole("button")).toHaveCount(0);
+  await expect(mark).toBeVisible();
   await expect(
     page.getByRole("link", { name: /通知中心.*9 条未读/ }),
   ).toHaveText("9");
-  expect(writes).toEqual(["exception-1"]);
+  expect(writes).toEqual(["schedule-1"]);
   await expect(page).toHaveURL(/\/manage\/notifications$/);
   await page.getByRole("button", { name: "刷新通知" }).click();
-  await expect(row.first()).toContainText("配送计划已变更");
+  await expect(row.first()).toContainText("定位例外待审批");
   await page.getByRole("button", { name: "未读", exact: true }).click();
   await expect(row).toHaveCount(1);
   await page.getByRole("button", { name: "已读", exact: true }).click();
@@ -235,6 +278,10 @@ test("notification bell, read order, five filters and exact exception link", asy
   );
   await expect(page.getByText("设备无法定位，需要审批")).toBeVisible();
   await expect(page.getByText("另一条配送异常")).toHaveCount(0);
+  await expect.poll(() => writes).toEqual(["schedule-1", "exception-1"]);
+  await expect(
+    page.getByRole("link", { name: /通知中心.*8 条未读/ }),
+  ).toHaveText("8");
   await page.getByRole("link", { name: /通知中心/ }).click();
   await page.getByRole("button", { name: "已处理", exact: true }).click();
   await row.getByRole("link", { name: "查看详情", exact: true }).click();
@@ -242,4 +289,19 @@ test("notification bell, read order, five filters and exact exception link", asy
     page.getByRole("heading", { name: `订单 ${data.orders[0].pickupCode}` }),
   ).toBeVisible();
   expect(orderDetails).toContain(`/admin/orders/${data.orders[0].id}`);
+  expect(writes).toEqual(["schedule-1", "exception-1"]);
+  await page.getByRole("link", { name: /通知中心/ }).click();
+  unreadLookupUnavailable = true;
+  await readAll.click();
+  await expect(
+    page.getByRole("link", { name: "通知中心", exact: true }),
+  ).toHaveText("");
+  await expect(readAll).toBeDisabled();
+  expect(writes).toEqual(["schedule-1", "exception-1", "read-all"]);
+  await page.getByRole("button", { name: "未读", exact: true }).click();
+  await expect(page.getByText("没有未读通知")).toBeVisible();
+  await page.getByRole("button", { name: "未处理", exact: true }).click();
+  await expect(row).toHaveCount(1);
+  await expect(row.first()).toHaveAttribute("data-read", "true");
+  await expect(row.first()).toContainText("待处理");
 });

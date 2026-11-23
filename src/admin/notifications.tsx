@@ -31,9 +31,11 @@ import { useIdentity } from "../growth/identity";
 import { ADMIN, DEMO } from "../lib/api";
 import type { components } from "../lib/api-schema";
 import { formatDisplayTime } from "../lib/display-format";
+import { useStore } from "../lib/store";
 import {
   notificationsEndpoint,
   unreadNotificationsKey,
+  useUnreadNotifications,
   type UnreadNotifications,
 } from "./notification-unread";
 
@@ -88,13 +90,18 @@ function NotificationInbox({
     page: 1,
   });
   const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
-  const [pendingId, setPendingId] = useState("");
-  const [issue, setIssue] = useState<{ id: string; message: string } | null>(
-    null,
-  );
-  const activeRead = useRef(false);
+  const activeReads = useRef(new Set<string>());
+  const readSequence = useRef(0);
+  const latestConfirmedRead = useRef(0);
+  const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
+  const [issue, setIssue] = useState<{
+    id: string | null;
+    message: string;
+  } | null>(null);
   const queryClient = useQueryClient();
+  const { toast } = useStore();
   const unreadKey = unreadNotificationsKey(generation, staffId);
+  const unread = useUnreadNotifications(generation, staffId, !!staffId);
   const { data, error, loading, refreshing, reload } =
     useGrowthResource<NotificationPage>(
       DEMO
@@ -114,34 +121,53 @@ function NotificationInbox({
     await reload();
     await queryClient.invalidateQueries({ queryKey: unreadKey, exact: true });
   };
-  const markRead = async (notification: Notification) => {
-    if (activeRead.current) return;
-    activeRead.current = true;
+  const markRead = async (
+    id: string | null,
+    showErrorAfterNavigation = false,
+  ) => {
+    const action = id ? `${encodeURIComponent(id)}/read` : "read-all";
+    if (
+      activeReads.current.has(action) ||
+      (!id && activeReads.current.size > 0)
+    )
+      return;
+    activeReads.current.add(action);
+    setPending(new Set(activeReads.current));
     setIssue(null);
-    setPendingId(notification.id);
     const requestGeneration = getIdentityGeneration();
+    const sequence = ++readSequence.current;
     try {
       const result = await growthRequest<UnreadNotifications>(
-        `${notificationsEndpoint}/${encodeURIComponent(notification.id)}/read`,
+        `${notificationsEndpoint}/${action}`,
         { method: "POST" },
       );
       await queryClient.cancelQueries({ queryKey: unreadKey, exact: true });
       if (getIdentityGeneration() !== requestGeneration) return;
-      queryClient.setQueryData(unreadKey, result);
-      setSeen((previous) => new Set(previous).add(notification.id));
-      if (position.filter === "UNREAD") await reload();
+      if (sequence > latestConfirmedRead.current) {
+        latestConfirmedRead.current = sequence;
+        queryClient.setQueryData(unreadKey, result);
+      }
+      const readIds = id ? [id] : (data?.items ?? []).map((item) => item.id);
+      setSeen((previous) => new Set([...previous, ...readIds]));
+      const updateUnread = queryClient.invalidateQueries({
+        queryKey: unreadKey,
+        exact: true,
+      });
+      if (!id || position.filter === "UNREAD")
+        await Promise.all([updateUnread, reload()]);
+      else await updateUnread;
     } catch (cause) {
-      if (getIdentityGeneration() === requestGeneration)
-        setIssue({
-          id: notification.id,
-          message:
-            cause instanceof Error ? cause.message : "标记已读失败，请重试",
-        });
+      if (getIdentityGeneration() !== requestGeneration) return;
+      const message =
+        cause instanceof Error ? cause.message : "标记已读失败，请重试";
+      if (showErrorAfterNavigation) toast(message, "warning");
+      else setIssue({ id, message });
     } finally {
-      activeRead.current = false;
-      setPendingId("");
+      activeReads.current.delete(action);
+      setPending(new Set(activeReads.current));
     }
   };
+  const unreadCount = unread.data?.unreadCount ?? data?.unreadCount ?? 0;
   const rows = (data?.items ?? []).filter(
     (item) => position.filter !== "UNREAD" || !seen.has(item.id),
   );
@@ -152,16 +178,30 @@ function NotificationInbox({
         title="通知中心"
         action={
           !DEMO && (
-            <Button
-              variant="secondary"
-              className="notification-refresh"
-              busy={refreshing}
-              disabled={loading || !!pendingId}
-              onClick={() => void refresh()}
-            >
-              <RefreshCw size={16} aria-hidden="true" />
-              刷新通知
-            </Button>
+            <div className="notification-actions">
+              <Button
+                variant="secondary"
+                className="notification-read-all"
+                busy={pending.has("read-all")}
+                disabled={
+                  loading || refreshing || pending.size > 0 || unreadCount === 0
+                }
+                onClick={() => void markRead(null)}
+              >
+                一键已读
+              </Button>
+              <Button
+                variant="secondary"
+                className="notification-refresh"
+                aria-label="刷新通知"
+                title="刷新通知"
+                busy={refreshing}
+                disabled={loading || pending.size > 0}
+                onClick={() => void refresh()}
+              >
+                <RefreshCw size={18} aria-hidden="true" />
+              </Button>
+            </div>
           )
         }
       />
@@ -175,7 +215,7 @@ function NotificationInbox({
             <button
               key={key}
               type="button"
-              disabled={!!pendingId}
+              disabled={pending.size > 0}
               aria-pressed={position.filter === key}
               onClick={() => {
                 setIssue(null);
@@ -187,6 +227,11 @@ function NotificationInbox({
           ))}
         </div>
         {loading && <Loading label="正在读取通知" />}
+        {issue?.id === null && (
+          <Notice type="error">
+            <span role="alert">{issue.message}</span>
+          </Notice>
+        )}
         {error &&
           (data ? (
             <Notice type="error">
@@ -210,30 +255,26 @@ function NotificationInbox({
         <ul className="notification-list" aria-label="通知列表">
           {rows.map((item) => {
             const read = item.read || seen.has(item.id);
+            const marking = pending.has(`${encodeURIComponent(item.id)}/read`);
             const { icon: Icon, path } = destinations[item.kind];
             return (
               <li key={item.id} className="notification-row" data-read={read}>
+                {!read && (
+                  <button
+                    type="button"
+                    className="notification-mark"
+                    aria-label={`标记「${item.title}」为已读`}
+                    aria-busy={marking}
+                    disabled={marking || pending.has("read-all")}
+                    onClick={() => void markRead(item.id)}
+                  />
+                )}
                 <span className="notification-kind-icon">
                   <Icon size={20} aria-hidden="true" />
                 </span>
                 <div className="notification-content">
                   <div className="notification-summary">
-                    <h2>
-                      {read ? (
-                        item.title
-                      ) : (
-                        <button
-                          type="button"
-                          className="notification-mark"
-                          aria-label={`标记「${item.title}」为已读`}
-                          aria-busy={pendingId === item.id}
-                          disabled={!!pendingId}
-                          onClick={() => void markRead(item)}
-                        >
-                          {item.title}
-                        </button>
-                      )}
-                    </h2>
+                    <h2>{item.title}</h2>
                     <span className="notification-read-state">
                       {read ? "已读" : "未读"}
                     </span>
@@ -261,6 +302,13 @@ function NotificationInbox({
                 <Link
                   className="notification-detail"
                   to={`${ADMIN}/${path}${encodeURIComponent(item.targetId)}`}
+                  onClick={() => {
+                    if (!read) void markRead(item.id, true);
+                  }}
+                  onAuxClick={(event) => {
+                    if (event.button === 1 && !read)
+                      void markRead(item.id, true);
+                  }}
                 >
                   查看详情
                   <ChevronRight size={15} aria-hidden="true" />
@@ -275,7 +323,7 @@ function NotificationInbox({
               type="button"
               className="icon-btn"
               aria-label="上一页"
-              disabled={loading || !!pendingId || position.page <= 1}
+              disabled={loading || pending.size > 0 || position.page <= 1}
               onClick={() =>
                 setPosition((current) => ({
                   ...current,
@@ -292,7 +340,9 @@ function NotificationInbox({
               type="button"
               className="icon-btn"
               aria-label="下一页"
-              disabled={loading || !!pendingId || position.page >= pageCount}
+              disabled={
+                loading || pending.size > 0 || position.page >= pageCount
+              }
               onClick={() =>
                 setPosition((current) => ({
                   ...current,

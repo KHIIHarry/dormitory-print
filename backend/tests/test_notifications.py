@@ -94,6 +94,33 @@ def test_capabilities_limit_list_badge_and_read_target(db, account_factory, sign
     assert api(payment, path, {}).status_code == 404
 
 
+def test_read_all_covers_every_page_without_changing_other_staff_or_tasks(
+        db, account_factory, sign_in, api):
+    first, _ = sign_in(['payment.manage'])
+    second, _ = sign_in(['payment.manage'])
+    courier, _ = sign_in([], 'COURIER')
+    principal_id = account_factory().principal_id
+    make_order(db, principal_id)
+    make_order(db, principal_id)
+    db.commit()
+
+    path = f'{CENTER}/read-all'
+    assert api(courier, path, {}).status_code == 403
+    assert data(first, filter='UNREAD', pageSize=1)['total'] == 2
+    for _ in range(2):
+        response = api(first, path, {})
+        assert response.status_code == 200, response.text
+        assert response.json()['data'] == {'unreadCount': 0}
+    assert data(first, filter='UNREAD')['items'] == []
+    pending = data(first, filter='PENDING')['items']
+    assert len(pending) == 2 and all(item['read'] for item in pending)
+    assert data(second, '/unread') == {'unreadCount': 2}
+
+    make_order(db, principal_id)
+    db.commit()
+    assert data(first, '/unread') == {'unreadCount': 1}
+
+
 def test_paginating_all_keeps_unread_first_across_pages(db, account_factory, sign_in, api):
     client, _ = sign_in(['payment.manage'])
     principal_id = account_factory().principal_id

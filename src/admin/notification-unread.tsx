@@ -14,11 +14,13 @@ export function unreadNotificationsKey(generation: number, staffId?: string) {
   return ["admin-notification-unread", generation, staffId] as const;
 }
 
-export function AdminNotificationBell() {
-  const { generation, staff } = useIdentity();
-  const allowed = staff?.role === "ADMIN" && !staff.mustChangePassword;
-  const unread = useQuery({
-    queryKey: unreadNotificationsKey(generation, staff?.id),
+export function useUnreadNotifications(
+  generation: number,
+  staffId: string | undefined,
+  allowed: boolean,
+) {
+  return useQuery({
+    queryKey: unreadNotificationsKey(generation, staffId),
     queryFn: ({ signal }) =>
       growthRequest<UnreadNotifications>(`${notificationsEndpoint}/unread`, {
         signal,
@@ -27,6 +29,12 @@ export function AdminNotificationBell() {
     refetchInterval: 30_000,
     retry: false,
   });
+}
+
+export function AdminNotificationBell() {
+  const { generation, staff } = useIdentity();
+  const allowed = staff?.role === "ADMIN" && !staff.mustChangePassword;
+  const unread = useUnreadNotifications(generation, staff?.id, allowed);
   if (!allowed) return null;
   const count = unread.data?.unreadCount ?? 0;
   return (

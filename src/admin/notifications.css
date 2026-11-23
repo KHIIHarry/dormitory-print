@@ -56,6 +56,7 @@
   list-style: none;
 }
 .notification-row {
+  position: relative;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 12px;
@@ -102,21 +103,12 @@
   line-height: 1.45;
 }
 .notification-row[data-read="false"] .notification-summary h2 {
+  position: relative;
+  padding-inline-start: 16px;
   color: #35271d;
   font-weight: 700;
 }
-.notification-mark {
-  position: relative;
-  display: block;
-  max-width: 100%;
-  min-height: 44px;
-  padding: 0;
-  padding-inline-start: 16px;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-}
-.notification-mark::before {
+.notification-row[data-read="false"] .notification-summary h2::before {
   position: absolute;
   inset-inline-start: 0;
   inset-block-start: calc(50% - 4px);
@@ -126,8 +118,15 @@
   background: #9e512d;
   content: "";
 }
-.notification-mark:hover:not(:disabled) {
-  text-decoration: underline;
+.notification-mark {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+}
+.notification-mark:focus-visible {
+  outline: 2px solid #9e512d;
+  outline-offset: -2px;
 }
 .notification-mark[aria-busy="true"] {
   cursor: progress;
@@ -166,6 +165,8 @@
   font-variant-numeric: tabular-nums;
 }
 .notification-detail {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -188,13 +189,26 @@
   border-top: 1px solid #eee8e2;
   font-variant-numeric: tabular-nums;
 }
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
 .notification-pagination .icon-btn,
-.admin-content .page-heading > .notification-refresh {
+.notification-actions .btn {
   min-width: 44px;
   min-height: 44px;
 }
-.admin-content .page-heading > .notification-refresh {
-  font-size: 13px;
+.page-heading .notification-actions > .btn.notification-read-all {
+  padding: 8px 16px;
+  font-size: 15px;
+  line-height: 20px;
+}
+.notification-actions .notification-refresh {
+  width: 44px;
+  height: 44px;
+  padding: 0;
 }
 .notification-error {
   margin: 6px 0 0;
