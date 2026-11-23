@@ -1584,6 +1584,7 @@ def create_reprint(
 @router.get('/admin/binding-tasks', response_model=Envelope[BindingQueueDTO])
 def list_binding_tasks(
     order_id: Annotated[str | None, Query(alias='orderId')] = None,
+    task_id: Annotated[str | None, Query(alias='taskId')] = None,
     db=Depends(get_db),
     actor: Actor = Depends(actor_dep),
 ):
@@ -1591,16 +1592,19 @@ def list_binding_tasks(
     query = select(BindingTask, Order).join(Order, Order.id == BindingTask.order_id).order_by(BindingTask.created_at, BindingTask.id)
     if order_id:
         query = query.where(BindingTask.order_id == order_id)
+    if task_id:
+        query = query.where(BindingTask.id == task_id)
     tasks = []
     for task, order in db.execute(query):
         if order.deleted_at:
             continue
         file = db.get(OrderFile, task.file_id)
-        if not _file_is_current(file, order) or file.binding_type == 'NONE':
+        in_queue = (_file_is_current(file, order) and file.binding_type != 'NONE'
+                    and order.status not in ('CANCELLED',) + POST_DELIVERY_STATUSES)
+        if not in_queue and not task_id:
             continue
-        if order.status in ('CANCELLED',) + POST_DELIVERY_STATUSES:
-            continue
-        tasks.append(_binding_dto(db, task, actor, order))
+        view = _binding_dto(db, task, actor, order)
+        tasks.append(view.model_copy(update={'read_only': not in_queue}))
     return ok(BindingQueueDTO(tasks=tasks))
 
 

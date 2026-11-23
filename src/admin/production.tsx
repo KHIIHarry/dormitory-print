@@ -1918,10 +1918,25 @@ const bindingPrintLabels: Record<string, string> = {
 
 function ServerBindingCenter() {
   const { data: storeData, refresh } = useStore();
-  const queue = useRemote<{ tasks: BindingTaskView[] }>("/admin/binding-tasks");
+  const [params] = useSearchParams();
+  const taskId = params.get("task");
+  const queue = useRemote<{ tasks: BindingTaskView[] }>(
+    taskId
+      ? `/admin/binding-tasks?taskId=${encodeURIComponent(taskId)}`
+      : "/admin/binding-tasks",
+  );
   const [busyId, setBusyId] = useState("");
   const [campus, setCampus] = useState("");
   const [issue, setIssue] = useState("");
+  const tasks = (queue.data?.tasks ?? []).filter((task) => {
+    if (taskId) return task.id === taskId;
+    if (!campus) return true;
+    const order = storeData.orders.find((row) => row.id === task.orderId);
+    return (
+      campusOfOrder(storeData.campuses, storeData.buildings, order)?.id ===
+      campus
+    );
+  });
   const complete = async (task: BindingTaskView) => {
     setBusyId(task.id);
     setIssue("");
@@ -1929,10 +1944,13 @@ function ServerBindingCenter() {
       const order = await growthRequest<{ version: number }>(
         `/admin/orders/${encodeURIComponent(task.orderId)}`,
       );
-      await growthRequest(`/admin/binding-tasks/${encodeURIComponent(task.id)}/complete`, {
-        method: "POST",
-        body: { expectedVersion: order.version },
-      });
+      await growthRequest(
+        `/admin/binding-tasks/${encodeURIComponent(task.id)}/complete`,
+        {
+          method: "POST",
+          body: { expectedVersion: order.version },
+        },
+      );
       await refresh();
       queue.reload();
     } catch (cause) {
@@ -1946,8 +1964,15 @@ function ServerBindingCenter() {
       <PageHeading
         title="装订中心"
         description="按完整册装订，不同文件不合册；全部有效打印完成后才能确认。"
+        action={
+          taskId && (
+            <Link className="btn secondary" to={`${ADMIN}/binding`}>
+              查看装订队列
+            </Link>
+          )
+        }
       />
-      {!!(storeData.campuses?.length ?? 0) && (
+      {!taskId && !!(storeData.campuses?.length ?? 0) && (
         <Panel className="filter-panel">
           <div className="filter-row">
             <CampusFilter
@@ -1966,87 +1991,72 @@ function ServerBindingCenter() {
       <ServerQueueState
         loading={queue.loading}
         error={queue.error}
-        empty={
-          !queue.loading &&
-          !queue.error &&
-          !(queue.data?.tasks || []).some((task) => {
-            if (!campus) return true;
-            const order = storeData.orders.find(
-              (row) => row.id === task.orderId,
-            );
-            return (
-              campusOfOrder(storeData.campuses, storeData.buildings, order)
-                ?.id === campus
-            );
-          })
-        }
+        empty={!queue.loading && !queue.error && tasks.length === 0}
         reload={queue.reload}
       />
       <div className="production-list">
-        {queue.data?.tasks
-          .filter((task) => {
-            if (!campus) return true;
-            const order = storeData.orders.find(
-              (row) => row.id === task.orderId,
-            );
-            return (
-              campusOfOrder(storeData.campuses, storeData.buildings, order)
-                ?.id === campus
-            );
-          })
-          .map((task) => {
-            const order = storeData.orders.find(
-              (row) => row.id === task.orderId,
-            );
-            const taskCampus = campusOfOrder(
-              storeData.campuses,
-              storeData.buildings,
-              order,
-            );
-            return (
-          <Panel key={task.id}>
-            <div className="print-task-top">
-              <OrderPickupCode pickup={adminPickupOf(task)} href={`${ADMIN}/orders/${task.orderId}`} />
-              <strong className="production-file-name">
-                {task.fileName?.trim() || "文件名未记录"}
-              </strong>
-              <CampusTag campus={taskCampus} />
-              <Badge
-                status={
-                  task.status === "COMPLETED"
-                    ? "COMPLETED"
-                    : task.printStatus === "COMPLETED"
-                      ? "READY"
-                      : "BLOCKED"
-                }
-              />
-            </div>
-            <div className="binding-task-body">
-              <BindingCard
-                type={task.bindingType}
-                label={task.bindingType === "CORNER" ? "左上角单钉" : "左侧双钉"}
-                selected
-                onClick={() => {}}
-              />
-              <div>
-                <p>
-                  {bindingPrintLabels[task.printStatus] || "打印尚未完成"}
-                </p>
-                <small className="muted">
-                  同文件各分段份数必须一致；超过每册张数上限时由服务端拒绝。
-                </small>
+        {tasks.map((task) => {
+          const order = storeData.orders.find((row) => row.id === task.orderId);
+          const taskCampus = campusOfOrder(
+            storeData.campuses,
+            storeData.buildings,
+            order,
+          );
+          return (
+            <Panel key={task.id}>
+              <div className="print-task-top">
+                <OrderPickupCode
+                  pickup={adminPickupOf(task)}
+                  href={`${ADMIN}/orders/${task.orderId}`}
+                />
+                <strong className="production-file-name">
+                  {task.fileName?.trim() || "文件名未记录"}
+                </strong>
+                <CampusTag campus={taskCampus} />
+                <Badge
+                  status={
+                    task.status === "COMPLETED"
+                      ? "COMPLETED"
+                      : task.printStatus === "COMPLETED"
+                        ? "READY"
+                        : "BLOCKED"
+                  }
+                />
               </div>
-              <Button
-                busy={busyId === task.id}
-                disabled={task.printStatus !== "COMPLETED" || task.status === "COMPLETED"}
-                onClick={() => complete(task)}
-              >
-                已整理且装订完成
-              </Button>
-            </div>
-          </Panel>
-            );
-          })}
+              <div className="binding-task-body">
+                <BindingCard
+                  type={task.bindingType}
+                  label={
+                    task.bindingType === "CORNER" ? "左上角单钉" : "左侧双钉"
+                  }
+                  selected
+                  onClick={() => {}}
+                />
+                <div>
+                  <p>
+                    {bindingPrintLabels[task.printStatus] || "打印尚未完成"}
+                  </p>
+                  <small className="muted">
+                    {task.readOnly
+                      ? "该任务已退出当前装订队列。"
+                      : "同文件各分段份数必须一致；超过每册张数上限时由服务端拒绝。"}
+                  </small>
+                </div>
+                <Button
+                  busy={busyId === task.id}
+                  disabled={
+                    task.readOnly ||
+                    task.printStatus !== "COMPLETED" ||
+                    task.status === "COMPLETED"
+                  }
+                  onClick={() => complete(task)}
+                >
+                  已整理且装订完成
+                </Button>
+              </div>
+            </Panel>
+          );
+        })}
       </div>
     </>
   );

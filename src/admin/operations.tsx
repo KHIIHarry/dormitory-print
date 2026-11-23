@@ -3,7 +3,7 @@ import { mapPublishError, mapPublishHotspots } from "./map-publish";
 import { formatDisplayTime } from "../lib/display-format";
 import { AuditPage } from "./audit";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Check,
   ChevronRight,
@@ -1516,6 +1516,11 @@ export function Exceptions() {
   const [reason, setReason] = useState("");
   const [decision, setDecision] = useState<"APPROVED" | "REJECTED">("APPROVED");
   const [filter, setFilter] = useState("");
+  const [params] = useSearchParams();
+  const exceptionId = params.get("exception");
+  const rows = data.exceptions.filter((row) =>
+    exceptionId ? row.id === exceptionId : !filter || row.status === filter,
+  );
   const path = (row: Record<string, any>) =>
     row.type === "LOCATION_EXCEPTION"
       ? `/admin/exceptions/${row.id}/decision`
@@ -1525,74 +1530,91 @@ export function Exceptions() {
       <PageHeading
         title="异常中心"
         description="配送异常与定位例外由服务端登记；管理员只处理审批/重派，不伪造已送达或打印完成。"
+        action={
+          exceptionId && (
+            <Link className="btn secondary" to={`${ADMIN}/exceptions`}>
+              查看全部异常
+            </Link>
+          )
+        }
       />
-      <div className="tabs">
-        {[
-          ["", "全部"],
-          ["OPEN", "待处理"],
-          ["APPROVED", "已批准"],
-          ["REJECTED", "已拒绝"],
-          ["RESOLVED", "已解决"],
-        ].map(([value, label]) => (
-          <button
-            className={filter === value ? "active" : ""}
-            key={value}
-            onClick={() => setFilter(value)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {!exceptionId && (
+        <div className="tabs">
+          {[
+            ["", "全部"],
+            ["OPEN", "待处理"],
+            ["APPROVED", "已批准"],
+            ["REJECTED", "已拒绝"],
+            ["RESOLVED", "已解决"],
+          ].map(([value, label]) => (
+            <button
+              className={filter === value ? "active" : ""}
+              key={value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       <Notice>
         配送员在配送中提交异常；资料损坏/缺失需先在打印中心完成生产纠错，不能只重新安排配送。
       </Notice>
       <div className="exception-list">
-        {data.exceptions
-          .filter((row) => !filter || row.status === filter)
-          .map((row) => (
-            <Panel key={row.id}>
-              <div className="exception-heading">
-                <span className="exception-icon">!</span>
+        {rows.map((row) => (
+          <Panel key={row.id}>
+            <div className="exception-heading">
+              <span className="exception-icon">!</span>
+              <div>
+                <h2>{row.type}</h2>
                 <div>
-                  <h2>{row.type}</h2>
-                  <p>
-                    {formatDisplayTime(
-                      (row as Record<string, any>).createdAt || row.time,
-                    )}{" "}
-                    ·{" "}
-                    <OrderPickupCode pickup={adminPickupOf(data.orders.find((order) => order.id === row.orderId) || {pickupCode:"关联订单"})} href={`${ADMIN}/orders/${row.orderId}`} />
-                  </p>
+                  {formatDisplayTime(
+                    (row as Record<string, any>).createdAt || row.time,
+                  )}{" "}
+                  ·{" "}
+                  <OrderPickupCode
+                    pickup={adminPickupOf(
+                      data.orders.find((order) => order.id === row.orderId) || {
+                        pickupCode: "关联订单",
+                      },
+                    )}
+                    href={`${ADMIN}/orders/${row.orderId}`}
+                  />
                 </div>
-                <Badge status={row.status} />
               </div>
-              <p className="exception-reason">{row.reason}</p>
-              <div className="task-card-actions">
-                <span className="muted">
-                  {(row as Record<string, any>).blocksDelivery
-                    ? "阻断配送"
-                    : "不阻断配送"}
-                  {(row as Record<string, any>).blocksProduction
-                    ? " · 需生产纠错"
-                    : ""}
-                </span>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setEdit(row as unknown as Record<string, any>);
-                    setReason(row.reason);
-                    setDecision("APPROVED");
-                  }}
-                >
-                  查看与处理
-                  <ChevronRight size={16} />
-                </Button>
-              </div>
-            </Panel>
-          ))}
+              <Badge status={row.status} />
+            </div>
+            <p className="exception-reason">{row.reason}</p>
+            <div className="task-card-actions">
+              <span className="muted">
+                {(row as Record<string, any>).blocksDelivery
+                  ? "阻断配送"
+                  : "不阻断配送"}
+                {(row as Record<string, any>).blocksProduction
+                  ? " · 需生产纠错"
+                  : ""}
+              </span>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEdit(row as unknown as Record<string, any>);
+                  setReason(row.reason);
+                  setDecision("APPROVED");
+                }}
+              >
+                查看与处理
+                <ChevronRight size={16} />
+              </Button>
+            </div>
+          </Panel>
+        ))}
       </div>
-      {!data.exceptions.length && (
+      {!rows.length && (
         <Panel>
-          <Empty title="暂无异常记录" />
+          <Empty
+            title={exceptionId ? "该异常记录已不可用" : "暂无异常记录"}
+            text=""
+          />
         </Panel>
       )}
       {edit && (

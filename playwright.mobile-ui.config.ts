@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "tests/e2e",
   testMatch: [
+    "admin-notifications.spec.ts",
     "preview-pagination.spec.ts",
     "guest-order-access.spec.ts",
     "guest-order-access-admin.spec.ts",

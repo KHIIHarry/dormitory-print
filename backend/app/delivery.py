@@ -3109,18 +3109,21 @@ def _exception_view(exception: BusinessException) -> dict:
             'createdAt': exception.created_at, 'data': exception.data or {}}
 
 
+def visible_admin_exception():
+    withdrawn_execution = select(DeliveryAssignment.id).where(
+        DeliveryAssignment.id == BusinessException.data['assignmentId'].as_string(),
+        DeliveryAssignment.active.is_(False),
+        DeliveryAssignment.data['publicationWithdrawnAt'].as_string().is_not(None)).exists()
+    return ~((BusinessException.type == 'LOCATION_EXCEPTION') & (BusinessException.status == 'OPEN')
+             & withdrawn_execution)
+
+
 @router.get('/admin/exceptions', response_model=Envelope[DeliveryExceptionListView])
 def admin_exceptions(status: str | None = None, order_id: str | None = None,
                      type: str | None = None, db=Depends(get_db),
                      actor: Actor = Depends(actor_dep)):
     require_admin(actor, 'delivery.manage')
-    withdrawn_execution = select(DeliveryAssignment.id).where(
-        DeliveryAssignment.id == BusinessException.data['assignmentId'].as_string(),
-        DeliveryAssignment.active.is_(False),
-        DeliveryAssignment.data['publicationWithdrawnAt'].as_string().is_not(None)).exists()
-    query = select(BusinessException).where(
-        ~((BusinessException.type == 'LOCATION_EXCEPTION') & (BusinessException.status == 'OPEN')
-          & withdrawn_execution))
+    query = select(BusinessException).where(visible_admin_exception())
     if status:
         query = query.where(BusinessException.status == status)
     if order_id:

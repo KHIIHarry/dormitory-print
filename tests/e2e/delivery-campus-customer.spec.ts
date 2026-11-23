@@ -15,6 +15,7 @@ test("switching campuses replaces the available slots and keeps checkout progres
     import React from '${reactUrl}'; const {useSyncExternalStore}=React;
     import {createDemo} from '/src/lib/demo.ts';
     const data=createDemo();
+    data.config.unpaidTimeoutMinutes=30;
     data.orders[0]={...data.orders[0],locationId:'missing-building',locationSnapshot:{name:'旧楼快照',campusId:'campus-east'},allowedActions:['ORDER_CHANGE_LOCATION_PRE_DELIVERY']};
     data.slots=[
       {id:'east-slot',campusId:'campus-east',name:'东校区时段',date:'2099-01-01',weekday:'周四',start:'12:00',end:'13:00',cutoffAt:'2098-12-31T14:00:00Z',enabled:true,selectable:true,capacity:10},
@@ -90,11 +91,35 @@ test("switching campuses replaces the available slots and keeps checkout progres
   await expect(east).toContainText("09:30 – 09:45");
   await expect(east).toContainText(/截单.*22:00/);
   await expect(east).toHaveClass(/selected/);
+  const slotPanel = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "选择预约配送时段" }),
+  });
+  const slotHint = slotPanel.getByText(/^所选为申请时段/);
+  const deadlineHint = slotPanel.getByText(
+    "提交后 30 分钟内未确认收款，订单将自动关闭。",
+    { exact: true },
+  );
+  await expect(deadlineHint).toBeVisible();
+  const typography = (hint: typeof slotHint) =>
+    hint.evaluate((element) => {
+      const { color, fontSize, fontWeight, lineHeight } = getComputedStyle(element);
+      return { color, fontSize, fontWeight, lineHeight };
+    });
   for (const width of [320, 375, 390, 430, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(east).toBeVisible();
+    expect(await typography(deadlineHint)).toEqual(await typography(slotHint));
+    const [slotBounds, deadlineBounds] = await Promise.all([
+      slotHint.boundingBox(),
+      deadlineHint.boundingBox(),
+    ]);
+    expect(deadlineBounds?.x).toBe(slotBounds?.x);
+    expect(deadlineBounds?.width).toBe(slotBounds?.width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     if (width === 390 || width === 1440) {
+      await slotPanel.screenshot({
+        path: info.outputPath(`checkout-slot-hints-${width}.png`),
+      });
       await east.screenshot({ path: info.outputPath(`checkout-window-${width}.png`) });
       await fees.screenshot({ path: info.outputPath(`checkout-fees-${width}.png`) });
     }

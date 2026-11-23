@@ -1,0 +1,220 @@
+.admin-header-right > .admin-notification-bell {
+  position: relative;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  color: #735947;
+}
+.admin-notification-bell[aria-current="page"] {
+  background: #f9f2ed;
+}
+.notification-count {
+  position: absolute;
+  top: 3px;
+  inset-inline-end: 0;
+  min-width: 17px;
+  padding-inline: 3px;
+  border: 1px solid #fff;
+  border-radius: 20px;
+  background: #9e512d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.notification-center {
+  min-width: 0;
+}
+.notification-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-block-end: 12px;
+}
+.notification-filters button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #665448;
+  font: inherit;
+  font-size: 14px;
+}
+.notification-filters button[aria-pressed="true"] {
+  border-color: #eeded1;
+  background: #f9f2ed;
+  color: #804526;
+  font-weight: 600;
+}
+.notification-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.notification-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #e9e2db;
+  border-radius: 14px;
+  background: #fff;
+}
+.notification-row[data-read="false"] {
+  border-color: #e2bda4;
+  background: #f8eadd;
+}
+.notification-kind-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  background: #f7f4f1;
+  color: #776453;
+}
+.notification-row[data-read="false"] .notification-kind-icon {
+  background: #efd8c7;
+  color: #884624;
+}
+.notification-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notification-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 44px;
+}
+.notification-summary h2 {
+  min-width: 0;
+  margin: 0;
+  color: #66584c;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.notification-row[data-read="false"] .notification-summary h2 {
+  color: #35271d;
+  font-weight: 700;
+}
+.notification-mark {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0;
+  padding-inline-start: 16px;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.notification-mark::before {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: calc(50% - 4px);
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: #9e512d;
+  content: "";
+}
+.notification-mark:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.notification-mark[aria-busy="true"] {
+  cursor: progress;
+}
+.notification-read-state {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.notification-task-state {
+  display: inline-block;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: #f4f2ef;
+  color: #675b51;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.notification-task-state[data-pending="true"] {
+  background: #fff0d8;
+  color: #78531c;
+}
+.notification-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  color: #756052;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.notification-meta time {
+  font-variant-numeric: tabular-nums;
+}
+.notification-detail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-height: 44px;
+  color: #914925;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.notification-detail:hover {
+  text-decoration: underline;
+}
+.notification-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-block-start: 12px;
+  padding-block-start: 12px;
+  border-top: 1px solid #eee8e2;
+  font-variant-numeric: tabular-nums;
+}
+.notification-pagination .icon-btn,
+.admin-content .page-heading > .notification-refresh {
+  min-width: 44px;
+  min-height: 44px;
+}
+.admin-content .page-heading > .notification-refresh {
+  font-size: 13px;
+}
+.notification-error {
+  margin: 6px 0 0;
+  color: #a32d28;
+}
+@media (max-width: 540px) {
+  .notification-filters button {
+    padding-inline: 9px;
+  }
+  .notification-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 2px 10px;
+  }
+  .notification-kind-icon {
+    width: 34px;
+    height: 34px;
+    margin-block-start: 3px;
+  }
+  .notification-detail {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

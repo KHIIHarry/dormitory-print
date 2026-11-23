@@ -13,9 +13,12 @@ export function planResources(
   if (path.startsWith(ADMIN)) {
     if (role !== "ADMIN" || !adminNavAllowed(path, capabilities)) return [];
     const names = adminResources(path, capabilities);
+    const orderId = path.slice(ADMIN.length).match(/^\/orders\/([^/]+)\/?$/)?.[1];
     const paths: Record<string, string> = {
       config: "/admin/config",
-      orders: "/admin/orders" + (path === `${ADMIN}/orders` ? search : ""),
+      orders: orderId
+        ? `/admin/orders/${orderId}`
+        : "/admin/orders" + (path === `${ADMIN}/orders` ? search : ""),
       batches: "/admin/batches",
       staff: "/admin/staff",
       exceptions: "/admin/exceptions",

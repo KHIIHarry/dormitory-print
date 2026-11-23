@@ -1469,14 +1469,11 @@ function ReviewContent() {
                   unpaidTimeoutMinutes?: number | null;
                 }
               ).unpaidTimeoutMinutes;
-              return typeof minutes === "number" && minutes > 0 ? (
-                <p className="v1-deadline">
-                  提交后若 {minutes}{" "}
-                  分钟内未人工确认收款，订单将按配置期限自动关闭并释放临时资源；以服务端关闭结果为准。
-                </p>
-              ) : (
-                <p className="v1-deadline">
-                  未配置未付款自动关闭期限；提交后请及时联系管理员确认收款。
+              return (
+                <p className="form-hint">
+                  {typeof minutes === "number" && minutes > 0
+                    ? `提交后 ${minutes} 分钟内未确认收款，订单将自动关闭。`
+                    : "提交后请及时联系管理员确认收款。"}
                 </p>
               );
             })()}

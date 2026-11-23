@@ -74,6 +74,13 @@ class Staff(Entity, Base):
               sqlite_where=text('is_super_admin = 1')))
 
 
+class NotificationRead(Base):
+    __tablename__ = 'admin_notification_reads'
+    staff_id: Mapped[str] = mapped_column(ForeignKey('staff.id', ondelete='CASCADE'), primary_key=True)
+    notification_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AuthSession(Entity, Base):
     __tablename__ = 'auth_sessions'
     kind: Mapped[str] = mapped_column(String(24), index=True)
@@ -630,6 +637,9 @@ class AuditLog(Entity, Base):
     reason: Mapped[str] = mapped_column(Text, default='')
     request_id: Mapped[str] = mapped_column(String(64), default='')
     data: Mapped[dict] = mapped_column(J, default=dict)
+    __table_args__ = (
+        Index('ix_audit_logs_notification_lookup', 'target_type', 'action', 'target_id', 'created_at', 'id'),
+    )
 
 
 class AnonymousLedger(Entity, Base):

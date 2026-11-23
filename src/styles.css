@@ -3528,15 +3528,6 @@ input[type="date"],
   font-size: 9px;
   margin-right: 12px;
 }
-.notification-dot {
-  position: absolute;
-  right: 9px;
-  top: 7px;
-  width: 4px;
-  height: 4px;
-  background: var(--primary);
-  border-radius: 50%;
-}
 .admin-avatar {
   width: 32px;
   font-size: 11px;

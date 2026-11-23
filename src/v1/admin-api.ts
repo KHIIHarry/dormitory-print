@@ -502,6 +502,7 @@ export type BindingTaskView = {
   printStatus: string;
   orderStatus: string;
   version: number;
+  readOnly?: boolean;
 };
 
 export type CheckListItemView = {

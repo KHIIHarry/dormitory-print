@@ -9,6 +9,7 @@ import {
   visibleAdminGroups,
 } from "../admin/navigation";
 import "../admin/navigation.css";
+import { AdminNotificationBell } from "../admin/notification-unread";
 import { useEffect, useRef, useState } from "react";
 import {
   NavLink,
@@ -20,7 +21,6 @@ import {
 } from "react-router-dom";
 import {
   ArrowUpRight,
-  Bell,
   BookOpen,
   ChevronDown,
   ChevronRight,
@@ -403,20 +403,7 @@ export function AdminLayout() {
                 weekday: "long",
               })}
             </span>
-            {adminNavAllowed(
-              `${ADMIN}/exceptions`,
-              staff?.capabilities ?? [],
-              staff?.isSuperAdmin === true,
-            ) && (
-              <button
-                className="icon-btn"
-                aria-label="查看异常提醒"
-                onClick={() => navigate(`${ADMIN}/exceptions`)}
-              >
-                <Bell size={19} />
-                <i className="notification-dot" />
-              </button>
-            )}
+            <AdminNotificationBell />
             <Link
               to={`${ADMIN}/account`}
               className="avatar admin-avatar"

@@ -536,6 +536,7 @@ class BindingTaskDTO(DTO):
     print_status: str = 'PENDING'
     order_status: str = ''
     version: int = 1
+    read_only: bool = False
 
 
 class BindingQueueDTO(DTO):

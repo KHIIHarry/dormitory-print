@@ -72,6 +72,9 @@ const Help = lazy(() =>
 const Dashboard = lazy(() =>
   import("./admin/dashboard").then((m) => ({ default: m.Dashboard })),
 );
+const AdminNotifications = lazy(() =>
+  import("./admin/notifications").then((m) => ({ default: m.AdminNotifications })),
+);
 const AdminOrders = lazy(() =>
   import("./admin/orders").then((m) => ({ default: m.AdminOrders })),
 );
@@ -422,6 +425,7 @@ function App() {
               <Route element={<StaffGuard />}>
                 <Route path={ADMIN} element={<AdminLayout />}>
                   <Route index element={<Dashboard />} />
+                  <Route path="notifications" element={<AdminNotifications />} />
                   <Route path="orders" element={<AdminOrders />} />
                   <Route path="orders/:id" element={<AdminOrder />} />
                   <Route path="after-sales" element={<AdminAfterSales />} />

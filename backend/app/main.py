@@ -221,7 +221,7 @@ def create_app(modules=None):
             raise DomainError('NOT_FOUND','未找到当前身份的操作结果',404)
         return ok({'status':'COMPLETED','statusCode':record.status_code,'result':public_result_reference(record.result_ref)})
 
-    names=modules if modules is not None else ['config','auth','growth','mail','media','commerce','production','delivery','after_sales','exports','maintenance','benefits','payroll','supplementary','finance']
+    names=modules if modules is not None else ['config','auth','growth','mail','media','commerce','production','delivery','after_sales','exports','maintenance','benefits','payroll','supplementary','finance','notifications']
     for name in names:
         if importlib.util.find_spec('app.'+name):
             module=importlib.import_module('app.'+name)

@@ -1,5 +1,6 @@
 import { matchPath } from "react-router-dom";
 import {
+  Bell,
   CalendarDays,
   ChartNoAxesCombined,
   ClipboardList,
@@ -102,6 +103,7 @@ export const adminNavGroups: readonly AdminNavGroup[] = [
 ];
 export const adminNavigationItems = [
   adminHome,
+  item("通知中心", "notifications", Bell),
   ...adminNavGroups.flatMap((group) => group.items),
   adminAccount,
 ];

@@ -45,6 +45,7 @@ export function ResourceOutlet() {
     pathname === "/u/orders" ||
     /^\/courier\/?$/.test(pathname) ||
     pathname === `${ADMIN}/orders` ||
+    pathname === `${ADMIN}/notifications` ||
     /\/(account|customers|promotions\/records|settings\/(mail|mail-templates|promotions|volume-discounts))/.test(
       pathname,
     ) ||

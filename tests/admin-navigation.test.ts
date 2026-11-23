@@ -8,9 +8,9 @@ import {
   visibleAdminGroups,
 } from "../src/admin/navigation";
 describe("后台分级导航", () => {
-  it("保留原有入口并纳入售后与数据导出，各功能只出现一次", () => {
-    expect(adminNavigationItems).toHaveLength(26);
-    expect(new Set(adminNavigationItems.map((item) => item.to)).size).toBe(26);
+  it("保留原有入口并纳入通知中心，各功能只出现一次", () => {
+    expect(adminNavigationItems).toHaveLength(27);
+    expect(new Set(adminNavigationItems.map((item) => item.to)).size).toBe(27);
     expect(adminNavGroups.map((group) => group.label)).toEqual([
       "订单与生产",
       "配送管理",
@@ -43,6 +43,8 @@ describe("后台分级导航", () => {
   it("工作台和配置采用精确匹配，详情不抢占其他同名前缀", () => {
     expect(activeAdminItem(ADMIN)?.label).toBe("工作台");
     expect(activeAdminGroup(ADMIN)).toBeUndefined();
+    expect(activeAdminItem(`${ADMIN}/notifications`)?.label).toBe("通知中心");
+    expect(activeAdminGroup(`${ADMIN}/notifications`)).toBeUndefined();
     expect(activeAdminItem(`${ADMIN}/settings/`)?.label).toBe("系统配置");
     expect(activeAdminItem(`${ADMIN}/orders-archive`)).toBeUndefined();
     expect(activeAdminItem(`${ADMIN}/settings/unknown`)).toBeUndefined();

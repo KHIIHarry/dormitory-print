@@ -2505,6 +2505,11 @@
             "title": "Printstatus",
             "type": "string"
           },
+          "readOnly": {
+            "default": false,
+            "title": "Readonly",
+            "type": "boolean"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -7492,6 +7497,42 @@
         "title": "Envelope[ManualCouponRecipient]",
         "type": "object"
       },
+      "Envelope_NotificationPage_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotificationPage"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[NotificationPage]",
+        "type": "object"
+      },
+      "Envelope_NotificationUnread_": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotificationUnread"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "requestId"
+        ],
+        "title": "Envelope[NotificationUnread]",
+        "type": "object"
+      },
       "Envelope_OrderAccessExchange_": {
         "additionalProperties": false,
         "properties": {
@@ -10757,6 +10798,79 @@
         "title": "NeedsConfigurationDTO",
         "type": "object"
       },
+      "Notification": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "PAYMENT_PENDING",
+              "PAYMENT_MISMATCH",
+              "PRINT_FAILED",
+              "BINDING_REOPENED",
+              "DELIVERY_EXCEPTION",
+              "LOCATION_EXCEPTION",
+              "AFTER_SALE_REQUESTED",
+              "REFUND_PENDING",
+              "BATCH_PENDING",
+              "BATCH_CHANGED"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "read": {
+            "title": "Read",
+            "type": "boolean"
+          },
+          "targetId": {
+            "title": "Targetid",
+            "type": "string"
+          },
+          "taskStatus": {
+            "anyOf": [
+              {
+                "enum": [
+                  "PENDING",
+                  "HANDLED"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskstatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "context",
+          "createdAt",
+          "read",
+          "taskStatus",
+          "targetId"
+        ],
+        "title": "Notification",
+        "type": "object"
+      },
       "NotificationInput": {
         "additionalProperties": false,
         "properties": {
@@ -10787,6 +10901,43 @@
         "title": "NotificationInput",
         "type": "object"
       },
+      "NotificationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pageSize": {
+            "title": "Pagesize",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unreadCount": {
+            "title": "Unreadcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unreadCount",
+          "items",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "NotificationPage",
+        "type": "object"
+      },
       "NotificationPreferences": {
         "additionalProperties": false,
         "properties": {
@@ -10809,6 +10960,20 @@
           "referralReward"
         ],
         "title": "NotificationPreferences",
+        "type": "object"
+      },
+      "NotificationUnread": {
+        "additionalProperties": false,
+        "properties": {
+          "unreadCount": {
+            "title": "Unreadcount",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unreadCount"
+        ],
+        "title": "NotificationUnread",
         "type": "object"
       },
       "OrderAccessExchange": {
@@ -21828,6 +21993,22 @@
               ],
               "title": "Orderid"
             }
+          },
+          {
+            "in": "query",
+            "name": "taskId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Taskid"
+            }
           }
         ],
         "responses": {
@@ -26210,6 +26391,204 @@
           }
         },
         "summary": "Admin Map Update"
+      }
+    },
+    "/admin/notifications": {
+      "get": {
+        "operationId": "list_notifications_api_v1_admin_notifications_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "default": "ALL",
+              "enum": [
+                "ALL",
+                "UNREAD",
+                "READ",
+                "PENDING",
+                "HANDLED"
+              ],
+              "title": "Filter",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Pagesize",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationPage_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List Notifications"
+      }
+    },
+    "/admin/notifications/unread": {
+      "get": {
+        "operationId": "unread_notifications_api_v1_admin_notifications_unread_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationUnread_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Unread Notifications"
+      }
+    },
+    "/admin/notifications/{notification_id}/read": {
+      "post": {
+        "operationId": "read_notification_api_v1_admin_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "maxLength": 160,
+              "minLength": 1,
+              "title": "Notification Id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "所有写请求必填。同一操作标识与相同请求内容会重放首次结果；相同标识用于不同请求会返回 409。",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "description": "必须与非 HttpOnly 的 csrfToken Cookie 值完全一致；缺失或不匹配返回 403 CSRF_REQUIRED。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": false,
+            "description": "浏览器写请求应携带；若携带了不在后端允许列表中的 Origin，返回 403 ORIGIN_REJECTED。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationUnread_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "事务安全校验失败：Origin 不被允许，或 X-CSRF-Token 与 csrfToken Cookie 不匹配。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "输入内容不符合要求，统一返回 VALIDATION_ERROR 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未单独列出的错误（包括 409 冲突与 500 INTERNAL_ERROR）统一使用 ApiError 错误信封。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read Notification"
       }
     },
     "/admin/orders": {
